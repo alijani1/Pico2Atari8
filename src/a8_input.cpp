@@ -22,14 +22,11 @@ extern "C" {
 #include "akey.h"
 }
 
-/* Up down left right fire, by the Quad's port labels 1-4. (quad.json lists
- * 36-39/13 and 32-35/11 the other way round: on the hardware the jack
- * labelled 3 is 36-39, as M.U.L.E.'s players 3 and 4 showed.) */
-static const int8_t PORT_PINS[4][5] = {
+static const int8_t PORT_PINS[4][5] = {     /* up down left right fire */
     { 28, 29, 30, 31, 12 },
     { 24, 25, 26, 27, 10 },
-    { 36, 37, 38, 39, 13 },
     { 32, 33, 34, 35, 11 },
+    { 36, 37, 38, 39, 13 },
 };
 static const int PIN_RED = 14, PIN_GREEN = 15, PIN_BLUE = 16, PIN_YELLOW = 17;
 static const int PIN_SELECT = 19, PIN_START = 20, PIN_MENU = 18, PIN_CLICK = 21;
