@@ -29,6 +29,12 @@ is restarted on an 800 (OS-B if the file is there); files named with
 `-osb` or `(OS-B)` start on the 800 straight away. If it crashes there too,
 the screen says so and MENU goes back to the list.
 
+**Disk drive off.** Some disk games refuse to start while a drive answers
+(this Shamus disk reboots on START if any drive replies to a status
+request). The right side button switches disk drive 1 off and on, like the
+switch on a real drive: let the game load, press it ("DRIVE OFF"), then
+START.
+
 ## Quad Ultimate CX
 
 Until the Quad firmware gets its own Atari 8-bit slot, Pico2Atari8 goes into
@@ -51,7 +57,7 @@ the Quad's **arcade slot** (replacing Pico2Arcade there), and
 | Yellow | | SPACE |
 | Green | | OPTION |
 | START / SELECT | START = play | START / SELECT |
-| Side buttons | up / down | left: FPS overlay on / off (`E60 S58` = emulator / screen frames a second) |
+| Side buttons | up / down | left: FPS overlay on / off (`E60 S58` = emulator / screen frames a second); right: disk drive 1 off / on |
 | MENU | back to the Quad | hold 1 s: back to the game list |
 
 ## Building

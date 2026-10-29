@@ -29,6 +29,7 @@
 #include "sound.h"
 #include "ui.h"
 #include "screen.h"
+#include "sio.h"
 #include "a8_platform.h"
 #include "pico_audio.h"
 
@@ -272,6 +273,21 @@ int UI_SelectCartType(int k)
 int UI_SelectCartTypeBetween(int *types)
 {
 	return types && types[0] ? types[0] : CARTRIDGE_NONE;
+}
+
+/* Disk drive 1 off (as if switched off: it no longer answers) or back on. */
+int a8_toggle_drive1(void)
+{
+	static SIO_UnitStatus was = SIO_READ_ONLY;
+	if (SIO_drive_status[0] == SIO_OFF) {
+		SIO_drive_status[0] = was;
+		Log_print("disk drive 1 on");
+		return TRUE;
+	}
+	was = SIO_drive_status[0];
+	SIO_drive_status[0] = SIO_OFF;
+	Log_print("disk drive 1 off");
+	return FALSE;
 }
 
 /* Raw cartridge images (.rom/.bin) carry no type: pick the commonest one

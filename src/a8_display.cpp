@@ -72,6 +72,32 @@ static const uint8_t GLYPH_DIGIT[10][7] = {
 };
 static const uint8_t GLYPH_E[7] = { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F };
 static const uint8_t GLYPH_S[7] = { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E };
+/* letters for the messages ("DRIVE OFF" / "DRIVE ON") */
+static const struct { char c; uint8_t g[7]; } GLYPH_LETTERS[] = {
+    { 'D', { 0x1C, 0x12, 0x11, 0x11, 0x11, 0x12, 0x1C } },
+    { 'E', { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F } },
+    { 'F', { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10 } },
+    { 'I', { 0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E } },
+    { 'N', { 0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11 } },
+    { 'O', { 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E } },
+    { 'R', { 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11 } },
+    { 'S', { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E } },
+    { 'V', { 0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04 } },
+};
+static const uint8_t *glyph(char c) {
+    if (c >= '0' && c <= '9') return GLYPH_DIGIT[c - '0'];
+    for (const auto &l : GLYPH_LETTERS) if (l.c == c) return l.g;
+    return nullptr;                       /* space / unknown: blank */
+}
+
+static char toast_text[12];
+static volatile uint32_t toast_until = 0;
+
+void a8_display_toast(const char *text) {
+    strncpy(toast_text, text, sizeof(toast_text) - 1);
+    toast_text[sizeof(toast_text) - 1] = 0;
+    toast_until = millis() + 2000;
+}
 
 static const uint8_t OV_BG = 0x00, OV_FG = 0x0F;       /* Atari black / white */
 static const int OV_SCALE = 2, OV_CHAR_W = 6 * OV_SCALE, OV_H = 7 * OV_SCALE + 4;
@@ -82,6 +108,17 @@ static void __not_in_flash_func(ov_glyph)(int x, int y, const uint8_t *g) {
             if (g[r] & (0x10 >> c))
                 for (int dy = 0; dy < OV_SCALE; dy++)
                     memset(frame8 + (y + r * OV_SCALE + dy) * SCR_W + x + c * OV_SCALE, OV_FG, OV_SCALE);
+}
+
+/* A short message in the top-left corner of the snapshot. */
+static void __not_in_flash_func(draw_toast)(void) {
+    int n = (int)strlen(toast_text), w = n * OV_CHAR_W + 2;
+    const int x0 = 2, y0 = 2;
+    for (int y = y0; y < y0 + OV_H; y++) memset(frame8 + y * SCR_W + x0, OV_BG, w);
+    for (int i = 0; i < n; i++) {
+        const uint8_t *g = glyph(toast_text[i]);
+        if (g) ov_glyph(x0 + 2 + i * OV_CHAR_W, y0 + 2, g);
+    }
 }
 
 /* "E60 S58" in the top-right corner of the snapshot. */
@@ -195,6 +232,7 @@ static void __not_in_flash_func(push_frame)(void) {
     uint32_t t0 = time_us_32();
     uint32_t sent = 0;
     if (fps_on) draw_fps();
+    if (toast_until && (int32_t)(toast_until - millis()) > 0) draw_toast();
     tft.startWrite();
     int y = 0;
     while (y < SCR_H) {

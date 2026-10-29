@@ -178,6 +178,7 @@ int main(int argc, char **argv) {
         a8_input.key = -1;
         if (start_at >= 0 && frame_no >= start_at && frame_no < start_at + 10) a8_input.start = 1;
         if (fire_at >= 0 && frame_no >= fire_at && frame_no < fire_at + 10) a8_input.trig[0] = 1;
+        if (getenv("DRIVE_OFF_AT") && frame_no == atol(getenv("DRIVE_OFF_AT"))) a8_toggle_drive1();
         if (getenv("DUMP_AT") && frame_no == atol(getenv("DUMP_AT"))) {  /* RAM -> ram.bin */
             FILE *df = fopen("ram.bin", "wb");
             fwrite(MEMORY_mem, 1, 65536, df);

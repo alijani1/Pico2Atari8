@@ -10,7 +10,8 @@
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
  *   Side buttons      game list: up / down; in a game, left = FPS overlay
- *                     on / off
+ *                     on / off, right = disk drive 1 off / on (some disk
+ *                     games won't start while a drive answers)
  */
 #include <Arduino.h>
 #include "a8_input.h"
@@ -31,9 +32,52 @@ static const int PIN_RED = 14, PIN_GREEN = 15, PIN_BLUE = 16, PIN_YELLOW = 17;
 static const int PIN_SELECT = 19, PIN_START = 20, PIN_MENU = 18, PIN_CLICK = 21;
 static const int PIN_SIDE_UP = 3, PIN_SIDE_DOWN = 2;
 static const int PIN_JOY_X = 44, PIN_JOY_Y = 45;
-static const int JOY_THRESHOLD = 512;       /* 25 % of the stick's travel */
 
-static int joy_cx = 2048, joy_cy = 2048;
+/* ---- Joy-Con: self-calibrating ----------------------------------------
+ * One reading at power-up isn't a reliable centre (a thumb may still be on
+ * the stick from the press that started us), and a fixed threshold sits
+ * close to where a self-centring stick overshoots. So each axis:
+ *  - learns its rest position: while the reading stays steady and short
+ *    of a direction for a moment, the centre moves towards it;
+ *  - learns how far it goes each way (the extremes seen, at least
+ *    MIN_SPAN);
+ *  - presses a direction at 40 % of that side's travel and releases it
+ *    only back under 20 % (hysteresis: no flicker at the edge). */
+struct JoyAxis {
+    int pin;
+    int centre, lo, hi;          /* rest, extremes seen */
+    int last, steady_since;      /* for the rest tracking */
+    int8_t dir;                  /* -1, 0, +1 */
+};
+static const int MIN_SPAN = 600;            /* of 2048 each way: until it's moved */
+static JoyAxis joy_x = { PIN_JOY_X }, joy_y = { PIN_JOY_Y };
+
+static void axis_init(JoyAxis &a, int v) {
+    a.centre = v; a.lo = v - MIN_SPAN; a.hi = v + MIN_SPAN;
+    a.last = v; a.steady_since = (int)millis(); a.dir = 0;
+}
+
+static int8_t axis_read(JoyAxis &a) {
+    int v = analogRead(a.pin);
+    int now = (int)millis();
+    if (v < a.lo) a.lo = v;
+    if (v > a.hi) a.hi = v;
+    int neg = a.centre - a.lo, pos = a.hi - a.centre;   /* travel each way */
+    if (neg < MIN_SPAN) neg = MIN_SPAN;
+    if (pos < MIN_SPAN) pos = MIN_SPAN;
+    int d = v - a.centre;
+    /* hysteresis */
+    if (a.dir == 0) {
+        if (d < -neg * 40 / 100) a.dir = -1;
+        else if (d > pos * 40 / 100) a.dir = 1;
+    } else if (a.dir < 0 ? d > -neg * 20 / 100 : d < pos * 20 / 100) {
+        a.dir = 0;
+    }
+    /* rest: steady (within 40 counts) for 150 ms and not pressed */
+    if (abs(v - a.last) > 40) { a.last = v; a.steady_since = now; }
+    else if (a.dir == 0 && now - a.steady_since > 150) a.centre += (v - a.centre) / 4;
+    return a.dir;
+}
 
 static inline bool low(int p) { return digitalRead(p) == LOW; }
 
@@ -43,22 +87,21 @@ void a8_input_init(void) {
     const int buttons[] = { PIN_RED, PIN_GREEN, PIN_BLUE, PIN_YELLOW, PIN_SELECT,
                             PIN_START, PIN_MENU, PIN_CLICK, PIN_SIDE_UP, PIN_SIDE_DOWN };
     for (int p : buttons) pinMode(p, INPUT_PULLUP);
-    /* Joy-Con centre: it rests at power-up */
+    /* Joy-Con: a first guess at the centre; it keeps learning (axis_read) */
     analogReadResolution(12);
     long sx = 0, sy = 0;
     for (int i = 0; i < 8; i++) { sx += analogRead(PIN_JOY_X); sy += analogRead(PIN_JOY_Y); delay(2); }
-    joy_cx = (int)(sx / 8);
-    joy_cy = (int)(sy / 8);
+    axis_init(joy_x, (int)(sx / 8));
+    axis_init(joy_y, (int)(sy / 8));
 }
 
 static uint8_t joycon_dirs(void) {
-    int jx = analogRead(PIN_JOY_X) - joy_cx;
-    int jy = analogRead(PIN_JOY_Y) - joy_cy;
+    int8_t x = axis_read(joy_x), y = axis_read(joy_y);
     uint8_t d = 0;
-    if (jx < -JOY_THRESHOLD) d |= A8_LEFT;
-    if (jx >  JOY_THRESHOLD) d |= A8_RIGHT;
-    if (jy < -JOY_THRESHOLD) d |= A8_UP;
-    if (jy >  JOY_THRESHOLD) d |= A8_DOWN;
+    if (x < 0) d |= A8_LEFT;
+    if (x > 0) d |= A8_RIGHT;
+    if (y < 0) d |= A8_UP;
+    if (y > 0) d |= A8_DOWN;
     return d;
 }
 
@@ -93,11 +136,14 @@ bool a8_input_frame(void) {
     else if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
     a8_input = in;
 
-    /* Left side button: FPS overlay on / off (on press) */
-    static bool side_was = true;           /* ignore one still held from the menu */
-    bool side = low(PIN_SIDE_UP);
-    if (side && !side_was) a8_display_toggle_fps();
-    side_was = side;
+    /* Left side button: FPS overlay on / off; right: disk drive 1 off / on
+     * (on press; one still held from the menu is ignored) */
+    static bool left_was = true, right_was = true;
+    bool left = low(PIN_SIDE_UP), right = low(PIN_SIDE_DOWN);
+    if (left && !left_was) a8_display_toggle_fps();
+    if (right && !right_was) a8_display_toast(a8_toggle_drive1() ? "DRIVE ON" : "DRIVE OFF");
+    left_was = left;
+    right_was = right;
 
     /* MENU held 1 s: leave the game. A press already down when the game
      * started (from the menu) counts only after it has been released. */
