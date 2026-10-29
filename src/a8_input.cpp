@@ -33,50 +33,29 @@ static const int PIN_SELECT = 19, PIN_START = 20, PIN_MENU = 18, PIN_CLICK = 21;
 static const int PIN_SIDE_UP = 3, PIN_SIDE_DOWN = 2;
 static const int PIN_JOY_X = 44, PIN_JOY_Y = 45;
 
-/* ---- Joy-Con: self-calibrating ----------------------------------------
- * One reading at power-up isn't a reliable centre (a thumb may still be on
- * the stick from the press that started us), and a fixed threshold sits
- * close to where a self-centring stick overshoots. So each axis:
- *  - learns its rest position: while the reading stays steady and short
- *    of a direction for a moment, the centre moves towards it;
- *  - learns how far it goes each way (the extremes seen, at least
- *    MIN_SPAN);
- *  - presses a direction at 40 % of that side's travel and releases it
- *    only back under 20 % (hysteresis: no flicker at the edge). */
-struct JoyAxis {
-    int pin;
-    int centre, lo, hi;          /* rest, extremes seen */
-    int last, steady_since;      /* for the rest tracking */
-    int8_t dir;                  /* -1, 0, +1 */
-};
-static const int MIN_SPAN = 600;            /* of 2048 each way: until it's moved */
+/* ---- Joy-Con ---------------------------------------------------------
+ * The centre is assumed at the first reading; as the stick moves, the
+ * lowest and highest readings are kept and the centre is their midpoint.
+ * A direction counts outside a dead zone of 30 % of the half-range around
+ * the centre. Until the stick has moved a fair way, a nominal half-range
+ * stands in. */
+struct JoyAxis { int pin; int first, lo, hi; };
+static const int NOMINAL_HALF = 1000;       /* of 2048: until it has moved */
 static JoyAxis joy_x = { PIN_JOY_X }, joy_y = { PIN_JOY_Y };
 
-static void axis_init(JoyAxis &a, int v) {
-    a.centre = v; a.lo = v - MIN_SPAN; a.hi = v + MIN_SPAN;
-    a.last = v; a.steady_since = (int)millis(); a.dir = 0;
-}
+static void axis_init(JoyAxis &a, int v) { a.first = a.lo = a.hi = v; }
 
 static int8_t axis_read(JoyAxis &a) {
     int v = analogRead(a.pin);
-    int now = (int)millis();
     if (v < a.lo) a.lo = v;
     if (v > a.hi) a.hi = v;
-    int neg = a.centre - a.lo, pos = a.hi - a.centre;   /* travel each way */
-    if (neg < MIN_SPAN) neg = MIN_SPAN;
-    if (pos < MIN_SPAN) pos = MIN_SPAN;
-    int d = v - a.centre;
-    /* hysteresis */
-    if (a.dir == 0) {
-        if (d < -neg * 40 / 100) a.dir = -1;
-        else if (d > pos * 40 / 100) a.dir = 1;
-    } else if (a.dir < 0 ? d > -neg * 20 / 100 : d < pos * 20 / 100) {
-        a.dir = 0;
-    }
-    /* rest: steady (within 40 counts) for 150 ms and not pressed */
-    if (abs(v - a.last) > 40) { a.last = v; a.steady_since = now; }
-    else if (a.dir == 0 && now - a.steady_since > 150) a.centre += (v - a.centre) / 4;
-    return a.dir;
+    int half = (a.hi - a.lo) / 2;
+    int centre = half >= NOMINAL_HALF ? (a.lo + a.hi) / 2 : a.first;
+    if (half < NOMINAL_HALF) half = NOMINAL_HALF;
+    int dead = half * 30 / 100;
+    if (v < centre - dead) return -1;
+    if (v > centre + dead) return 1;
+    return 0;
 }
 
 static inline bool low(int p) { return digitalRead(p) == LOW; }
@@ -141,7 +120,11 @@ bool a8_input_frame(void) {
     static bool left_was = true, right_was = true;
     bool left = low(PIN_SIDE_UP), right = low(PIN_SIDE_DOWN);
     if (left && !left_was) a8_display_toggle_fps();
-    if (right && !right_was) a8_display_toast(a8_toggle_drive1() ? "DRIVE ON" : "DRIVE OFF");
+    if (right && !right_was) {
+        bool on = a8_toggle_drive1();
+        Serial.printf("[input] right side button: disk drive 1 %s%c", on ? "on" : "off", 10);
+        a8_display_toast(on ? "DRIVE ON" : "DRIVE OFF");
+    }
     left_was = left;
     right_was = right;
 
