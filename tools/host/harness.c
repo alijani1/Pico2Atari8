@@ -178,6 +178,11 @@ int main(int argc, char **argv) {
         a8_input.key = -1;
         if (start_at >= 0 && frame_no >= start_at && frame_no < start_at + 10) a8_input.start = 1;
         if (fire_at >= 0 && frame_no >= fire_at && frame_no < fire_at + 10) a8_input.trig[0] = 1;
+        if (getenv("DUMP_AT") && frame_no == atol(getenv("DUMP_AT"))) {  /* RAM -> ram.bin */
+            FILE *df = fopen("ram.bin", "wb");
+            fwrite(MEMORY_mem, 1, 65536, df);
+            fclose(df);
+        }
         a8_frame();                                              /* as main.cpp */
         if (a8_crashed && !a8_handle_crash(argv[1])) { printf("crashed on the 800 too\n"); break; }
     }

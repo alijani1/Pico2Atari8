@@ -18,7 +18,18 @@
 #include "pico_drive.h"
 
 static const int MAX_GAMES = 128;      /* + the ROM drive row */
-struct Game { char path[24]; char name[40]; bool osb; };
+struct Game { char path[24]; char name[40]; bool osb; char kind[5]; };
+
+/* What the file is, shown at the right of its row: two files can share a
+ * name ("Slime" = SLIME.BIN and SLIME.ZIP). */
+static const char *kind_of(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (!dot) return "";
+    if (!strcasecmp(dot, ".zip")) return "ZIP";
+    if (!strcasecmp(dot, ".atr") || !strcasecmp(dot, ".xfd")) return "DISK";
+    if (!strcasecmp(dot, ".car") || !strcasecmp(dot, ".rom") || !strcasecmp(dot, ".bin")) return "CART";
+    return "XEX";
+}
 static bool picked_osb = false;
 bool a8_menu_picked_osb(void) { return picked_osb; }
 static Game games[MAX_GAMES + 1];
@@ -57,6 +68,9 @@ static bool add_game(const char *path, const char *display, uint32_t size, void 
     for (size_t i = 0; i < n; i++) low[i] = (char)tolower((unsigned char)display[i]);
     low[n] = 0;
     g.osb = strstr(low, "osb") != nullptr || strstr(low, "os-b") != nullptr;
+    strncpy(g.kind, kind_of(path), sizeof(g.kind) - 1);
+    g.kind[sizeof(g.kind) - 1] = 0;
+    Serial.printf("[menu] %-22s %-5s %7lu  %s\n", path, g.kind, (unsigned long)size, display);
     /* shown without its extension */
     strncpy(g.name, display, sizeof(g.name) - 1);
     g.name[sizeof(g.name) - 1] = 0;
@@ -99,6 +113,11 @@ static void draw_row(int idx, int top, bool sel) {
     tft.setCursor(12, y + 1);
     if (idx == found) tft.setTextColor(sel ? COL_TEXT : 0x07FF, bg);   /* the drive row */
     tft.print(games[idx].name);
+    if (idx < found && games[idx].kind[0]) {
+        tft.setTextColor(sel ? COL_TEXT : COL_HINT, bg);
+        tft.setCursor(320 - 8 - tft.textWidth(games[idx].kind), y + 1);
+        tft.print(games[idx].kind);
+    }
 }
 
 static void draw_counter(int sel) {
@@ -138,6 +157,7 @@ const char *a8_menu_pick(void) {
     Serial.printf("[menu] %d games\n", found);
     Game &drive = games[game_count++];
     drive.path[0] = 0;
+    drive.kind[0] = 0;
     strcpy(drive.name, "ROM Drive (USB)");
 
     draw_frame();
@@ -150,10 +170,27 @@ const char *a8_menu_pick(void) {
 
     uint8_t prev = A8M_OK | A8M_BACK;   /* a button still down isn't a new press */
     uint32_t held_since = 0, last_repeat = 0;
+    /* A self-centring stick overshoots when let go: UP released can read as
+     * a short DOWN. A new press of the opposite direction within this long
+     * of a release is ignored. */
+    static const uint32_t OVERSHOOT_MS = 200;
+    uint32_t released_at = 0;
+    uint8_t released_dir = 0;
     for (;;) {
         uint8_t b = a8_input_menu();
         uint8_t pressed = b & ~prev;
         uint32_t now = millis();
+        uint8_t let_go = prev & ~b & (A8M_UP | A8M_DOWN | A8M_LEFT | A8M_RIGHT);
+        if (let_go) { released_dir = let_go; released_at = now; }
+        if (now - released_at < OVERSHOOT_MS) {
+            uint8_t opposite = 0;
+            if (released_dir & A8M_UP)    opposite |= A8M_DOWN;
+            if (released_dir & A8M_DOWN)  opposite |= A8M_UP;
+            if (released_dir & A8M_LEFT)  opposite |= A8M_RIGHT;
+            if (released_dir & A8M_RIGHT) opposite |= A8M_LEFT;
+            pressed &= ~opposite;
+            b &= ~opposite;            /* nor does it count as held */
+        }
         /* auto-repeat for held directions */
         uint8_t dirs = b & (A8M_UP | A8M_DOWN | A8M_LEFT | A8M_RIGHT);
         if (dirs && dirs == (prev & dirs)) {
