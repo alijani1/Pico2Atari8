@@ -27,10 +27,19 @@
 
 extern "C" {
 #include "atari.h"
+#include "cpu.h"
 #include "platform.h"
 }
 
 static volatile bool g_emulating = false;
+static volatile bool g_heartbeat = false;
+static volatile uint32_t g_frames = 0;
+volatile const char *a8_stage = "menu";
+
+/* atari800's Log_print and our own debug lines. */
+extern "C" void a8_log_write(const char *line) {
+    Serial.printf("[a8] %s\n", line);
+}
 
 extern "C" uint64_t a8_time_us(void) { return time_us_64(); }
 extern "C" void a8_idle(void) { tight_loop_contents(); }
@@ -72,12 +81,16 @@ static void emu_start(void) {
     static char arg0[] = "atari800", xl[] = "-xl", ntsc[] = "-ntsc", nobasic[] = "-nobasic";
     char *argv[] = { arg0, xl, ntsc, nobasic, game_file, nullptr };
     int argc = 5;
+    a8_stage = "Atari800_Initialise";
     if (!Atari800_Initialise(&argc, argv))
         Serial.println("[a8] Atari800_Initialise failed");
+    a8_stage = "initialised";
 }
 
 static void emu_frame(void) {
+    if (g_frames == 0) a8_stage = "first frame";
     Atari800_Frame();
+    g_frames++;
     /* As in upstream's own main loops: the core leaves showing the frame
      * to the platform. */
     if (Atari800_display_screen) PLATFORM_DisplayScreen();
@@ -110,6 +123,8 @@ void setup() {
     log_file(game_file);
 
     for (uint32_t i = 0; i < EMU_STACK_WORDS; i++) emu_stack[i] = STACK_FILL;
+    Serial.printf("[a8] heap free %d bytes before start\n", rp2040.getFreeHeap());
+    g_heartbeat = true;
     on_emu_stack(emu_start);
     Serial.printf("[a8] started, emulator stack %lu bytes used, heap free %d bytes\n",
                   (unsigned long)emu_stack_used(), rp2040.getFreeHeap());
@@ -144,8 +159,19 @@ void loop() {
     }
 }
 
-/* Core 1: the display. */
+/* Core 1: the display, and once a second a heartbeat with core 0's
+ * progress - it keeps coming if core 0 hangs or faults. */
 void setup1() {}
 void loop1() {
     if (g_emulating) a8_display_core1_loop();
+    static uint32_t last = 0;
+    uint32_t now = millis();
+    if (g_heartbeat && now - last >= 1000) {
+        last = now;
+        uint32_t shown, skipped;
+        a8_display_stats(&shown, &skipped);
+        Serial.printf("[hb] %s: frames %lu, 6502 PC %04x, shown %lu, stack %lu\n",
+                      (const char *)a8_stage, (unsigned long)g_frames, CPU_regPC,
+                      (unsigned long)shown, (unsigned long)emu_stack_used());
+    }
 }

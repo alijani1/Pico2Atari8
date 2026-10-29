@@ -76,6 +76,8 @@ static int same_count;
 
 uint64_t a8_time_us(void) { return (uint64_t)clock() * 1000000ull / CLOCKS_PER_SEC; }
 void a8_idle(void) {}
+volatile const char *a8_stage = "";
+void a8_log_write(const char *line) { printf("[a8] %s\n", line); }
 
 void pico_audio_init(int rate) { (void)rate; }
 size_t pico_audio_push_s16(const void *d, size_t n) { (void)d; return n; }

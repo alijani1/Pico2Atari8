@@ -37,6 +37,11 @@ uint64_t a8_time_us(void);
 void     a8_idle(void);              /* waiting for the audio ring: keep the rest alive */
 void     a8_display_frame(void);     /* Screen_atari is complete: show it */
 
+/* Debug: a line to the serial monitor, and where start-up has got to (the
+ * core 1 heartbeat prints it, so it shows even if core 0 stops). */
+void     a8_log_write(const char *line);
+extern volatile const char *a8_stage;
+
 #ifdef __cplusplus
 }
 #endif

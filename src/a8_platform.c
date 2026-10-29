@@ -13,11 +13,13 @@
  */
 #include "config.h"
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include "atari.h"
 #include "akey.h"
 #include "cartridge.h"
 #include "input.h"
+#include "log.h"
 #include "platform.h"
 #include "pokeysnd.h"
 #include "sound.h"
@@ -31,8 +33,23 @@ a8_input_t a8_input;
 
 int PLATFORM_Initialise(int *argc, char *argv[])
 {
+	a8_stage = "PLATFORM_Initialise";
 	return Sound_Initialise(argc, argv);   /* as libatari800 does */
 }
+
+/* ---- log (replaces upstream log.c: no 8 KB stack buffer, no printf) ---- */
+
+void Log_print(const char *format, ...)
+{
+	char line[256];
+	va_list args;
+	va_start(args, format);
+	vsnprintf(line, sizeof(line), format, args);
+	va_end(args);
+	a8_log_write(line);
+}
+
+void Log_flushlog(void) {}
 
 int PLATFORM_Exit(int run_monitor)
 {
@@ -84,6 +101,7 @@ int PLATFORM_TRIG(int num)
 
 void PLATFORM_DisplayScreen(void)
 {
+	a8_stage = "running";
 	a8_display_frame();
 }
 
@@ -107,6 +125,7 @@ int Sound_Initialise(int *argc, char *argv[])
 /* Called by Atari800_Initialise once the machine is set up. */
 int Sound_Setup(void)
 {
+	a8_stage = "Sound_Setup";
 	POKEYSND_enable_new_pokey = FALSE;   /* the classic engine: MZ is too heavy */
 	POKEYSND_Init(POKEYSND_FREQ_17_EXACT, A8_SAMPLE_RATE, 1, POKEYSND_BIT16);
 	Sound_enabled = TRUE;
@@ -162,7 +181,9 @@ void UI_Run(void) {}
  * it; a raw .rom of an ambiguous size is the commonest type of that size. */
 int UI_SelectCartType(int k)
 {
-	return a8_guess_cart_type(k);
+	int t = a8_guess_cart_type(k);
+	Log_print("raw cartridge, %d KB: type %d", k, t);
+	return t;
 }
 
 int UI_SelectCartTypeBetween(int *types)
