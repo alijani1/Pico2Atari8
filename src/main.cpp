@@ -21,6 +21,7 @@
 
 extern "C" {
 #include "atari.h"
+#include "platform.h"
 }
 
 static volatile bool g_emulating = false;
@@ -65,6 +66,9 @@ void loop() {
     }
     uint32_t t0 = time_us_32();
     Atari800_Frame();
+    /* As in upstream's own main loops: the core leaves showing the frame
+     * to the platform. */
+    if (Atari800_display_screen) PLATFORM_DisplayScreen();
     static uint32_t busy = 0, frames = 0, last = 0;
     busy += time_us_32() - t0;
     frames++;

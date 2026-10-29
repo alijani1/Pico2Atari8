@@ -1,0 +1,5 @@
+obj/
+*.exe
+*.ppm
+*.png
+a8_harness
