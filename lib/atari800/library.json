@@ -1,0 +1,19 @@
+{
+  "name": "atari800",
+  "version": "5.2.0-pico",
+  "description": "Atari800 emulation core (CPU, ANTIC, GTIA, POKEY, PIA, SIO, cartridges, XEX) with a hand-written config.h for the RP2350",
+  "license": "GPL-2.0-or-later",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "srcFilter": [
+      "+<*.c>",
+      "+<roms/*.c>"
+    ],
+    "flags": [
+      "-Wno-implicit-function-declaration",
+      "-Wno-unused-function",
+      "-Wno-maybe-uninitialized"
+    ]
+  }
+}

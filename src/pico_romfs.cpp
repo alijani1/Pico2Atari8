@@ -1,0 +1,339 @@
+/* pico_romfs.cpp — see pico_romfs.h. */
+#include <Arduino.h>
+#include <string.h>
+#include "pico_romfs.h"
+#include "pico_board.h"
+#include <strings.h>
+#include <stdio.h>
+
+#ifndef PICO_BOARD_TABLE
+/* ── SD card backend (PicoCartReader) ─────────────────────────────────── */
+#include <SD.h>
+
+extern "C" bool pico_sd_init(void);
+
+extern "C" bool romfs_init(void) { return pico_sd_init(); }
+
+extern "C" bool romfs_exists(const char *path) { return SD.exists(path); }
+
+extern "C" bool romfs_slurp(const char *path, uint8_t **out, size_t *out_sz) {
+    File f = SD.open(path, FILE_READ);
+    if (!f) { Serial.printf("[romfs] open failed: %s\n", path); return false; }
+    size_t sz = f.size();
+    uint8_t *buf = (uint8_t *)malloc(sz);
+    if (!buf) { Serial.printf("[romfs] malloc %u bytes failed\n", (unsigned)sz); f.close(); return false; }
+    size_t got = f.read(buf, sz);
+    f.close();
+    if (got != sz) { Serial.printf("[romfs] short read: %u/%u\n", (unsigned)got, (unsigned)sz); free(buf); return false; }
+    *out = buf; *out_sz = sz;
+    return true;
+}
+
+extern "C" const char *romfs_where(void) { return "/roms/ on the SD card"; }
+
+#else
+/* ── Flash ROM drive backend (read-only FAT12/FAT16 over XIP) ───────────
+ * Quad (chain-booted) and standalone Pico 2. The drive is read through XIP;
+ * writing it (USB ROM drive mode, pico_drive.cpp) uses its physical offset. */
+#include <hardware/structs/watchdog.h>
+#include "pico_handoff.h"
+
+/* Hosted builds: where the host's ROM drive is if it didn't pass it (set per
+ * env in platformio.ini; defaults = the Quad). */
+#ifndef PICO_HOST_FAT_WINDOW_OFS
+#define PICO_HOST_FAT_WINDOW_OFS 0x60000u    /* Quad: 0x3C0000 - 0x360000 */
+#endif
+#ifndef PICO_HOST_FAT_PHYS
+#define PICO_HOST_FAT_PHYS       0x3C0000u   /* Quad: physical flash offset */
+#endif
+#ifndef PICO_HOST_FAT_SIZE
+#define PICO_HOST_FAT_SIZE       0x40000u    /* 256 KB */
+#endif
+#ifndef PICO_DRIVE_PHYS
+#define PICO_DRIVE_PHYS          0x200000u   /* standalone: drive at 2 MB ... */
+#endif
+#ifndef PICO_DRIVE_SIZE
+#define PICO_DRIVE_SIZE          0x100000u   /* ... 1 MB */
+#endif
+
+static const uint8_t *vol = nullptr;         /* start of the FAT volume (XIP), when formatted */
+static uint32_t volSize = 0;
+static const uint8_t *s_xip = nullptr;       /* drive location, formatted or not */
+static uint32_t s_phys = 0, s_size = 0;
+
+static void locate_drive(void);
+extern "C" void romfs_location(const uint8_t **xip, uint32_t *phys, uint32_t *size) {
+    if (!s_xip) locate_drive();
+    *xip = s_xip; *phys = s_phys; *size = s_size;
+}
+
+/* Where is the drive? Chain-booted by the Quad: it tags scratch[0] with the
+ * drive's physical offset and passes its offset/size in our window in
+ * scratch[2]/[3]. Otherwise: the Quad build's defaults, or (standalone) our
+ * own drive, which XIP sees at its physical offset. */
+static void locate_drive(void) {
+    uint32_t s0 = watchdog_hw->scratch[HANDOFF_SCRATCH_HOST];
+    if ((s0 & 0xFFFF0000u) == HANDOFF_HOST_QUAD_TAG) {
+        uint32_t ofs = PICO_HOST_FAT_WINDOW_OFS, size = PICO_HOST_FAT_SIZE;
+        uint32_t s2 = watchdog_hw->scratch[HANDOFF_SCRATCH_FATOFS];
+        uint32_t s3 = watchdog_hw->scratch[HANDOFF_SCRATCH_FATSIZE];
+        if ((s2 & 0xFFFF0000u) == HANDOFF_FATOFS_TAG)  ofs  = (s2 & 0xFFFFu) << 12;
+        if ((s3 & 0xFFFF0000u) == HANDOFF_FATSIZE_TAG) size = (s3 & 0xFFFFu) << 12;
+        s_xip = (const uint8_t *)(XIP_BASE + ofs);
+        s_phys = (s0 & 0xFFFFu) << 12;
+        s_size = size;
+    } else {
+#ifdef PICO_HOSTED
+        s_xip = (const uint8_t *)(XIP_BASE + PICO_HOST_FAT_WINDOW_OFS);
+        s_phys = PICO_HOST_FAT_PHYS;
+        s_size = PICO_HOST_FAT_SIZE;
+#else
+        s_xip = (const uint8_t *)(XIP_BASE + PICO_DRIVE_PHYS);
+        s_phys = PICO_DRIVE_PHYS;
+        s_size = PICO_DRIVE_SIZE;
+#endif
+    }
+}
+static uint32_t bps, spc, fatOfs, rootOfs, rootEntries, dataOfs, clusterBytes, clusterCount;
+static bool fat16 = false;
+
+static inline uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+static inline uint32_t rd32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/* Next cluster in the chain; >= 0xFF8 (FAT12) / 0xFFF8 (FAT16) = end. */
+static uint32_t fat_next(uint32_t c) {
+    if (fat16) return rd16(vol + fatOfs + c * 2);
+    uint16_t v = rd16(vol + fatOfs + c + c / 2);
+    return (c & 1) ? (v >> 4) : (v & 0x0FFF);
+}
+static bool fat_eoc(uint32_t c) { return fat16 ? c >= 0xFFF8 : c >= 0x0FF8; }
+static bool cluster_ok(uint32_t c) { return c >= 2 && c < clusterCount + 2; }
+static uint32_t cluster_ofs(uint32_t c) { return dataOfs + (c - 2) * clusterBytes; }
+
+extern "C" bool romfs_init(void) {
+    if (!s_xip) locate_drive();
+    vol = s_xip;
+    volSize = s_size;
+    uint32_t ofs = s_phys;
+
+    if (vol[510] != 0x55 || vol[511] != 0xAA) {
+        Serial.printf("[romfs] no FAT volume at 0x%lx (format it: ROM Drive mode)\n", (unsigned long)ofs);
+        vol = nullptr; return false;
+    }
+    bps = rd16(vol + 11);
+    spc = vol[13];
+    uint32_t rsvd = rd16(vol + 14), nfats = vol[16], spf = rd16(vol + 22);
+    rootEntries = rd16(vol + 17);
+    uint32_t totSec = rd16(vol + 19);
+    if (totSec == 0) totSec = rd32(vol + 32);
+    if (bps != 512 || spc == 0 || nfats == 0 || spf == 0 || totSec * bps > volSize) {
+        Serial.println("[romfs] unsupported FAT geometry");
+        vol = nullptr; return false;
+    }
+    fatOfs = rsvd * bps;
+    rootOfs = (rsvd + nfats * spf) * bps;
+    uint32_t rootSec = (rootEntries * 32 + bps - 1) / bps;
+    dataOfs = rootOfs + rootSec * bps;
+    clusterBytes = spc * bps;
+    clusterCount = (totSec * bps - dataOfs) / clusterBytes;
+    fat16 = clusterCount >= 4085;
+    Serial.printf("[romfs] FAT%d ROM drive at +0x%lx: %lu clusters x %lu B\n",
+                  fat16 ? 16 : 12, (unsigned long)ofs,
+                  (unsigned long)clusterCount, (unsigned long)clusterBytes);
+    return true;
+}
+
+/* "galaga.zip" -> "GALAGA  ZIP" (8.3, space padded). False if not 8.3. */
+static bool to_83(const char *name, char out[11]) {
+    memset(out, ' ', 11);
+    const char *dot = strrchr(name, '.');
+    size_t base = dot ? (size_t)(dot - name) : strlen(name);
+    if (base == 0 || base > 8) return false;
+    for (size_t i = 0; i < base; i++) out[i] = toupper((unsigned char)name[i]);
+    if (dot) {
+        size_t ext = strlen(dot + 1);
+        if (ext > 3) return false;
+        for (size_t i = 0; i < ext; i++) out[8 + i] = toupper((unsigned char)dot[1 + i]);
+    }
+    return true;
+}
+
+/* Look for `name83` among `count` 32-byte entries at `dir`. */
+static const uint8_t *scan_dir(const uint8_t *dir, uint32_t count, const char *name83, uint8_t wantAttr) {
+    for (uint32_t i = 0; i < count; i++) {
+        const uint8_t *e = dir + i * 32;
+        if (e[0] == 0x00) return nullptr;                 /* end of directory */
+        if (e[0] == 0xE5) continue;                        /* deleted */
+        uint8_t attr = e[11];
+        if (attr == 0x0F || (attr & 0x08)) continue;       /* LFN piece / volume label */
+        if ((attr & 0x10) != wantAttr) continue;           /* file vs. directory */
+        if (memcmp(e, name83, 11) == 0) return e;
+    }
+    return nullptr;
+}
+
+/* Find a directory entry in a subdirectory's cluster chain. */
+static const uint8_t *scan_subdir(uint32_t cluster, const char *name83) {
+    for (int guard = 0; cluster_ok(cluster) && guard < 4096; guard++) {
+        const uint8_t *e = scan_dir(vol + cluster_ofs(cluster), clusterBytes / 32, name83, 0);
+        if (e) return e;
+        cluster = fat_next(cluster);
+        if (fat_eoc(cluster)) break;
+    }
+    return nullptr;
+}
+
+/* A folder in the root directory, by its 8.3 name ("ATARI"). */
+static const uint8_t *find_dir(const char *name) {
+    char n83[11];
+    if (!vol || !to_83(name, n83)) return nullptr;
+    return scan_dir(vol + rootOfs, rootEntries, n83, 0x10);
+}
+
+/* Directory entry for `path`: "/DIR/NAME.EXT" looks in that root folder;
+ * a bare name (or "/roms/NAME.EXT") in the root, then the ROMS folder,
+ * then the ATARI folder. */
+static const uint8_t *find_file(const char *path) {
+    if (!vol) return nullptr;
+    const char *name = strrchr(path, '/');
+    name = name ? name + 1 : path;
+    char n83[11];
+    if (!to_83(name, n83)) return nullptr;
+    const char *p = (path[0] == '/') ? path + 1 : path;
+    const char *slash = strchr(p, '/');
+    if (slash && slash == strrchr(p, '/')) {
+        char dir[13];
+        size_t n = (size_t)(slash - p);
+        if (n < sizeof(dir)) {
+            memcpy(dir, p, n); dir[n] = 0;
+            if (strcasecmp(dir, "roms") != 0) {
+                const uint8_t *d = find_dir(dir);
+                return d ? scan_subdir(rd16(d + 26), n83) : nullptr;
+            }
+        }
+    }
+    const uint8_t *e = scan_dir(vol + rootOfs, rootEntries, n83, 0);
+    if (e) return e;
+    static const char *const dirs[] = { "ROMS", "ATARI" };
+    for (const char *dn : dirs) {
+        const uint8_t *d = find_dir(dn);
+        if (d && (e = scan_subdir(rd16(d + 26), n83))) return e;
+    }
+    return nullptr;
+}
+
+/* ---- listing --------------------------------------------------------- */
+
+/* Long file name pieces (VFAT): 13 UCS-2 characters each, ASCII kept. */
+static void lfn_piece(const uint8_t *e, char *lfn, size_t cap) {
+    static const uint8_t offs[13] = { 1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30 };
+    int seq = (e[0] & 0x1F) - 1;
+    if (seq < 0) return;
+    for (int i = 0; i < 13; i++) {
+        size_t at = (size_t)seq * 13 + i;
+        if (at + 1 >= cap) return;
+        uint16_t c = rd16(e + offs[i]);
+        if (c == 0x0000 || c == 0xFFFF) { lfn[at] = 0; return; }
+        lfn[at] = (c < 0x80) ? (char)c : '?';
+        if (i == 12 && (e[0] & 0x40)) lfn[at + 1] = 0;
+    }
+}
+
+/* Calls cb for each file among `count` entries at `dir`. Returns true once
+ * the callback asked to stop. `lfn` carries a long name across clusters. */
+static bool list_entries(const uint8_t *dir, uint32_t count, const char *folder,
+                         romfs_list_cb cb, void *ctx, char *lfn, size_t cap) {
+    for (uint32_t i = 0; i < count; i++) {
+        const uint8_t *e = dir + i * 32;
+        if (e[0] == 0x00) return false;                    /* end of directory */
+        if (e[0] == 0xE5) { lfn[0] = 0; continue; }        /* deleted */
+        uint8_t attr = e[11];
+        if (attr == 0x0F) {                                 /* long name piece */
+            if (e[0] & 0x40) memset(lfn, 0, cap);
+            lfn_piece(e, lfn, cap);
+            continue;
+        }
+        if ((attr & 0x18) || e[0] == '.') { lfn[0] = 0; continue; }   /* dir / label */
+        char n83[13];
+        int k = 0;
+        for (int j = 0; j < 8 && e[j] != ' '; j++) n83[k++] = (char)e[j];
+        if (e[8] != ' ') {
+            n83[k++] = '.';
+            for (int j = 8; j < 11 && e[j] != ' '; j++) n83[k++] = (char)e[j];
+        }
+        n83[k] = 0;
+        char path[24];
+        if (folder) snprintf(path, sizeof(path), "/%s/%s", folder, n83);
+        else        snprintf(path, sizeof(path), "/%s", n83);
+        bool more = cb(path, lfn[0] ? lfn : n83, rd32(e + 28), ctx);
+        lfn[0] = 0;
+        if (!more) return true;
+    }
+    return false;
+}
+
+extern "C" void romfs_list(romfs_list_cb cb, void *ctx) {
+    if (!vol) return;
+    char lfn[64];
+    lfn[0] = 0;
+    if (list_entries(vol + rootOfs, rootEntries, nullptr, cb, ctx, lfn, sizeof(lfn))) return;
+    static const char *const dirs[] = { "ATARI", "ROMS" };
+    for (const char *dn : dirs) {
+        const uint8_t *d = find_dir(dn);
+        if (!d) continue;
+        uint32_t cluster = rd16(d + 26);
+        lfn[0] = 0;
+        for (int guard = 0; cluster_ok(cluster) && guard < 4096; guard++) {
+            if (list_entries(vol + cluster_ofs(cluster), clusterBytes / 32, dn, cb, ctx, lfn, sizeof(lfn)))
+                return;
+            cluster = fat_next(cluster);
+            if (fat_eoc(cluster)) break;
+        }
+    }
+}
+
+extern "C" bool romfs_exists(const char *path) { return find_file(path) != nullptr; }
+
+extern "C" bool romfs_map(const char *path, const uint8_t **out, size_t *out_sz) {
+    const uint8_t *e = find_file(path);
+    if (!e) return false;
+    uint32_t size = rd32(e + 28), cluster = rd16(e + 26), first = cluster;
+    if (size == 0 || size > volSize || !cluster_ok(cluster)) return false;
+    /* contiguous: each cluster follows the one before */
+    for (uint32_t done = clusterBytes; done < size; done += clusterBytes) {
+        uint32_t next = fat_next(cluster);
+        if (next != cluster + 1 || !cluster_ok(next)) return false;
+        cluster = next;
+    }
+    *out = vol + cluster_ofs(first);
+    *out_sz = size;
+    return true;
+}
+
+extern "C" bool romfs_slurp(const char *path, uint8_t **out, size_t *out_sz) {
+    const uint8_t *e = find_file(path);
+    if (!e) { Serial.printf("[romfs] not found: %s\n", path); return false; }
+    uint32_t size = rd32(e + 28), cluster = rd16(e + 26);
+    if (size == 0 || size > volSize) return false;
+    uint8_t *buf = (uint8_t *)malloc(size);
+    if (!buf) { Serial.printf("[romfs] malloc %lu bytes failed\n", (unsigned long)size); return false; }
+    /* Copy cluster by cluster (the file may be fragmented). */
+    uint32_t done = 0;
+    while (done < size) {
+        if (!cluster_ok(cluster)) { free(buf); Serial.println("[romfs] broken cluster chain"); return false; }
+        uint32_t n = size - done;
+        if (n > clusterBytes) n = clusterBytes;
+        memcpy(buf + done, vol + cluster_ofs(cluster), n);
+        done += n;
+        if (done < size) cluster = fat_next(cluster);
+    }
+    *out = buf; *out_sz = size;
+    return true;
+}
+
+/* Every flash board's drive is labelled ARCADE ROMS (the Quad's first drives
+ * were "QUAD ROMS"; only the label differs). */
+extern "C" const char *romfs_where(void) { return "the ARCADE ROMS drive"; }
+#endif
