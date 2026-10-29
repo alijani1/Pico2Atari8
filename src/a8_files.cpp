@@ -55,6 +55,20 @@ extern "C" FILE *__wrap_fopen(const char *path, const char *mode) {
     return f;
 }
 
+/* For cartridge.c (A8_MAPPED_CARTS): a file's bytes in flash, if it's
+ * stored in one piece. */
+extern "C" const uint8_t *A8_MapFile(const char *path, int *len) {
+    const uint8_t *p;
+    size_t size;
+    if (!romfs_map(path, &p, &size)) return nullptr;
+    *len = (int)size;
+    return p;
+}
+
+extern "C" int A8_IsMapped(const void *p) {
+    return (uintptr_t)p >= XIP_BASE && (uintptr_t)p < XIP_BASE + 0x04000000u;
+}
+
 extern "C" int __wrap_fclose(FILE *f) {
     int r = __real_fclose(f);
     for (int i = 0; i < 4; i++) {

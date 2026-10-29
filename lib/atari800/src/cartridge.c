@@ -30,6 +30,17 @@
 #include "atari.h"
 #include "binload.h" /* BINLOAD_loading_basic */
 #include "cartridge.h"
+
+#ifdef A8_MAPPED_CARTS
+/* pico2atari8: the platform can hand back a file's bytes in place (the ROM
+   drive is memory-mapped flash), so a cartridge needn't be copied to RAM.
+   Such an image must never be freed. */
+extern const UBYTE *A8_MapFile(const char *filename, int *len);
+extern int A8_IsMapped(const void *p);
+#define FREE_IMAGE(img) do { if (!A8_IsMapped(img)) free(img); } while (0)
+#else
+#define FREE_IMAGE(img) free(img)
+#endif
 #include "memory.h"
 #ifdef IDE
 #  include "ide.h"
@@ -1577,7 +1588,7 @@ static void PreprocessCart(CARTRIDGE_image_t *cart)
 				(byte & 0x40 ? map->data[6] : 0) |
 				(byte & 0x80 ? map->data[7] : 0);
 		}
-		free(cart->image);
+		FREE_IMAGE(cart->image);
 		cart->image = new_image;
 	}
 }
@@ -1669,7 +1680,7 @@ static void RemoveCart(CARTRIDGE_image_t *cart)
 			CARTRIDGE_WriteImage(cart->filename, cart->type, cart->image, cart->size << 10, cart->raw, -1);
 		}
 
-		free(cart->image);
+		FREE_IMAGE(cart->image);
 		cart->image = NULL;
 	}
 	if (cart->type != CARTRIDGE_NONE) {
@@ -1712,6 +1723,25 @@ void CARTRIDGE_ColdStart(void) {
 	MapActiveCart();
 }
 
+/* Read LEN bytes at OFFSET of FILENAME (already open as FP, positioned at
+   OFFSET) into a new image - or, with A8_MAPPED_CARTS, point at them. */
+static UBYTE *LoadImageData(const char *filename, FILE *fp, int offset, int len)
+{
+	UBYTE *image;
+#ifdef A8_MAPPED_CARTS
+	int mlen;
+	const UBYTE *m = A8_MapFile(filename, &mlen);
+	if (m != NULL && mlen >= offset + len)
+		return (UBYTE *) (m + offset);
+#endif
+	image = (UBYTE *) Util_malloc(len);
+	if (fread(image, 1, len, fp) < len) {
+		free(image);
+		return NULL;
+	}
+	return image;
+}
+
 int CARTRIDGE_ReadImage(const char *filename, CARTRIDGE_image_t *cart)
 {
 	FILE *fp;
@@ -1737,12 +1767,10 @@ int CARTRIDGE_ReadImage(const char *filename, CARTRIDGE_image_t *cart)
 	/* if full kilobytes, assume it is raw image */
 	if ((len & 0x3ff) == 0) {
 		/* alloc memory and read data */
-		cart->image = (UBYTE *) Util_malloc(len);
-		if (fread(cart->image, 1, len, fp) < len) {
+		cart->image = LoadImageData(filename, fp, 0, len);
+		if (cart->image == NULL) {
 			Log_print("Error reading cartridge.\n");
 			fclose(fp);
-			free(cart->image);
-			cart->image = NULL;
 			return CARTRIDGE_TOO_FEW_DATA;
 		}
 		fclose(fp);
@@ -1764,7 +1792,7 @@ int CARTRIDGE_ReadImage(const char *filename, CARTRIDGE_image_t *cart)
 			/*InitCartridge(cart);*/
 			return 0;	/* ok */
 		}
-		free(cart->image);
+		FREE_IMAGE(cart->image);
 		cart->image = NULL;
 		return CARTRIDGE_BAD_FORMAT;
 	}
@@ -1790,12 +1818,10 @@ int CARTRIDGE_ReadImage(const char *filename, CARTRIDGE_image_t *cart)
 			cart->raw = FALSE;
 			cart->size = CARTRIDGES[type].kb;
 			/* alloc memory and read data */
-			cart->image = (UBYTE *) Util_malloc(len);
-			if (fread(cart->image, 1, len, fp) < len) {
+			cart->image = LoadImageData(filename, fp, 16, len);
+			if (cart->image == NULL) {
 				Log_print("Error reading cartridge.\n");
 				fclose(fp);
-				free(cart->image);
-				cart->image = NULL;
 				return CARTRIDGE_TOO_FEW_DATA;
 			}
 			fclose(fp);

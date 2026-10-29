@@ -68,6 +68,26 @@ void __cyg_profile_func_enter(void *fn, void *site) {
 __attribute__((no_instrument_function))
 void __cyg_profile_func_exit(void *fn, void *site) { (void)fn; (void)site; }
 
+/* ---- A8_MAPPED_CARTS (build with EXTRA_CFLAGS=-DA8_MAPPED_CARTS): files
+ * "in flash" are read into this buffer once and handed out in place. ---- */
+static unsigned char flash_sim[1 << 20];
+static const char *flash_name;
+static int flash_len = -1;
+const unsigned char *A8_MapFile(const char *filename, int *len) {
+    if (flash_len < 0 || !flash_name || strcmp(filename, flash_name) != 0) {
+        FILE *f = fopen(filename, "rb");
+        if (!f) return NULL;
+        flash_len = (int)fread(flash_sim, 1, sizeof(flash_sim), f);
+        fclose(f);
+        flash_name = filename;
+    }
+    *len = flash_len;
+    return flash_sim;
+}
+int A8_IsMapped(const void *p) {
+    return (const unsigned char *)p >= flash_sim && (const unsigned char *)p < flash_sim + sizeof(flash_sim);
+}
+
 /* ---- the Pico side, stubbed ------------------------------------------- */
 
 static long frame_no;
