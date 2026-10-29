@@ -24,6 +24,7 @@
 #include "pokeysnd.h"
 #include "sound.h"
 #include "ui.h"
+#include "screen.h"
 #include "a8_platform.h"
 #include "pico_audio.h"
 
@@ -31,9 +32,15 @@ a8_input_t a8_input;
 
 /* ---- lifecycle --------------------------------------------------------- */
 
+/* The Atari screen (384 x 240 colour indices): static, so it can't fail
+ * to allocate at run time (Screen_Initialise allocates one only if the
+ * platform hasn't set Screen_atari). */
+static ULONG screen_buf[Screen_WIDTH * Screen_HEIGHT / sizeof(ULONG)];
+
 int PLATFORM_Initialise(int *argc, char *argv[])
 {
 	a8_stage = "PLATFORM_Initialise";
+	Screen_atari = screen_buf;
 	return Sound_Initialise(argc, argv);   /* as libatari800 does */
 }
 
@@ -174,7 +181,12 @@ int UI_n_atari_files_dir;
 int UI_n_saved_files_dir;
 int UI_show_hidden_files = FALSE;
 
-int UI_Initialise(int *argc, char *argv[]) { (void)argc; (void)argv; return TRUE; }
+int UI_Initialise(int *argc, char *argv[])
+{
+	(void)argc; (void)argv;
+	a8_stage = "chips (ANTIC/GTIA/PIA/POKEY), then the file";
+	return TRUE;
+}
 void UI_Run(void) {}
 
 /* A cartridge whose type can't be told from its size: a .car header names
