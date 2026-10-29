@@ -17,7 +17,5 @@ void    a8_input_init(void);
 /* Fill a8_input for the next frame. True = MENU held: leave the game. */
 bool    a8_input_frame(void);
 uint8_t a8_input_menu(void);
-/* Joy-Con readings as one line of text (debug, shown in the game list). */
-void    a8_input_joy_debug(char *buf, size_t cap);
 
 #endif

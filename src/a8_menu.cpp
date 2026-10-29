@@ -209,8 +209,6 @@ const char *a8_menu_pick(void) {
             int old_sel = sel, old_top = top;
             if (pressed & A8M_UP)    sel = sel > 0 ? sel - 1 : game_count - 1;
             if (pressed & A8M_DOWN)  sel = sel < game_count - 1 ? sel + 1 : 0;
-            if (sel != old_sel)
-                Serial.printf("[menu] sel %d -> %d (pressed %02x, held %02x)%c", old_sel, sel, pressed, b, 10);
             if (sel < top) top = sel;
             if (sel >= top + ROWS) top = sel - ROWS + 1;
             if (top != old_top) draw_list(top, sel);
@@ -227,21 +225,6 @@ const char *a8_menu_pick(void) {
                               picked_osb ? " - OS-B game" : "");
                 return games[sel].path;
             }
-        }
-        /* Joy-Con debug line in place of the hints, 10 times a second */
-        static uint32_t dbg_ms = 0;
-        if (now - dbg_ms >= 100) {
-            dbg_ms = now;
-            char line[64];
-            a8_input_joy_debug(line, sizeof(line));
-            TFT_eSPI &tft = a8_tft();
-            tft.setTextFont(1);
-            tft.setTextColor(TFT_YELLOW, COL_BG);
-            tft.fillRect(0, 220, 320, 20, COL_BG);
-            tft.setCursor(4, 226);
-            tft.print(line);
-            static uint32_t log_ms = 0;
-            if (now - log_ms >= 500) { log_ms = now; Serial.printf("[joy] %s%c", line, 10); }
         }
         delay(10);
     }

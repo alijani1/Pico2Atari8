@@ -46,8 +46,6 @@ static JoyAxis joy_x = { PIN_JOY_X }, joy_y = { PIN_JOY_Y };
 
 static void axis_init(JoyAxis &a, int v) { a.first = a.lo = a.hi = v; }
 
-static int joy_raw[2];          /* last readings, for the debug line */
-
 /* Centre and half-range in use (see above). */
 static void axis_centre(const JoyAxis &a, int *centre, int *half) {
     bool both = a.first - a.lo >= NOMINAL_HALF * 6 / 10 && a.hi - a.first >= NOMINAL_HALF * 6 / 10;
@@ -57,7 +55,6 @@ static void axis_centre(const JoyAxis &a, int *centre, int *half) {
 
 static int8_t axis_read(JoyAxis &a) {
     int v = analogRead(a.pin);
-    joy_raw[&a == &joy_y] = v;
     if (v < a.lo) a.lo = v;
     if (v > a.hi) a.hi = v;
     int centre, half;
@@ -102,20 +99,6 @@ static uint8_t port_dirs(int n) {
     if (low(PORT_PINS[n][2])) d |= A8_LEFT;
     if (low(PORT_PINS[n][3])) d |= A8_RIGHT;
     return d;
-}
-
-/* Debug: raw readings, learned range and centre, and the directions. */
-void a8_input_joy_debug(char *buf, size_t cap) {
-    int cx, cy, hx, hy;
-    axis_centre(joy_x, &cx, &hx);
-    axis_centre(joy_y, &cy, &hy);
-    uint8_t j = joycon_dirs(), p = port_dirs(0);
-    auto c = [](uint8_t v, uint8_t bit, char ch) { return (v & bit) ? ch : '.'; };
-    snprintf(buf, cap, "X%4d c%4d Y%4d c%4d J%c%c%c%c P%c%c%c%c S%c%c",
-             joy_raw[0], cx, joy_raw[1], cy,
-             c(j, A8_UP, 'U'), c(j, A8_DOWN, 'D'), c(j, A8_LEFT, 'L'), c(j, A8_RIGHT, 'R'),
-             c(p, A8_UP, 'U'), c(p, A8_DOWN, 'D'), c(p, A8_LEFT, 'L'), c(p, A8_RIGHT, 'R'),
-             low(PIN_SIDE_UP) ? 'u' : '.', low(PIN_SIDE_DOWN) ? 'd' : '.');
 }
 
 /* ---- in a game ------------------------------------------------------- */
