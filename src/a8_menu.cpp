@@ -2,7 +2,8 @@
  *
  * Lists the Atari files on the ARCADE ROMS drive (root, ATARI and ROMS
  * folders): .xex .com .exe executables, .car .rom .bin cartridges and .atr
- * .xfd disk images, by their long names, sorted, then "ROM Drive (USB)",
+ * .xfd disk images and .zip files holding one of those (a8_zip.cpp), by
+ * their long names, sorted, then "ROM Drive (USB)",
  * which reboots into USB drive mode to copy games over (pico_drive.cpp).
  * Up/down scroll (left/right a page), fire / START picks, MENU goes back
  * to the Quad.
@@ -38,7 +39,7 @@ static bool supported(const char *path) {
     const char *dot = strrchr(path, '.');
     if (!dot) return false;
     static const char *const exts[] = { ".xex", ".com", ".exe", ".car", ".rom",
-                                        ".bin", ".atr", ".xfd" };
+                                        ".bin", ".atr", ".xfd", ".zip" };
     for (const char *e : exts) if (strcasecmp(dot, e) == 0) return true;
     return false;
 }

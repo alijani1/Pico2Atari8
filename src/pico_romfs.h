@@ -41,6 +41,9 @@ bool romfs_slurp(const char *path, uint8_t **out, size_t *out_sz);
 typedef bool (*romfs_list_cb)(const char *path, const char *display, uint32_t size, void *ctx);
 void romfs_list(romfs_list_cb cb, void *ctx);
 
+/* Read a file into buf (at most cap bytes); false if missing or too big. */
+bool romfs_read(const char *path, uint8_t *buf, size_t cap, size_t *out_sz);
+
 /* A file stored in one piece on a flash drive: its address in flash (read
  * it in place, no copy). False if it's fragmented (use romfs_slurp). */
 bool romfs_map(const char *path, const uint8_t **out, size_t *out_sz);

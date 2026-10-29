@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include "pico_romfs.h"
 #include "a8_platform.h"
+#include "a8_zip.h"
 
 extern "C" {
 FILE *__real_fopen(const char *path, const char *mode);
@@ -41,7 +42,9 @@ extern "C" FILE *__wrap_fopen(const char *path, const char *mode) {
     uint8_t *buf = nullptr;            /* ours to free, if slurped */
     const uint8_t *data = nullptr;
     size_t size = 0;
-    if (romfs_map(path, &data, &size)) {
+    if (strncmp(path, A8_UNZIP_PREFIX, strlen(A8_UNZIP_PREFIX)) == 0) {
+        if (!(data = a8_unzipped(&size))) return nullptr;      /* unpacked zip, in flash */
+    } else if (romfs_map(path, &data, &size)) {
         /* in place */
     } else if (romfs_slurp(path, &buf, &size)) {
         data = buf;
@@ -60,7 +63,9 @@ extern "C" FILE *__wrap_fopen(const char *path, const char *mode) {
 extern "C" const uint8_t *A8_MapFile(const char *path, int *len) {
     const uint8_t *p;
     size_t size;
-    if (!romfs_map(path, &p, &size)) return nullptr;
+    if (strncmp(path, A8_UNZIP_PREFIX, strlen(A8_UNZIP_PREFIX)) == 0) p = a8_unzipped(&size);
+    else if (!romfs_map(path, &p, &size)) p = nullptr;
+    if (!p) return nullptr;
     *len = (int)size;
     return p;
 }

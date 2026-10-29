@@ -5,6 +5,8 @@
 #include <TFT_eSPI.h>
 
 TFT_eSPI &a8_tft(void);
+/* The frame snapshot (75 KB), free to use before a game starts. */
+uint8_t *a8_display_scratch(size_t *size);
 
 void a8_display_init(void);        /* panel on, landscape, DMA (core 0, at boot) */
 void a8_display_palette(void);     /* Colours_table -> panel colours */

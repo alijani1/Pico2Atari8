@@ -12,6 +12,9 @@ Status: **in development — Quad Ultimate CX first.**
 - **Cartridges** — `.car` (any type), `.rom` / `.bin` (standard 2–16 KB and
   XEGS sizes)
 - **Disk images** — `.atr` `.xfd` (read-only)
+- **Zip files** holding any of those (one game per zip). The game is
+  unpacked into a reserved flash area when it starts (about a second for a
+  90 KB disk) and runs from there; see [docs/QUAD_FLASH.md](docs/QUAD_FLASH.md).
 
 The machine is an 800XL with 64 KB, NTSC, BASIC off. The Atari operating
 system is **AltirraOS** (Avery Lee's free replacement, built in), so no

@@ -312,6 +312,23 @@ extern "C" bool romfs_map(const char *path, const uint8_t **out, size_t *out_sz)
     return true;
 }
 
+extern "C" bool romfs_read(const char *path, uint8_t *buf, size_t cap, size_t *out_sz) {
+    const uint8_t *e = find_file(path);
+    if (!e) return false;
+    uint32_t size = rd32(e + 28), cluster = rd16(e + 26);
+    if (size == 0 || size > cap) return false;
+    for (uint32_t done = 0; done < size; ) {
+        if (!cluster_ok(cluster)) return false;
+        uint32_t n = size - done;
+        if (n > clusterBytes) n = clusterBytes;
+        memcpy(buf + done, vol + cluster_ofs(cluster), n);
+        done += n;
+        if (done < size) cluster = fat_next(cluster);
+    }
+    *out_sz = size;
+    return true;
+}
+
 extern "C" bool romfs_slurp(const char *path, uint8_t **out, size_t *out_sz) {
     const uint8_t *e = find_file(path);
     if (!e) { Serial.printf("[romfs] not found: %s\n", path); return false; }

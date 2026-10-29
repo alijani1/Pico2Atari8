@@ -24,6 +24,7 @@
 #include "pico_drive.h"
 #include "pico_handoff.h"
 #include "pico_romfs.h"
+#include "a8_zip.h"
 
 extern "C" {
 #include "atari.h"
@@ -76,7 +77,7 @@ static uint32_t emu_stack_used(void) {
 
 /* ---- start-up --------------------------------------------------------- */
 
-static char game_file[32];
+static char game_file[96];
 static bool start_as_800 = false;
 
 /* An 800XL with 64 KB (or an 800 with 48 KB for OS-B games), NTSC, BASIC
@@ -143,6 +144,33 @@ void setup() {
     strncpy(game_file, path, sizeof(game_file) - 1);
     start_as_800 = a8_menu_picked_osb();
     log_file(game_file);
+
+    /* A zip: unpack its game into the flash area first (before the audio
+     * starts: flash writes stop interrupts) and run it from there. */
+    const char *dot = strrchr(path, '.');
+    if (dot && strcasecmp(dot, ".zip") == 0) {
+        TFT_eSPI &tft = a8_tft();
+        tft.fillScreen(TFT_BLACK);
+        tft.setTextFont(2);
+        tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        tft.setCursor(110, 110);
+        tft.print("Unpacking...");
+        char inner[64];
+        if (!a8_unzip(path, inner, sizeof(inner))) {
+            tft.fillScreen(TFT_BLACK);
+            tft.setCursor(40, 100); tft.print("Can't unpack this zip.");
+            tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+            tft.setCursor(40, 122); tft.print("Press MENU for the game list.");
+            while (digitalRead(18) == LOW) delay(10);
+            while (digitalRead(18) == HIGH) delay(10);
+            handoff_relaunch_arcade();
+        }
+        snprintf(game_file, sizeof(game_file), "%s%s", A8_UNZIP_PREFIX, inner);
+        char low[64];
+        size_t n = strlen(inner);
+        for (size_t i = 0; i <= n; i++) low[i] = (char)tolower((unsigned char)inner[i]);
+        if (strstr(low, "osb") || strstr(low, "os-b")) start_as_800 = true;
+    }
 
     Serial.println("[a8] starting audio");
     pico_audio_init(A8_SAMPLE_RATE);

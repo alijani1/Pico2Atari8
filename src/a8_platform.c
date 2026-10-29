@@ -41,6 +41,13 @@ a8_input_t a8_input;
  * platform hasn't set Screen_atari). */
 static ULONG screen_buf[Screen_WIDTH * Screen_HEIGHT / sizeof(ULONG)];
 
+/* Free to use before the game starts (a8_zip: inflate dictionary). */
+uint8_t *a8_screen_scratch(size_t *size)
+{
+	*size = sizeof(screen_buf);
+	return (uint8_t *)screen_buf;
+}
+
 int PLATFORM_Initialise(int *argc, char *argv[])
 {
 	a8_stage = "PLATFORM_Initialise";

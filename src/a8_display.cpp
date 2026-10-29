@@ -115,6 +115,11 @@ static void fps_tick(void) {
 
 TFT_eSPI &a8_tft(void) { return tft; }
 
+uint8_t *a8_display_scratch(size_t *size) {
+    *size = sizeof(frame8);
+    return frame8;
+}
+
 void a8_display_init(void) {
     /* clk_peri back on clk_sys: platformio's f_cpu override leaves it on
      * the USB PLL (48 MHz), which caps SPI at 24 MHz (as in Pico2Arcade). */
