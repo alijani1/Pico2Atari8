@@ -157,11 +157,13 @@ void loop() {
         a8_display_stats(&shown, &skipped);
         uint32_t rows;
         uint32_t push_us = a8_display_push_us(&rows);
-        Serial.printf("[a8] %lu frames, %.2f ms/frame (incl. audio wait), shown %lu skipped %lu, "
+        static uint32_t last_shown = 0;
+        float secs = (now - last) / 1000.0f;
+        Serial.printf("[a8] emulator %.1f fps, screen %.1f fps (%lu dropped total), "
                       "push %.2f ms (%lu rows), stack %lu\n",
-                      (unsigned long)frames, busy / 1000.0f / frames,
-                      (unsigned long)shown, (unsigned long)skipped,
+                      frames / secs, (shown - last_shown) / secs, (unsigned long)skipped,
                       push_us / 1000.0f, (unsigned long)rows, (unsigned long)emu_stack_used());
+        last_shown = shown;
         busy = frames = 0;
         last = now;
     }
