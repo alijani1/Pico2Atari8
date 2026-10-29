@@ -212,6 +212,8 @@ const char *a8_menu_pick(void) {
             if (pressed & A8M_DOWN)  sel = sel < game_count - 1 ? sel + 1 : 0;
             if (pressed & A8M_LEFT)  sel = sel >= ROWS ? sel - ROWS : 0;
             if (pressed & A8M_RIGHT) sel = sel + ROWS < game_count ? sel + ROWS : game_count - 1;
+            if (sel != old_sel)
+                Serial.printf("[menu] sel %d -> %d (pressed %02x, held %02x)%c", old_sel, sel, pressed, b, 10);
             if (sel < top) top = sel;
             if (sel >= top + ROWS) top = sel - ROWS + 1;
             if (top != old_top) draw_list(top, sel);
