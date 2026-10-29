@@ -104,6 +104,18 @@ int PLATFORM_TRIG(int num)
 	return a8_input.trig[num] ? 0 : 1;
 }
 
+/* ---- one frame ---------------------------------------------------------- */
+
+/* What upstream's ports do in their main loops: the core reads neither the
+ * keyboard nor shows the screen by itself. */
+void a8_frame(void)
+{
+	INPUT_key_code = PLATFORM_Keyboard();
+	Atari800_Frame();
+	if (Atari800_display_screen)
+		PLATFORM_DisplayScreen();
+}
+
 /* ---- display ----------------------------------------------------------- */
 
 void PLATFORM_DisplayScreen(void)
@@ -119,7 +131,7 @@ void PLATFORM_DisplayScreen(void)
 int Sound_enabled = TRUE;
 static int sound_paused = FALSE;
 static int16_t sound_buf[A8_MAX_FRAME_SAMPLES];
-static unsigned sound_frac;          /* samples owed to the next frame, x 1000 */
+static unsigned sound_acc;           /* sample-rate x 1000 owed to the next frame */
 
 /* The PWM output itself is started by main.cpp before the emulator (as
  * Pico2Arcade does, on the normal stack); here there's nothing left to do. */
@@ -151,10 +163,11 @@ void Sound_WriteConfig(FILE *fp) { (void)fp; }
 void Sound_Update(void)
 {
 	if (!Sound_enabled || sound_paused) return;
+	/* samples this frame = rate / fps, in fixed point (fps x 1000) */
 	unsigned fps1000 = Atari800_tv_mode == Atari800_TV_PAL ? 49860 : 59923;
-	sound_frac += (unsigned)A8_SAMPLE_RATE * 1000u * 1000u / fps1000;
-	unsigned n = sound_frac / 1000u;
-	sound_frac -= n * 1000u;
+	sound_acc += (unsigned)A8_SAMPLE_RATE * 1000u;
+	unsigned n = sound_acc / fps1000;
+	sound_acc -= n * fps1000;
 	if (n > A8_MAX_FRAME_SAMPLES) n = A8_MAX_FRAME_SAMPLES;
 	POKEYSND_Process(sound_buf, (int)n);
 	/* Wait for room: this is what holds the emulator to real time. */

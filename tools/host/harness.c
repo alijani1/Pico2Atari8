@@ -140,8 +140,7 @@ int main(int argc, char **argv) {
         a8_input.key = -1;
         if (start_at >= 0 && frame_no >= start_at && frame_no < start_at + 10) a8_input.start = 1;
         if (fire_at >= 0 && frame_no >= fire_at && frame_no < fire_at + 10) a8_input.trig[0] = 1;
-        Atari800_Frame();
-        if (Atari800_display_screen) PLATFORM_DisplayScreen();   /* as main.cpp */
+        a8_frame();                                              /* as main.cpp */
     }
     if (same_count > 30) printf("  (frame unchanged for the last %d frames)\n", same_count);
     printf("deepest stack: %zu bytes below main (x86-64)\n", stack_max);

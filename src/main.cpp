@@ -92,11 +92,8 @@ static void emu_start(void) {
 
 static void emu_frame(void) {
     if (g_frames == 0) a8_stage = "first frame";
-    Atari800_Frame();
+    a8_frame();
     g_frames++;
-    /* As in upstream's own main loops: the core leaves showing the frame
-     * to the platform. */
-    if (Atari800_display_screen) PLATFORM_DisplayScreen();
 }
 
 /* What the drive gives for the file (rules out a wrong drive offset). */

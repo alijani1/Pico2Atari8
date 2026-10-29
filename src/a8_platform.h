@@ -33,7 +33,8 @@ typedef struct {
 extern a8_input_t a8_input;
 
 /* a8_platform.c */
-int a8_guess_cart_type(int kb);
+int  a8_guess_cart_type(int kb);
+void a8_frame(void);                 /* keyboard, emulate one frame, show it */
 
 /* Pico side */
 uint64_t a8_time_us(void);
