@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "pico_romfs.h"
+#include "a8_platform.h"
 
 extern "C" {
 FILE *__real_fopen(const char *path, const char *mode);
@@ -27,6 +28,11 @@ int   __wrap_fclose(FILE *f);
 static struct { FILE *f; uint8_t *buf; } open_files[4];
 
 extern "C" FILE *__wrap_fopen(const char *path, const char *mode) {
+    if (path) {
+        static char stage[48];
+        snprintf(stage, sizeof(stage), "fopen %s %s", path, mode ? mode : "");
+        a8_stage = stage;
+    }
     if (!path || !mode || strchr(mode, 'w') || strchr(mode, 'a') || strchr(mode, '+'))
         return nullptr;                       /* read-only drive */
     int slot = -1;

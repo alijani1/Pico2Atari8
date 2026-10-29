@@ -41,6 +41,9 @@ extern "C" void a8_log_write(const char *line) {
     Serial.printf("[a8] %s\n", line);
 }
 
+extern volatile uint32_t a8_fault_pc, a8_fault_lr, a8_fault_cfsr;
+void a8_debug_init(void);
+
 extern "C" uint64_t a8_time_us(void) { return time_us_64(); }
 extern "C" void a8_idle(void) { tight_loop_contents(); }
 
@@ -110,6 +113,7 @@ static void log_file(const char *path) {
 
 void setup() {
     Serial.begin(115200);
+    a8_debug_init();
     int vol = handoff_volume_read();
     pico_audio_set_volume_pct(vol >= 0 ? vol : 50);
     board_pins_load();                 /* audio / amp pins (Quad profile) */
@@ -174,6 +178,10 @@ void loop1() {
         last = now;
         uint32_t shown, skipped;
         a8_display_stats(&shown, &skipped);
+        if (a8_fault_pc)
+            Serial.printf("[hb] CRASH on core 0: pc %08lx lr %08lx cfsr %08lx%c",
+                          (unsigned long)a8_fault_pc, (unsigned long)a8_fault_lr,
+                          (unsigned long)a8_fault_cfsr, 10);
         Serial.printf("[hb] %s: frames %lu, 6502 PC %04x, shown %lu, stack %lu\n",
                       (const char *)a8_stage, (unsigned long)g_frames, CPU_regPC,
                       (unsigned long)shown, (unsigned long)emu_stack_used());
