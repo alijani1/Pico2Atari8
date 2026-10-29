@@ -4,6 +4,9 @@
  *   printf / puts  the core prints a few things straight to stdout (e.g.
  *                  "Fatal error: out of memory"), which goes nowhere on the
  *                  Pico - send them to the serial monitor instead.
+ *   perror         writes to stderr, which BLOCKS FOREVER on the Pico: the
+ *                  core calls it when it can't save its config file (the
+ *                  drive is read-only), and that froze every game start.
  *   exit           the core exits on fatal errors; on the Pico that just
  *                  stops. Report it (with the stage and the free heap) and
  *                  keep reporting, so it can't look like a silent freeze.
@@ -16,12 +19,15 @@
 #include <Arduino.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <errno.h>
+#include <string.h>
 #include "a8_platform.h"
 #include "hardware/exception.h"
 
 extern "C" {
 int __wrap_printf(const char *fmt, ...);
 int __wrap_puts(const char *s);
+void __wrap_perror(const char *s);
 void __wrap_exit(int code);
 }
 
@@ -61,6 +67,10 @@ extern "C" int __wrap_printf(const char *fmt, ...) {
 extern "C" int __wrap_puts(const char *s) {
     Serial.printf("[stdout] %s\n", s);
     return 1;
+}
+
+extern "C" void __wrap_perror(const char *s) {
+    Serial.printf("[stderr] %s: %s\n", s ? s : "", strerror(errno));
 }
 
 extern "C" void __wrap_exit(int code) {
