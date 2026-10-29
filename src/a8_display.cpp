@@ -11,10 +11,16 @@
  * core 0 is already emulating the next frame. If core 1 is still sending
  * the previous one, the new frame is skipped rather than holding up the
  * emulation (and with it the sound).
+ *
+ * Only rows that changed are sent: a full 320 x 240 frame is 12.3 ms of
+ * SPI at 100 MHz (plus overhead) - too close to the 16.7 ms of a frame -
+ * but most of an Atari screen usually stays put. Core 1 hashes each row
+ * and sends the runs of rows whose hash differs from what the panel shows.
  */
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include "hardware/clocks.h"
+#include "hardware/spi.h"
 #include "a8_display.h"
 #include "a8_platform.h"
 
@@ -29,12 +35,16 @@ static const int SCR_W = 320, SCR_H = 240;
 static const int SRC_X = (Screen_WIDTH - SCR_W) / 2;    /* 32: middle 320 columns */
 static const int BAND = 16;                             /* lines per DMA push */
 
-static uint8_t  frame8[SCR_W * SCR_H];                  /* snapshot for core 1 */
+static uint8_t  frame8[SCR_W * SCR_H] __attribute__((aligned(4)));   /* snapshot for core 1 */
 static uint16_t band565[2][SCR_W * BAND];               /* ping-pong DMA buffers */
 static uint16_t pal565[256];                            /* byte-swapped for the panel */
 static volatile bool frame_ready = false;               /* core 0 -> core 1 */
 static volatile bool running = false;                   /* core 1 owns the panel */
 static volatile uint32_t frames_shown = 0, frames_skipped = 0;
+static volatile uint32_t push_us_sum = 0, push_count = 0;   /* time per push */
+static volatile uint32_t rows_sum = 0;                      /* rows sent per push */
+static uint32_t row_hash[SCR_H];                        /* what the panel shows */
+static bool hashes_valid = false;
 
 TFT_eSPI &a8_tft(void) { return tft; }
 
@@ -48,6 +58,8 @@ void a8_display_init(void) {
     tft.setSwapBytes(false);
     tft.fillScreen(TFT_BLACK);
     if (!tft.initDMA()) Serial.println("[display] initDMA failed");
+    Serial.printf("[display] sys %lu MHz, SPI %lu MHz\n", (unsigned long)(sys_hz / 1000000),
+                  (unsigned long)(spi_get_baudrate(spi0) / 1000000));
 }
 
 void a8_display_palette(void) {
@@ -61,6 +73,7 @@ void a8_display_palette(void) {
 void a8_display_start(void) {
     a8_display_palette();
     tft.fillScreen(TFT_BLACK);
+    hashes_valid = false;                /* send the first frame whole */
     running = true;
 }
 
@@ -80,21 +93,56 @@ extern "C" void a8_display_frame(void) {
     frame_ready = true;
 }
 
-/* Core 1: send a snapshot. */
-static void push_frame(void) {
-    tft.startWrite();
-    tft.setAddrWindow(0, 0, SCR_W, SCR_H);
-    int b = 0;
-    for (int y0 = 0; y0 < SCR_H; y0 += BAND) {
-        uint16_t *dst = band565[b];
-        const uint8_t *src = frame8 + y0 * SCR_W;
-        for (int i = 0; i < SCR_W * BAND; i++) dst[i] = pal565[src[i]];
+/* Core 1: send a snapshot. In RAM: core 0 runs the emulator out of flash,
+ * and the two cores share the flash cache. */
+static uint32_t __not_in_flash_func(hash_row)(const uint8_t *row) {
+    const uint32_t *w = (const uint32_t *)row;
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < SCR_W / 4; i++) h = (h ^ w[i]) * 16777619u;
+    return h;
+}
+
+/* Send rows y0 .. y0+n-1 (one address window, ping-pong bands). */
+static int band_buf = 0;
+static void __not_in_flash_func(push_rows)(int y0, int n) {
+    tft.dmaWait();                       /* window change: the bus must be idle */
+    tft.setAddrWindow(0, y0, SCR_W, n);
+    for (int y = y0; y < y0 + n; y += BAND) {
+        int rows = (y0 + n - y < BAND) ? y0 + n - y : BAND;
+        uint16_t *dst = band565[band_buf];
+        const uint8_t *src = frame8 + y * SCR_W;
+        for (int i = 0; i < SCR_W * rows; i++) dst[i] = pal565[src[i]];
         tft.dmaWait();                   /* the other buffer is free again */
-        tft.pushPixelsDMA(dst, SCR_W * BAND);
-        b ^= 1;
+        tft.pushPixelsDMA(dst, SCR_W * rows);
+        band_buf ^= 1;
+    }
+}
+
+static void __not_in_flash_func(push_frame)(void) {
+    uint32_t t0 = time_us_32();
+    uint32_t sent = 0;
+    tft.startWrite();
+    int y = 0;
+    while (y < SCR_H) {
+        uint32_t h = hash_row(frame8 + y * SCR_W);
+        if (hashes_valid && h == row_hash[y]) { y++; continue; }
+        /* a run of changed rows */
+        int start = y;
+        row_hash[y++] = h;
+        while (y < SCR_H) {
+            h = hash_row(frame8 + y * SCR_W);
+            if (hashes_valid && h == row_hash[y]) break;
+            row_hash[y++] = h;
+        }
+        push_rows(start, y - start);
+        sent += (uint32_t)(y - start);
     }
     tft.dmaWait();
     tft.endWrite();
+    hashes_valid = true;
+    push_us_sum += time_us_32() - t0;
+    rows_sum += sent;
+    push_count++;
     frames_shown++;
 }
 
@@ -108,4 +156,11 @@ void a8_display_core1_loop(void) {
 void a8_display_stats(uint32_t *shown, uint32_t *skipped) {
     *shown = frames_shown;
     *skipped = frames_skipped;
+}
+
+uint32_t a8_display_push_us(uint32_t *avg_rows) {
+    uint32_t n = push_count, s = push_us_sum, r = rows_sum;
+    push_count = 0; push_us_sum = 0; rows_sum = 0;
+    if (avg_rows) *avg_rows = n ? r / n : 0;
+    return n ? s / n : 0;
 }

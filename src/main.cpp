@@ -155,10 +155,13 @@ void loop() {
     if (now - last >= 5000) {
         uint32_t shown, skipped;
         a8_display_stats(&shown, &skipped);
-        Serial.printf("[a8] %lu frames, %.2f ms/frame (incl. audio wait), shown %lu skipped %lu, stack %lu\n",
+        uint32_t rows;
+        uint32_t push_us = a8_display_push_us(&rows);
+        Serial.printf("[a8] %lu frames, %.2f ms/frame (incl. audio wait), shown %lu skipped %lu, "
+                      "push %.2f ms (%lu rows), stack %lu\n",
                       (unsigned long)frames, busy / 1000.0f / frames,
                       (unsigned long)shown, (unsigned long)skipped,
-                      (unsigned long)emu_stack_used());
+                      push_us / 1000.0f, (unsigned long)rows, (unsigned long)emu_stack_used());
         busy = frames = 0;
         last = now;
     }
