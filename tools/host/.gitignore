@@ -3,3 +3,5 @@ obj/
 *.ppm
 *.png
 a8_harness
+ram.bin
+ziptest
