@@ -34,11 +34,12 @@ static const int PIN_SIDE_UP = 3, PIN_SIDE_DOWN = 2;
 static const int PIN_JOY_X = 44, PIN_JOY_Y = 45;
 
 /* ---- Joy-Con ---------------------------------------------------------
- * The centre is assumed at the first reading; as the stick moves, the
- * lowest and highest readings are kept and the centre is their midpoint.
- * A direction counts outside a dead zone of 30 % of the half-range around
- * the centre. Until the stick has moved a fair way, a nominal half-range
- * stands in. */
+ * The centre is assumed at the first reading (averaged at start-up); as the
+ * stick moves, the lowest and highest readings are kept, and once it has
+ * gone well past the centre BOTH ways the centre becomes their midpoint
+ * (one side alone would skew it). A direction counts outside a dead zone
+ * of 30 % of the half-range around the centre; until both sides are known,
+ * a nominal half-range stands in. */
 struct JoyAxis { int pin; int first, lo, hi; };
 static const int NOMINAL_HALF = 1000;       /* of 2048: until it has moved */
 static JoyAxis joy_x = { PIN_JOY_X }, joy_y = { PIN_JOY_Y };
@@ -47,14 +48,20 @@ static void axis_init(JoyAxis &a, int v) { a.first = a.lo = a.hi = v; }
 
 static int joy_raw[2];          /* last readings, for the debug line */
 
+/* Centre and half-range in use (see above). */
+static void axis_centre(const JoyAxis &a, int *centre, int *half) {
+    bool both = a.first - a.lo >= NOMINAL_HALF * 6 / 10 && a.hi - a.first >= NOMINAL_HALF * 6 / 10;
+    *centre = both ? (a.lo + a.hi) / 2 : a.first;
+    *half = both ? (a.hi - a.lo) / 2 : NOMINAL_HALF;
+}
+
 static int8_t axis_read(JoyAxis &a) {
     int v = analogRead(a.pin);
     joy_raw[&a == &joy_y] = v;
     if (v < a.lo) a.lo = v;
     if (v > a.hi) a.hi = v;
-    int half = (a.hi - a.lo) / 2;
-    int centre = half >= NOMINAL_HALF ? (a.lo + a.hi) / 2 : a.first;
-    if (half < NOMINAL_HALF) half = NOMINAL_HALF;
+    int centre, half;
+    axis_centre(a, &centre, &half);
     int dead = half * 30 / 100;
     if (v < centre - dead) return -1;
     if (v > centre + dead) return 1;
@@ -71,10 +78,11 @@ void a8_input_init(void) {
     for (int p : buttons) pinMode(p, INPUT_PULLUP);
     /* Joy-Con: a first guess at the centre; it keeps learning (axis_read) */
     analogReadResolution(12);
+    delay(20);                               /* let the ADC settle */
     long sx = 0, sy = 0;
-    for (int i = 0; i < 8; i++) { sx += analogRead(PIN_JOY_X); sy += analogRead(PIN_JOY_Y); delay(2); }
-    axis_init(joy_x, (int)(sx / 8));
-    axis_init(joy_y, (int)(sy / 8));
+    for (int i = 0; i < 32; i++) { sx += analogRead(PIN_JOY_X); sy += analogRead(PIN_JOY_Y); delay(1); }
+    axis_init(joy_x, (int)(sx / 32));
+    axis_init(joy_y, (int)(sy / 32));
 }
 
 static uint8_t joycon_dirs(void) {
@@ -98,9 +106,9 @@ static uint8_t port_dirs(int n) {
 
 /* Debug: raw readings, learned range and centre, and the directions. */
 void a8_input_joy_debug(char *buf, size_t cap) {
-    int hx = (joy_x.hi - joy_x.lo) / 2, hy = (joy_y.hi - joy_y.lo) / 2;
-    int cx = hx >= NOMINAL_HALF ? (joy_x.lo + joy_x.hi) / 2 : joy_x.first;
-    int cy = hy >= NOMINAL_HALF ? (joy_y.lo + joy_y.hi) / 2 : joy_y.first;
+    int cx, cy, hx, hy;
+    axis_centre(joy_x, &cx, &hx);
+    axis_centre(joy_y, &cy, &hy);
     uint8_t j = joycon_dirs(), p = port_dirs(0);
     auto c = [](uint8_t v, uint8_t bit, char ch) { return (v & bit) ? ch : '.'; };
     snprintf(buf, cap, "X%4d c%4d Y%4d c%4d J%c%c%c%c P%c%c%c%c S%c%c",

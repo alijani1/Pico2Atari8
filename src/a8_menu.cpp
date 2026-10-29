@@ -5,8 +5,7 @@
  * .xfd disk images and .zip files holding one of those (a8_zip.cpp), by
  * their long names, sorted, then "ROM Drive (USB)",
  * which reboots into USB drive mode to copy games over (pico_drive.cpp).
- * Up/down scroll (left/right a page), fire / START picks, MENU goes back
- * to the Quad.
+ * Up/down scroll, fire / START picks, MENU goes back to the Quad.
  */
 #include <Arduino.h>
 #include <strings.h>
@@ -177,7 +176,7 @@ const char *a8_menu_pick(void) {
     uint32_t released_at = 0;
     uint8_t released_dir = 0;
     for (;;) {
-        uint8_t b = a8_input_menu();
+        uint8_t b = a8_input_menu() & ~(A8M_LEFT | A8M_RIGHT);   /* up / down only */
         uint8_t pressed = b & ~prev;
         uint32_t now = millis();
         uint8_t let_go = prev & ~b & (A8M_UP | A8M_DOWN | A8M_LEFT | A8M_RIGHT);
@@ -210,8 +209,6 @@ const char *a8_menu_pick(void) {
             int old_sel = sel, old_top = top;
             if (pressed & A8M_UP)    sel = sel > 0 ? sel - 1 : game_count - 1;
             if (pressed & A8M_DOWN)  sel = sel < game_count - 1 ? sel + 1 : 0;
-            if (pressed & A8M_LEFT)  sel = sel >= ROWS ? sel - ROWS : 0;
-            if (pressed & A8M_RIGHT) sel = sel + ROWS < game_count ? sel + ROWS : game_count - 1;
             if (sel != old_sel)
                 Serial.printf("[menu] sel %d -> %d (pressed %02x, held %02x)%c", old_sel, sel, pressed, b, 10);
             if (sel < top) top = sel;
