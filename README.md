@@ -17,6 +17,15 @@ The machine is an 800XL with 64 KB, NTSC, BASIC off. The Atari operating
 system is **AltirraOS** (Avery Lee's free replacement, built in), so no
 Atari ROM files are needed.
 
+**Real Atari ROMs (optional).** Some early games (Synapse's Slime and
+Shamus, for example) jump straight into the original Atari OS and crash on
+AltirraOS. Copy your own `ATARIOSB.ROM` (400/800 OS-B, 10 KB) and
+`ATARIXL.ROM` (XL/XE OS, 16 KB) onto the drive (root or `ATARI` folder) and
+they're used instead. When a game crashes the emulated 6502 on the XL, it
+is restarted on an 800 (OS-B if the file is there); files named with
+`-osb` or `(OS-B)` start on the 800 straight away. If it crashes there too,
+the screen says so and MENU goes back to the list.
+
 ## Quad Ultimate CX
 
 Until the Quad firmware gets its own Atari 8-bit slot, Pico2Atari8 goes into

@@ -119,7 +119,15 @@ static void save_ppm(const char *path) {
     printf("saved %s\n", path);
 }
 
+/* atari800 exit()s when the 6502 hits a crash opcode (it would open its
+ * monitor); report where. */
+static void at_exit(void) {
+    printf("EXIT at frame %ld, 6502 PC %04x, crash opcode seen: %s\n",
+           frame_no, CPU_regPC, CPU_cim_encountered ? "yes" : "no");
+}
+
 int main(int argc, char **argv) {
+    atexit(at_exit);
     if (argc < 2) { fprintf(stderr, "usage: %s <file> [frames] [out.ppm]\n", argv[0]); return 1; }
     long frames = argc > 2 ? atol(argv[2]) : 600;
     const char *out = argc > 3 ? argv[3] : "frame.ppm";
@@ -128,8 +136,18 @@ int main(int argc, char **argv) {
 
     char top; stack_top = &top;
     /* as main.cpp */
-    char *a8argv[] = { "atari800", "-xl", "-ntsc", "-nobasic", argv[1], NULL };
-    int a8argc = 5;
+    /* MACHINE=-atari (400/800) or -xl (default, as the device) */
+    char *machine = getenv("MACHINE") ? getenv("MACHINE") : "-xl";
+    /* A8_ARGS="-osb_rom /path/ATARIOSB.ROM -800-rev b-ntsc": more options */
+    char *a8argv[32] = { "atari800", machine, "-ntsc", "-nobasic" };
+    int a8argc = 4;
+    static char extra[512];
+    if (getenv("A8_ARGS")) {
+        strncpy(extra, getenv("A8_ARGS"), sizeof(extra) - 1);
+        for (char *t = strtok(extra, " "); t && a8argc < 30; t = strtok(NULL, " ")) a8argv[a8argc++] = t;
+    }
+    a8argv[a8argc++] = argv[1];
+    a8argv[a8argc] = NULL;
     if (!Atari800_Initialise(&a8argc, a8argv)) { printf("Atari800_Initialise failed\n"); return 2; }
     printf("initialised: machine %d, %d KB RAM, OS %d, heap %zu KB (peak %zu KB)\n",
            Atari800_machine_type, MEMORY_ram_size, Atari800_os_version,
@@ -141,6 +159,7 @@ int main(int argc, char **argv) {
         if (start_at >= 0 && frame_no >= start_at && frame_no < start_at + 10) a8_input.start = 1;
         if (fire_at >= 0 && frame_no >= fire_at && frame_no < fire_at + 10) a8_input.trig[0] = 1;
         a8_frame();                                              /* as main.cpp */
+        if (a8_crashed && !a8_handle_crash(argv[1])) { printf("crashed on the 800 too\n"); break; }
     }
     if (same_count > 30) printf("  (frame unchanged for the last %d frames)\n", same_count);
     printf("deepest stack: %zu bytes below main (x86-64)\n", stack_max);

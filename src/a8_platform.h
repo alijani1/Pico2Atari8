@@ -35,6 +35,11 @@ extern a8_input_t a8_input;
 /* a8_platform.c */
 int  a8_guess_cart_type(int kb);
 void a8_frame(void);                 /* keyboard, emulate one frame, show it */
+/* Set by a8_frame when the 6502 hit a crash opcode. a8_handle_crash then
+ * restarts the game (path) on an 800 if it was on the XL: true if it did,
+ * false if it was on the 800 already. */
+extern volatile int a8_crashed;
+int  a8_handle_crash(const char *path);
 
 /* Pico side */
 uint64_t a8_time_us(void);

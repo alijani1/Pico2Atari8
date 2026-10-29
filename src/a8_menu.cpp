@@ -17,12 +17,24 @@
 #include "pico_drive.h"
 
 static const int MAX_GAMES = 128;      /* + the ROM drive row */
-struct Game { char path[24]; char name[40]; };
+struct Game { char path[24]; char name[40]; bool osb; };
+static bool picked_osb = false;
+bool a8_menu_picked_osb(void) { return picked_osb; }
 static Game games[MAX_GAMES + 1];
 static int found = 0;                  /* games on the drive; the row after them is the drive */
 static int game_count = 0;
 
+/* Atari OS / BASIC ROM files (used by the emulator, not games) */
+static bool system_rom(const char *path) {
+    const char *name = strrchr(path, '/');
+    name = name ? name + 1 : path;
+    static const char *const prefixes[] = { "ATARIOS", "ATARIXL", "ATARIBAS", "5200" };
+    for (const char *p : prefixes) if (strncasecmp(name, p, strlen(p)) == 0) return true;
+    return false;
+}
+
 static bool supported(const char *path) {
+    if (system_rom(path)) return false;
     const char *dot = strrchr(path, '.');
     if (!dot) return false;
     static const char *const exts[] = { ".xex", ".com", ".exe", ".car", ".rom",
@@ -37,6 +49,13 @@ static bool add_game(const char *path, const char *display, uint32_t size, void 
     Game &g = games[game_count++];
     strncpy(g.path, path, sizeof(g.path) - 1);
     g.path[sizeof(g.path) - 1] = 0;
+    /* "-osb" / "(OS-B)" in the name: needs a 400/800 with OS-B */
+    char low[64];
+    size_t n = strlen(display);
+    if (n >= sizeof(low)) n = sizeof(low) - 1;
+    for (size_t i = 0; i < n; i++) low[i] = (char)tolower((unsigned char)display[i]);
+    low[n] = 0;
+    g.osb = strstr(low, "osb") != nullptr || strstr(low, "os-b") != nullptr;
     /* shown without its extension */
     strncpy(g.name, display, sizeof(g.name) - 1);
     g.name[sizeof(g.name) - 1] = 0;
@@ -166,7 +185,9 @@ const char *a8_menu_pick(void) {
             if (pressed & A8M_OK) {
                 while (a8_input_menu() & A8M_OK) delay(10);
                 if (sel == found) pico_drive_request();      /* reboots into drive mode */
-                Serial.printf("[menu] run %s (%s)\n", games[sel].path, games[sel].name);
+                picked_osb = games[sel].osb;
+                Serial.printf("[menu] run %s (%s)%s\n", games[sel].path, games[sel].name,
+                              picked_osb ? " - OS-B game" : "");
                 return games[sel].path;
             }
         }

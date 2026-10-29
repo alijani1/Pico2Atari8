@@ -77,22 +77,42 @@ static uint32_t emu_stack_used(void) {
 /* ---- start-up --------------------------------------------------------- */
 
 static char game_file[32];
+static bool start_as_800 = false;
 
-/* An 800XL with 64 KB, NTSC, BASIC off (as if OPTION were held at power-on),
- * running the chosen file. AltirraOS is built in. */
+/* An 800XL with 64 KB (or an 800 with 48 KB for OS-B games), NTSC, BASIC
+ * off (as if OPTION were held at power-on), running the chosen file.
+ * AltirraOS is built in; real Atari ROM files on the drive (ATARIXL.ROM,
+ * ATARIOSB.ROM - root or ATARI folder) are used instead when present: some
+ * early games jump into the original OS and crash on AltirraOS. */
 static void emu_start(void) {
-    static char arg0[] = "atari800", xl[] = "-xl", ntsc[] = "-ntsc", nobasic[] = "-nobasic";
-    char *argv[] = { arg0, xl, ntsc, nobasic, game_file, nullptr };
-    int argc = 5;
+    static char arg0[] = "atari800", xl[] = "-xl", atari[] = "-atari", ntsc[] = "-ntsc",
+                nobasic[] = "-nobasic", osb_opt[] = "-osb_rom", osb_file[] = "/ATARIOSB.ROM",
+                xl_opt[] = "-xlxe_rom", xl_file[] = "/ATARIXL.ROM";
+    char *argv[12];
+    int argc = 0;
+    argv[argc++] = arg0;
+    argv[argc++] = start_as_800 ? atari : xl;
+    argv[argc++] = ntsc;
+    argv[argc++] = nobasic;
+    if (romfs_exists(osb_file)) { argv[argc++] = osb_opt; argv[argc++] = osb_file; }
+    if (romfs_exists(xl_file))  { argv[argc++] = xl_opt;  argv[argc++] = xl_file; }
+    argv[argc++] = game_file;
+    argv[argc] = nullptr;
+    Serial.printf("[a8] %s, OS-B ROM file %s, XL ROM file %s\n",
+                  start_as_800 ? "800" : "800XL", romfs_exists(osb_file) ? "yes" : "no",
+                  romfs_exists(xl_file) ? "yes" : "no");
     a8_stage = "Atari800_Initialise";
     if (!Atari800_Initialise(&argc, argv))
         Serial.println("[a8] Atari800_Initialise failed");
     a8_stage = "initialised";
 }
 
+static volatile bool g_gave_up = false;
+
 static void emu_frame(void) {
     if (g_frames == 0) a8_stage = "first frame";
     a8_frame();
+    if (a8_crashed && !a8_handle_crash(game_file)) g_gave_up = true;
     g_frames++;
 }
 
@@ -121,6 +141,7 @@ void setup() {
 
     const char *path = a8_menu_pick();
     strncpy(game_file, path, sizeof(game_file) - 1);
+    start_as_800 = a8_menu_picked_osb();
     log_file(game_file);
 
     Serial.println("[a8] starting audio");
@@ -145,6 +166,24 @@ void loop() {
         a8_display_stop();
         handoff_volume_write(pico_audio_get_volume_pct());
         handoff_relaunch_arcade();
+    }
+    if (g_gave_up) {
+        /* crashed on both machines: say so, MENU returns to the list */
+        static bool shown = false;
+        if (!shown) {
+            shown = true;
+            a8_display_stop();
+            TFT_eSPI &tft = a8_tft();
+            tft.fillRect(20, 90, 280, 60, TFT_BLACK);
+            tft.drawRect(20, 90, 280, 60, TFT_RED);
+            tft.setTextFont(2);
+            tft.setTextColor(TFT_WHITE, TFT_BLACK);
+            tft.setCursor(32, 100); tft.print("This game crashed the Atari.");
+            tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+            tft.setCursor(32, 122); tft.print("Hold MENU for the game list.");
+        }
+        delay(20);
+        return;
     }
     uint32_t t0 = time_us_32();
     on_emu_stack(emu_frame);

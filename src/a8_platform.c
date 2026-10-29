@@ -12,12 +12,16 @@
  * also paces the emulator to real time, so PLATFORM_Sleep does nothing.
  */
 #include "config.h"
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 #include "atari.h"
+#include "afile.h"
 #include "akey.h"
+#include "memory.h"
 #include "cartridge.h"
+#include "cpu.h"
 #include "input.h"
 #include "log.h"
 #include "platform.h"
@@ -58,10 +62,51 @@ void Log_print(const char *format, ...)
 
 void Log_flushlog(void) {}
 
+/* ---- crashes ----------------------------------------------------------- */
+
+/* When the 6502 hits a crash (CIM) opcode, atari800 "enters the monitor":
+ * Atari800_Exit(TRUE) -> PLATFORM_Exit(TRUE). There's no monitor here, and
+ * returning "carry on" would run the same opcode forever, so (as
+ * libatari800 does) we leave the frame with a longjmp and flag it; main
+ * then restarts the game on another machine (a8_handle_crash). */
+static jmp_buf frame_jmp;
+static volatile int in_frame = FALSE;
+volatile int a8_crashed = FALSE;
+
 int PLATFORM_Exit(int run_monitor)
 {
-	(void)run_monitor;
-	return 0;          /* no monitor: always exit */
+	if (run_monitor && in_frame) {
+		a8_crashed = TRUE;
+		longjmp(frame_jmp, 1);
+	}
+	return 0;          /* no monitor: exit */
+}
+
+/* Restart `path` on a 400/800 (48 KB): the OS-B ROM file if the drive has
+ * one (SYSROM picks a real ROM over AltirraOS when it can), else AltirraOS. */
+static void restart_as_800(const char *path)
+{
+	Atari800_SetMachineType(Atari800_MACHINE_800);
+	MEMORY_ram_size = 48;
+	Atari800_InitialiseMachine();
+	int r = AFILE_OpenFile(path, TRUE, 1, TRUE);
+	if ((r & 0xff) == AFILE_ROM && (r >> 8) > 0) {
+		/* a raw cartridge: pick its type, as Atari800_Initialise does */
+		CARTRIDGE_SetType(&CARTRIDGE_main, UI_SelectCartType(r >> 8));
+		Atari800_Coldstart();
+	}
+}
+
+int a8_handle_crash(const char *path)
+{
+	a8_crashed = FALSE;
+	if (Atari800_machine_type == Atari800_MACHINE_XLXE) {
+		Log_print("6502 crashed on the XL (PC %04X): restarting as an 800", CPU_regPC);
+		restart_as_800(path);
+		return TRUE;
+	}
+	Log_print("6502 crashed on the 800 too (PC %04X)", CPU_regPC);
+	return FALSE;
 }
 
 double PLATFORM_Time(void)
@@ -111,7 +156,13 @@ int PLATFORM_TRIG(int num)
 void a8_frame(void)
 {
 	INPUT_key_code = PLATFORM_Keyboard();
+	if (setjmp(frame_jmp)) {          /* the 6502 crashed: a8_crashed is set */
+		in_frame = FALSE;
+		return;
+	}
+	in_frame = TRUE;
 	Atari800_Frame();
+	in_frame = FALSE;
 	if (Atari800_display_screen)
 		PLATFORM_DisplayScreen();
 }
