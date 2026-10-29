@@ -19,7 +19,7 @@
  *
  * FPS overlay: "E60 S58" (emulator / screen frames a second) is drawn into
  * the snapshot's top-right corner before hashing, so it travels with the
- * picture. Toggled with a8_display_toggle_fps() (the Quad's left side
+ * picture. Toggled with a8_display_toggle_fps() (the Quad's right side
  * button in a game).
  */
 #include <Arduino.h>

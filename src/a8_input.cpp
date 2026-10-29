@@ -9,8 +9,8 @@
  *   Green / Yellow    OPTION / SPACE
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
- *   Side buttons      game list: up / down; in a game, left = FPS overlay
- *                     on / off, right = disk drive 1 off / on (some disk
+ *   Side buttons      game list: up / down; in a game, right = FPS overlay
+ *                     on / off, left = disk drive 1 off / on (some disk
  *                     games won't start while a drive answers)
  */
 #include <Arduino.h>
@@ -123,14 +123,14 @@ bool a8_input_frame(void) {
     else if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
     a8_input = in;
 
-    /* Left side button: FPS overlay on / off; right: disk drive 1 off / on
+    /* Right side button: FPS overlay on / off; left: disk drive 1 off / on
      * (on press; one still held from the menu is ignored) */
     static bool left_was = true, right_was = true;
     bool left = low(PIN_SIDE_UP), right = low(PIN_SIDE_DOWN);
-    if (left && !left_was) a8_display_toggle_fps();
-    if (right && !right_was) {
+    if (right && !right_was) a8_display_toggle_fps();
+    if (left && !left_was) {
         bool on = a8_toggle_drive1();
-        Serial.printf("[input] right side button: disk drive 1 %s%c", on ? "on" : "off", 10);
+        Serial.printf("[input] left side button: disk drive 1 %s%c", on ? "on" : "off", 10);
         a8_display_toast(on ? "DRIVE ON" : "DRIVE OFF");
     }
     left_was = left;
