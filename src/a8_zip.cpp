@@ -47,13 +47,28 @@ const uint8_t *a8_unzipped(size_t *size) {
     return (const uint8_t *)(WINDOW1 + A8_UNZIP_PHYS);
 }
 
+/* Erase + program one sector, then put the flash's fast read mode back.
+ * On the RP2350 the SDK's flash functions re-enter XIP in the boot ROM's
+ * slow default mode (they save/restore only the PSRAM chip select, m[1]):
+ * left like that, everything run from flash afterwards - both cores - ran
+ * many times slower (1-5 fps). All in RAM with interrupts off, so nothing is
+ * fetched from flash until the registers are back. */
+static void __no_inline_not_in_flash_func(program_sector)(uint32_t ofs, const uint8_t *data) {
+    uint32_t timing = qmi_hw->m[0].timing, rcmd = qmi_hw->m[0].rcmd, rfmt = qmi_hw->m[0].rfmt;
+    flash_range_erase(ofs, FLASH_SECTOR_SIZE);
+    flash_range_program(ofs, data, FLASH_SECTOR_SIZE);
+    qmi_hw->m[0].timing = timing;
+    qmi_hw->m[0].rcmd = rcmd;
+    qmi_hw->m[0].rfmt = rfmt;
+    __compiler_memory_barrier();
+}
+
 /* One 4 KB flash sector of the area (core 1 parked: it runs from flash). */
 static void write_sector(uint32_t index, const uint8_t *data) {
     uint32_t ofs = A8_UNZIP_PHYS + index * FLASH_SECTOR_SIZE;
     rp2040.idleOtherCore();
     uint32_t irq = save_and_disable_interrupts();
-    flash_range_erase(ofs, FLASH_SECTOR_SIZE);
-    flash_range_program(ofs, data, FLASH_SECTOR_SIZE);
+    program_sector(ofs, data);
     restore_interrupts(irq);
     rp2040.resumeOtherCore();
 }
