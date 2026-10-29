@@ -39,7 +39,7 @@ the Quad's **arcade slot** (replacing Pico2Arcade there), and
 | Yellow | | SPACE |
 | Green | | OPTION |
 | START / SELECT | START = play | START / SELECT |
-| Side buttons | up / down | |
+| Side buttons | up / down | left: FPS overlay on / off (`E60 S58` = emulator / screen frames a second) |
 | MENU | back to the Quad | hold 1 s: back to the game list |
 
 ## Building

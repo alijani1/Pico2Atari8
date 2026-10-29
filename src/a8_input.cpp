@@ -9,11 +9,13 @@
  *   Green / Yellow    OPTION / SPACE
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
- *   Side buttons      game list: up / down
+ *   Side buttons      game list: up / down; in a game, left = FPS overlay
+ *                     on / off
  */
 #include <Arduino.h>
 #include "a8_input.h"
 #include "a8_platform.h"
+#include "a8_display.h"
 
 extern "C" {
 #include "akey.h"
@@ -90,6 +92,12 @@ bool a8_input_frame(void) {
     if (low(PIN_BLUE))        in.key = AKEY_RETURN;
     else if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
     a8_input = in;
+
+    /* Left side button: FPS overlay on / off (on press) */
+    static bool side_was = true;           /* ignore one still held from the menu */
+    bool side = low(PIN_SIDE_UP);
+    if (side && !side_was) a8_display_toggle_fps();
+    side_was = side;
 
     /* MENU held 1 s: leave the game. A press already down when the game
      * started (from the menu) counts only after it has been released. */

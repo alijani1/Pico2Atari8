@@ -16,6 +16,11 @@
  * SPI at 100 MHz (plus overhead) - too close to the 16.7 ms of a frame -
  * but most of an Atari screen usually stays put. Core 1 hashes each row
  * and sends the runs of rows whose hash differs from what the panel shows.
+ *
+ * FPS overlay: "E60 S58" (emulator / screen frames a second) is drawn into
+ * the snapshot's top-right corner before hashing, so it travels with the
+ * picture. Toggled with a8_display_toggle_fps() (the Quad's left side
+ * button in a game).
  */
 #include <Arduino.h>
 #include <TFT_eSPI.h>
@@ -45,6 +50,68 @@ static volatile uint32_t push_us_sum = 0, push_count = 0;   /* time per push */
 static volatile uint32_t rows_sum = 0;                      /* rows sent per push */
 static uint32_t row_hash[SCR_H];                        /* what the panel shows */
 static bool hashes_valid = false;
+
+/* ---- FPS overlay ----------------------------------------------------- */
+
+static volatile bool fps_on = true;
+static volatile uint32_t frames_emulated = 0;          /* every frame core 0 finished */
+static int fps_emu = 0, fps_scr = 0;                    /* last second's rates */
+
+/* 5 x 7 glyphs, one byte per row, bit 4 = left column. */
+static const uint8_t GLYPH_DIGIT[10][7] = {
+    { 0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E },   /* 0 */
+    { 0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E },   /* 1 */
+    { 0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F },   /* 2 */
+    { 0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E },   /* 3 */
+    { 0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02 },   /* 4 */
+    { 0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E },   /* 5 */
+    { 0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E },   /* 6 */
+    { 0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08 },   /* 7 */
+    { 0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E },   /* 8 */
+    { 0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C },   /* 9 */
+};
+static const uint8_t GLYPH_E[7] = { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F };
+static const uint8_t GLYPH_S[7] = { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E };
+
+static const uint8_t OV_BG = 0x00, OV_FG = 0x0F;       /* Atari black / white */
+static const int OV_SCALE = 2, OV_CHAR_W = 6 * OV_SCALE, OV_H = 7 * OV_SCALE + 4;
+
+static void __not_in_flash_func(ov_glyph)(int x, int y, const uint8_t *g) {
+    for (int r = 0; r < 7; r++)
+        for (int c = 0; c < 5; c++)
+            if (g[r] & (0x10 >> c))
+                for (int dy = 0; dy < OV_SCALE; dy++)
+                    memset(frame8 + (y + r * OV_SCALE + dy) * SCR_W + x + c * OV_SCALE, OV_FG, OV_SCALE);
+}
+
+/* "E60 S58" in the top-right corner of the snapshot. */
+static void __not_in_flash_func(draw_fps)(void) {
+    char txt[12];
+    int e = fps_emu > 99 ? 99 : fps_emu, s = fps_scr > 99 ? 99 : fps_scr;
+    txt[0] = 'E'; txt[1] = '0' + e / 10; txt[2] = '0' + e % 10; txt[3] = ' ';
+    txt[4] = 'S'; txt[5] = '0' + s / 10; txt[6] = '0' + s % 10; txt[7] = 0;
+    const int n = 7, w = n * OV_CHAR_W + 2;
+    const int x0 = SCR_W - w - 2, y0 = 2;
+    for (int y = y0; y < y0 + OV_H; y++) memset(frame8 + y * SCR_W + x0, OV_BG, w);
+    for (int i = 0; i < n; i++) {
+        const uint8_t *g = txt[i] == 'E' ? GLYPH_E : txt[i] == 'S' ? GLYPH_S :
+                           (txt[i] >= '0' && txt[i] <= '9') ? GLYPH_DIGIT[txt[i] - '0'] : nullptr;
+        if (g) ov_glyph(x0 + 2 + i * OV_CHAR_W, y0 + 2, g);
+    }
+}
+
+void a8_display_toggle_fps(void) { fps_on = !fps_on; }
+
+/* Core 1, once a second: the rates for the overlay. */
+static void fps_tick(void) {
+    static uint32_t last_ms = 0, last_emu = 0, last_shown = 0;
+    uint32_t now = millis();
+    if (now - last_ms < 1000) return;
+    uint32_t dt = now - last_ms;
+    fps_emu = (int)((frames_emulated - last_emu) * 1000 / dt);
+    fps_scr = (int)((frames_shown - last_shown) * 1000 / dt);
+    last_emu = frames_emulated; last_shown = frames_shown; last_ms = now;
+}
 
 TFT_eSPI &a8_tft(void) { return tft; }
 
@@ -86,6 +153,7 @@ void a8_display_stop(void) {
 /* Core 0, end of each emulated frame. */
 extern "C" void a8_display_frame(void) {
     if (!running) return;
+    frames_emulated++;
     if (frame_ready) { frames_skipped++; return; }   /* core 1 still busy */
     const uint8_t *src = (const uint8_t *)Screen_atari + SRC_X;
     for (int y = 0; y < SCR_H; y++)
@@ -121,6 +189,7 @@ static void __not_in_flash_func(push_rows)(int y0, int n) {
 static void __not_in_flash_func(push_frame)(void) {
     uint32_t t0 = time_us_32();
     uint32_t sent = 0;
+    if (fps_on) draw_fps();
     tft.startWrite();
     int y = 0;
     while (y < SCR_H) {
@@ -147,6 +216,7 @@ static void __not_in_flash_func(push_frame)(void) {
 }
 
 void a8_display_core1_loop(void) {
+    if (running) fps_tick();
     if (running && frame_ready) {
         push_frame();
         frame_ready = false;
