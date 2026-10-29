@@ -25,9 +25,10 @@ the Quad's **arcade slot** (replacing Pico2Arcade there), and
 
 1. Build and flash: `pio run -e quad -t upload` (writes only the arcade
    slot at 0x360000; the Quad firmware and its ROM drive are left alone).
-2. Copy games onto the Quad's **ARCADE ROMS** drive (**Mini-Games → Arcade
-   ROM Drive**): in the root or an `ATARI` folder.
-3. **Mini-Games → Arcade Games** opens the game list.
+2. **Mini-Games → Arcade Games** opens the game list.
+3. To copy games: pick **ROM Drive (USB)** at the end of the list. The
+   Quad shows up on your computer as the **ARCADE ROMS** drive; copy the
+   files into the root or an `ATARI` folder, eject, and press MENU or START.
 
 | Control | In the game list | In a game |
 |---|---|---|
