@@ -50,13 +50,13 @@ the Quad's **arcade slot** (replacing Pico2Arcade there), and
 
 | Control | In the game list | In a game |
 |---|---|---|
-| Ports 1–4 | port 1: move / fire = play | Atari joysticks 1–4 (XL/XE games read 1–2) |
+| Ports 1–4 | port 1: move / fire = play | Atari joysticks 1–4 (on an 800XL only 1–2 exist: start four-player games such as M.U.L.E. with SELECT) |
 | Joy-Con stick / click | move / play | joystick 1 / fire 1 |
 | Red | play | fire 1 |
 | Blue | | RETURN |
 | Yellow | | SPACE |
 | Green | | OPTION |
-| START / SELECT | START = play | START / SELECT |
+| START / SELECT | START = play; SELECT = play as a 400/800 (four joysticks, OS-B) | START / SELECT |
 | Side buttons | up / down | right: FPS overlay on / off (`E60 S58` = emulator / screen frames a second); left: disk drive 1 off / on |
 | MENU | back to the Quad | hold 1 s: back to the game list |
 

@@ -12,6 +12,7 @@
 #define A8M_RIGHT 0x08
 #define A8M_OK    0x10
 #define A8M_BACK  0x20
+#define A8M_ALT   0x40     /* SELECT: start the game as a 400/800 */
 
 void    a8_input_init(void);
 /* Fill a8_input for the next frame. True = MENU held: leave the game. */

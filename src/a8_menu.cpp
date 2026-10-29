@@ -5,7 +5,8 @@
  * .xfd disk images and .zip files holding one of those (a8_zip.cpp), by
  * their long names, sorted, then "ROM Drive (USB)",
  * which reboots into USB drive mode to copy games over (pico_drive.cpp).
- * Up/down scroll, fire / START picks, MENU goes back to the Quad.
+ * Up/down scroll, fire / START picks (an 800XL), SELECT picks as a
+ * 400/800 (four joysticks, OS-B), MENU goes back to the Quad.
  */
 #include <Arduino.h>
 #include <strings.h>
@@ -29,8 +30,8 @@ static const char *kind_of(const char *path) {
     if (!strcasecmp(dot, ".car") || !strcasecmp(dot, ".rom") || !strcasecmp(dot, ".bin")) return "CART";
     return "XEX";
 }
-static bool picked_osb = false;
-bool a8_menu_picked_osb(void) { return picked_osb; }
+static bool picked_800 = false;
+bool a8_menu_picked_800(void) { return picked_800; }
 static Game games[MAX_GAMES + 1];
 static int found = 0;                  /* games on the drive; the row after them is the drive */
 static int game_count = 0;
@@ -60,13 +61,13 @@ static bool add_game(const char *path, const char *display, uint32_t size, void 
     Game &g = games[game_count++];
     strncpy(g.path, path, sizeof(g.path) - 1);
     g.path[sizeof(g.path) - 1] = 0;
-    /* "-osb" / "(OS-B)" in the name: needs a 400/800 with OS-B */
+    /* "-osb" / "(OS-B)" / "[400-800]" in the name: a 400/800 game */
     char low[64];
     size_t n = strlen(display);
     if (n >= sizeof(low)) n = sizeof(low) - 1;
     for (size_t i = 0; i < n; i++) low[i] = (char)tolower((unsigned char)display[i]);
     low[n] = 0;
-    g.osb = strstr(low, "osb") != nullptr || strstr(low, "os-b") != nullptr;
+    g.osb = strstr(low, "osb") || strstr(low, "os-b") || strstr(low, "400-800");
     strncpy(g.kind, kind_of(path), sizeof(g.kind) - 1);
     g.kind[sizeof(g.kind) - 1] = 0;
     Serial.printf("[menu] %-22s %-5s %7lu  %s\n", path, g.kind, (unsigned long)size, display);
@@ -98,7 +99,7 @@ static void draw_frame(void) {
     tft.drawFastHLine(0, 25, 320, COL_HINT);
     tft.setTextColor(COL_HINT, COL_BG);
     tft.setCursor(8, 222);
-    tft.print("FIRE / START: play     MENU: back");
+    tft.print("FIRE: play   SELECT: as 400/800   MENU: back");
 }
 
 static void draw_row(int idx, int top, bool sel) {
@@ -167,7 +168,7 @@ const char *a8_menu_pick(void) {
     /* Wait for everything to be released (the press that started us). */
     for (uint32_t t0 = millis(); a8_input_menu() && millis() - t0 < 1000; ) delay(10);
 
-    uint8_t prev = A8M_OK | A8M_BACK;   /* a button still down isn't a new press */
+    uint8_t prev = A8M_OK | A8M_BACK | A8M_ALT;   /* a button still down isn't a new press */
     uint32_t held_since = 0, last_repeat = 0;
     /* A self-centring stick overshoots when let go: UP released can read as
      * a short DOWN. A new press of the opposite direction within this long
@@ -217,12 +218,13 @@ const char *a8_menu_pick(void) {
                 draw_row(sel, top, true);
                 draw_counter(sel);
             }
-            if (pressed & A8M_OK) {
-                while (a8_input_menu() & A8M_OK) delay(10);
+            if (pressed & (A8M_OK | A8M_ALT)) {
+                bool as_800 = (pressed & A8M_ALT) != 0;
+                while (a8_input_menu() & (A8M_OK | A8M_ALT)) delay(10);
                 if (sel == found) pico_drive_request();      /* reboots into drive mode */
-                picked_osb = games[sel].osb;
+                picked_800 = as_800 || games[sel].osb;
                 Serial.printf("[menu] run %s (%s)%s\n", games[sel].path, games[sel].name,
-                              picked_osb ? " - OS-B game" : "");
+                              picked_800 ? " as a 400/800" : "");
                 return games[sel].path;
             }
         }

@@ -157,5 +157,6 @@ uint8_t a8_input_menu(void) {
     if (d & A8_RIGHT) b |= A8M_RIGHT;
     if (low(PORT_PINS[0][4]) || low(PIN_RED) || low(PIN_CLICK) || low(PIN_START)) b |= A8M_OK;
     if (low(PIN_MENU)) b |= A8M_BACK;
+    if (low(PIN_SELECT)) b |= A8M_ALT;
     return b;
 }

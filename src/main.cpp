@@ -142,7 +142,7 @@ void setup() {
 
     const char *path = a8_menu_pick();
     strncpy(game_file, path, sizeof(game_file) - 1);
-    start_as_800 = a8_menu_picked_osb();
+    start_as_800 = a8_menu_picked_800();
     log_file(game_file);
 
     /* A zip: unpack its game into the flash area first (before the audio
@@ -169,7 +169,7 @@ void setup() {
         char low[64];
         size_t n = strlen(inner);
         for (size_t i = 0; i <= n; i++) low[i] = (char)tolower((unsigned char)inner[i]);
-        if (strstr(low, "osb") || strstr(low, "os-b")) start_as_800 = true;
+        if (strstr(low, "osb") || strstr(low, "os-b") || strstr(low, "400-800")) start_as_800 = true;
     }
 
     Serial.println("[a8] starting audio");
