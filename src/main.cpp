@@ -4,6 +4,12 @@
  * Core 0: the game list, then the emulator (atari800, paced by the audio
  * ring). Core 1: pushes each finished frame to the TFT (a8_display.cpp).
  *
+ * The emulator runs on its own 32 KB stack (emu_stack): setup()/loop() get
+ * core 0's 4 KB scratch bank, and atari800 goes far deeper than that - it
+ * keeps FILENAME_MAX (1 KB) path buffers on the stack, several calls deep,
+ * when it starts a machine (tools/host measured ~29 KB on the PC, where
+ * FILENAME_MAX is 4 KB). Overflowing it froze the Quad when a game started.
+ *
  * Chain-booted by the Quad firmware (see platformio.ini): MENU in the game
  * list returns to the Quad; MENU held in a game reboots into the game list
  * (pico_handoff), which also starts each game from a clean machine.
@@ -29,6 +35,66 @@ static volatile bool g_emulating = false;
 extern "C" uint64_t a8_time_us(void) { return time_us_64(); }
 extern "C" void a8_idle(void) { tight_loop_contents(); }
 
+/* ---- the emulator's stack ------------------------------------------- */
+
+static const uint32_t EMU_STACK_WORDS = 8192;           /* 32 KB */
+static const uint32_t STACK_FILL = 0xA8A8A8A8u;
+static uint32_t emu_stack[EMU_STACK_WORDS] __attribute__((aligned(8)));
+
+/* Run fn() with the stack pointer on emu_stack, then switch back. r4 keeps
+ * the old SP (callee-saved, so fn leaves it alone). */
+static void __attribute__((noinline)) on_emu_stack(void (*fn)(void)) {
+    void *top = emu_stack + EMU_STACK_WORDS;
+    asm volatile(
+        "mov r4, sp\n"
+        "mov sp, %1\n"
+        "blx %0\n"
+        "mov sp, r4\n"
+        :
+        : "r"(fn), "r"(top)
+        : "r0", "r1", "r2", "r3", "r4", "r12", "lr", "memory", "cc");
+}
+
+/* Bytes of emu_stack ever used (the fill pattern still intact below). */
+static uint32_t emu_stack_used(void) {
+    uint32_t i = 0;
+    while (i < EMU_STACK_WORDS && emu_stack[i] == STACK_FILL) i++;
+    return (EMU_STACK_WORDS - i) * 4;
+}
+
+/* ---- start-up --------------------------------------------------------- */
+
+static char game_file[32];
+
+/* An 800XL with 64 KB, NTSC, BASIC off (as if OPTION were held at power-on),
+ * running the chosen file. AltirraOS is built in. */
+static void emu_start(void) {
+    static char arg0[] = "atari800", xl[] = "-xl", ntsc[] = "-ntsc", nobasic[] = "-nobasic";
+    char *argv[] = { arg0, xl, ntsc, nobasic, game_file, nullptr };
+    int argc = 5;
+    if (!Atari800_Initialise(&argc, argv))
+        Serial.println("[a8] Atari800_Initialise failed");
+}
+
+static void emu_frame(void) {
+    Atari800_Frame();
+    /* As in upstream's own main loops: the core leaves showing the frame
+     * to the platform. */
+    if (Atari800_display_screen) PLATFORM_DisplayScreen();
+}
+
+/* What the drive gives for the file (rules out a wrong drive offset). */
+static void log_file(const char *path) {
+    const uint8_t *p;
+    size_t size;
+    if (romfs_map(path, &p, &size)) {
+        Serial.printf("[a8] %s: %u bytes in place, starts %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                      path, (unsigned)size, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+    } else {
+        Serial.printf("[a8] %s: fragmented (copied to RAM on open)\n", path);
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     int vol = handoff_volume_read();
@@ -40,17 +106,13 @@ void setup() {
     if (pico_drive_requested()) pico_drive_run();      /* never returns */
 
     const char *path = a8_menu_pick();
+    strncpy(game_file, path, sizeof(game_file) - 1);
+    log_file(game_file);
 
-    /* An 800XL with 64 KB, NTSC, BASIC off (as if OPTION were held at
-     * power-on), running the chosen file. AltirraOS is built in. */
-    static char arg0[] = "atari800", xl[] = "-xl", ntsc[] = "-ntsc", nobasic[] = "-nobasic";
-    static char file[32];
-    strncpy(file, path, sizeof(file) - 1);
-    char *argv[] = { arg0, xl, ntsc, nobasic, file, nullptr };
-    int argc = 5;
-    if (!Atari800_Initialise(&argc, argv)) {
-        Serial.println("[a8] Atari800_Initialise failed");
-    }
+    for (uint32_t i = 0; i < EMU_STACK_WORDS; i++) emu_stack[i] = STACK_FILL;
+    on_emu_stack(emu_start);
+    Serial.printf("[a8] started, emulator stack %lu bytes used, heap free %d bytes\n",
+                  (unsigned long)emu_stack_used(), rp2040.getFreeHeap());
     a8_display_start();
     pico_audio_amp_on();
     g_emulating = true;
@@ -65,10 +127,7 @@ void loop() {
         handoff_relaunch_arcade();
     }
     uint32_t t0 = time_us_32();
-    Atari800_Frame();
-    /* As in upstream's own main loops: the core leaves showing the frame
-     * to the platform. */
-    if (Atari800_display_screen) PLATFORM_DisplayScreen();
+    on_emu_stack(emu_frame);
     static uint32_t busy = 0, frames = 0, last = 0;
     busy += time_us_32() - t0;
     frames++;
@@ -76,9 +135,10 @@ void loop() {
     if (now - last >= 5000) {
         uint32_t shown, skipped;
         a8_display_stats(&shown, &skipped);
-        Serial.printf("[a8] %lu frames, %.2f ms/frame (incl. audio wait), shown %lu skipped %lu\n",
+        Serial.printf("[a8] %lu frames, %.2f ms/frame (incl. audio wait), shown %lu skipped %lu, stack %lu\n",
                       (unsigned long)frames, busy / 1000.0f / frames,
-                      (unsigned long)shown, (unsigned long)skipped);
+                      (unsigned long)shown, (unsigned long)skipped,
+                      (unsigned long)emu_stack_used());
         busy = frames = 0;
         last = now;
     }

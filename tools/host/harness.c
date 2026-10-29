@@ -54,6 +54,20 @@ void *__wrap_realloc(void *p, size_t n) {
 }
 void __wrap_free(void *p) { if (p) heap_now -= block_size(p); __real_free(p); }
 
+/* ---- stack depth (build with EXTRA_CFLAGS=-finstrument-functions) ------ */
+
+static char *stack_top;
+static size_t stack_max;
+static const char *stack_max_at = "";
+__attribute__((no_instrument_function))
+void __cyg_profile_func_enter(void *fn, void *site) {
+    (void)fn; (void)site;
+    char here;
+    if (stack_top && (size_t)(stack_top - &here) > stack_max) stack_max = (size_t)(stack_top - &here);
+}
+__attribute__((no_instrument_function))
+void __cyg_profile_func_exit(void *fn, void *site) { (void)fn; (void)site; }
+
 /* ---- the Pico side, stubbed ------------------------------------------- */
 
 static long frame_no;
@@ -110,6 +124,7 @@ int main(int argc, char **argv) {
     long start_at = getenv("START_AT") ? atol(getenv("START_AT")) : -1;
     long fire_at = getenv("FIRE_AT") ? atol(getenv("FIRE_AT")) : -1;
 
+    char top; stack_top = &top;
     /* as main.cpp */
     char *a8argv[] = { "atari800", "-xl", "-ntsc", "-nobasic", argv[1], NULL };
     int a8argc = 5;
@@ -127,6 +142,7 @@ int main(int argc, char **argv) {
         if (Atari800_display_screen) PLATFORM_DisplayScreen();   /* as main.cpp */
     }
     if (same_count > 30) printf("  (frame unchanged for the last %d frames)\n", same_count);
+    printf("deepest stack: %zu bytes below main (x86-64)\n", stack_max);
     printf("done: %ld frames, heap now %zu KB, peak %zu KB\n", frames, heap_now / 1024, heap_peak / 1024);
     save_ppm(out);
     return 0;
