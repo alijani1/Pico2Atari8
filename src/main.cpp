@@ -122,6 +122,10 @@ void setup() {
     strncpy(game_file, path, sizeof(game_file) - 1);
     log_file(game_file);
 
+    Serial.println("[a8] starting audio");
+    pico_audio_init(A8_SAMPLE_RATE);
+    Serial.println("[a8] audio running");
+
     for (uint32_t i = 0; i < EMU_STACK_WORDS; i++) emu_stack[i] = STACK_FILL;
     Serial.printf("[a8] heap free %d bytes before start\n", rp2040.getFreeHeap());
     g_heartbeat = true;

@@ -107,7 +107,6 @@ void PLATFORM_DisplayScreen(void)
 
 /* ---- sound ------------------------------------------------------------- */
 
-#define A8_SAMPLE_RATE 22050
 #define A8_MAX_FRAME_SAMPLES 512
 
 int Sound_enabled = TRUE;
@@ -115,10 +114,11 @@ static int sound_paused = FALSE;
 static int16_t sound_buf[A8_MAX_FRAME_SAMPLES];
 static unsigned sound_frac;          /* samples owed to the next frame, x 1000 */
 
+/* The PWM output itself is started by main.cpp before the emulator (as
+ * Pico2Arcade does, on the normal stack); here there's nothing left to do. */
 int Sound_Initialise(int *argc, char *argv[])
 {
 	(void)argc; (void)argv;
-	pico_audio_init(A8_SAMPLE_RATE);
 	return TRUE;
 }
 

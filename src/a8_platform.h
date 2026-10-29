@@ -13,6 +13,9 @@
 extern "C" {
 #endif
 
+/* POKEY output rate (the PWM ring runs at it) */
+#define A8_SAMPLE_RATE 22050
+
 /* Stick bits (set = held) */
 #define A8_UP    0x01
 #define A8_DOWN  0x02

@@ -35,13 +35,16 @@ extern "C" void pico_audio_init(int sample_rate) {
     if (!g_started) {
 #ifdef PICO_BOARD_TABLE
         if (AUDIO_PIN < 0) return;                 /* no audio wired */
+        Serial.printf("[audio] PWMAudio on GPIO %d\n", AUDIO_PIN);
         g_audio_p = new PWMAudio(AUDIO_PIN, /*stereo=*/false);
 #endif
         // 4 buffers × 256 words = 1024 samples. ~42ms of latency at 24kHz;
         // small enough that game→audio lag stays imperceptible, large enough
         // that we survive a few missed refills.
         g_audio.setBuffers(4, 256);
-        g_audio.begin(sample_rate);
+        Serial.printf("[audio] begin %d Hz\n", sample_rate);
+        bool ok = g_audio.begin(sample_rate);
+        Serial.printf("[audio] begin %s\n", ok ? "ok" : "FAILED");
         if (AMP_EN_PIN >= 0) {
             pinMode(AMP_EN_PIN, OUTPUT);
             digitalWrite(AMP_EN_PIN, LOW);    // amp OFF until game starts
