@@ -15,6 +15,7 @@
 #include "a8_platform.h"
 #include "pico_audio.h"
 #include "pico_board.h"
+#include "pico_drive.h"
 #include "pico_handoff.h"
 #include "pico_romfs.h"
 
@@ -35,6 +36,7 @@ void setup() {
     romfs_init();
     a8_input_init();
     a8_display_init();
+    if (pico_drive_requested()) pico_drive_run();      /* never returns */
 
     const char *path = a8_menu_pick();
 

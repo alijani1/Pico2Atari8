@@ -2,8 +2,10 @@
  *
  * Lists the Atari files on the ARCADE ROMS drive (root, ATARI and ROMS
  * folders): .xex .com .exe executables, .car .rom .bin cartridges and .atr
- * .xfd disk images, by their long names, sorted. Up/down scroll (left/right
- * a page), fire / START runs, MENU goes back to the Quad.
+ * .xfd disk images, by their long names, sorted, then "ROM Drive (USB)",
+ * which reboots into USB drive mode to copy games over (pico_drive.cpp).
+ * Up/down scroll (left/right a page), fire / START picks, MENU goes back
+ * to the Quad.
  */
 #include <Arduino.h>
 #include <strings.h>
@@ -12,10 +14,12 @@
 #include "a8_input.h"
 #include "pico_romfs.h"
 #include "pico_handoff.h"
+#include "pico_drive.h"
 
-static const int MAX_GAMES = 128;
+static const int MAX_GAMES = 128;      /* + the ROM drive row */
 struct Game { char path[24]; char name[40]; };
-static Game games[MAX_GAMES];
+static Game games[MAX_GAMES + 1];
+static int found = 0;                  /* games on the drive; the row after them is the drive */
 static int game_count = 0;
 
 static bool supported(const char *path) {
@@ -73,6 +77,7 @@ static void draw_row(int idx, int top, bool sel) {
     tft.setTextFont(2);
     tft.setTextColor(COL_TEXT, bg);
     tft.setCursor(12, y + 1);
+    if (idx == found) tft.setTextColor(sel ? COL_TEXT : 0x07FF, bg);   /* the drive row */
     tft.print(games[idx].name);
 }
 
@@ -82,7 +87,7 @@ static void draw_counter(int sel) {
     tft.setTextColor(COL_HINT, COL_BG);
     tft.fillRect(240, 6, 80, 16, COL_BG);
     tft.setCursor(250, 6);
-    tft.printf("%d / %d", sel + 1, game_count);
+    if (sel < found) tft.printf("%d / %d", sel + 1, found);
 }
 
 static void draw_list(int top, int sel) {
@@ -94,13 +99,13 @@ static void draw_empty(void) {
     TFT_eSPI &tft = a8_tft();
     tft.setTextFont(2);
     tft.setTextColor(COL_TEXT, COL_BG);
-    int y = 60;
+    int y = LIST_Y + ROW_H + 24;
     tft.setCursor(12, y);       tft.print("No Atari games found.");
     tft.setTextColor(COL_HINT, COL_BG);
-    tft.setCursor(12, y += 28); tft.print("Copy .xex .car .rom or .atr files to");
-    tft.setCursor(12, y += 18); tft.print("the ARCADE ROMS drive (root or an");
-    tft.setCursor(12, y += 18); tft.print("ATARI folder): on the Quad, open");
-    tft.setCursor(12, y += 18); tft.print("Mini-Games > Arcade ROM Drive.");
+    tft.setCursor(12, y += 24); tft.print("Pick ROM Drive (USB) above and copy");
+    tft.setCursor(12, y += 18); tft.print(".xex .car .rom or .atr files onto the");
+    tft.setCursor(12, y += 18); tft.print("drive from your computer (root or");
+    tft.setCursor(12, y += 18); tft.print("an ATARI folder).");
 }
 
 /* ---- the list -------------------------------------------------------- */
@@ -109,12 +114,16 @@ const char *a8_menu_pick(void) {
     game_count = 0;
     romfs_list(add_game, nullptr);
     qsort(games, game_count, sizeof(Game), by_name);
-    Serial.printf("[menu] %d games\n", game_count);
+    found = game_count;
+    Serial.printf("[menu] %d games\n", found);
+    Game &drive = games[game_count++];
+    drive.path[0] = 0;
+    strcpy(drive.name, "ROM Drive (USB)");
 
     draw_frame();
-    if (game_count == 0) draw_empty();
     int sel = 0, top = 0;
-    if (game_count) draw_list(top, sel);
+    draw_list(top, sel);
+    if (found == 0) draw_empty();
 
     /* Wait for everything to be released (the press that started us). */
     for (uint32_t t0 = millis(); a8_input_menu() && millis() - t0 < 1000; ) delay(10);
@@ -156,6 +165,7 @@ const char *a8_menu_pick(void) {
             }
             if (pressed & A8M_OK) {
                 while (a8_input_menu() & A8M_OK) delay(10);
+                if (sel == found) pico_drive_request();      /* reboots into drive mode */
                 Serial.printf("[menu] run %s (%s)\n", games[sel].path, games[sel].name);
                 return games[sel].path;
             }
