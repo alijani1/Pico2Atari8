@@ -55,13 +55,13 @@ and on, like the switch on a real drive: let the game load, type DRV
 
 ## Quad Ultimate CX
 
-Until the Quad firmware gets its own Atari 8-bit slot, Pico2Atari8 goes into
-the Quad's **arcade slot** (replacing Pico2Arcade there), and
-**Mini-Games → Arcade Games** starts it.
+From Quad firmware 1.1 (CX and CX-W), Pico2Atari8 has its own slot beside
+Pico2Arcade, comes with the Quad release, and shares its ARCADE ROMS drive.
 
-1. Build and flash: `pio run -e quad -t upload` (writes only the arcade
-   slot at 0x360000; the Quad firmware and its ROM drive are left alone).
-2. **Mini-Games → Arcade Games** opens the game list.
+1. To flash just this image: `pio run -e quad -t upload` (writes only the
+   Atari 8-bit slot at 0x260000; the Quad firmware, the arcade and the ROM
+   drive are left alone).
+2. **Mini-Games → Atari 8-bit** opens the game list.
 3. To copy games: pick **ROM Drive (USB)** at the end of the list. The
    Quad shows up on your computer as the **ARCADE ROMS** drive; copy the
    files into the root or an `ATARI` folder, eject, and press MENU or START.

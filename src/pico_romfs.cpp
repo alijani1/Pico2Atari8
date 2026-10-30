@@ -41,7 +41,7 @@ extern "C" const char *romfs_where(void) { return "/roms/ on the SD card"; }
 /* Hosted builds: where the host's ROM drive is if it didn't pass it (set per
  * env in platformio.ini; defaults = the Quad). */
 #ifndef PICO_HOST_FAT_WINDOW_OFS
-#define PICO_HOST_FAT_WINDOW_OFS 0x60000u    /* Quad: 0x3C0000 - 0x360000 */
+#define PICO_HOST_FAT_WINDOW_OFS 0x160000u   /* Quad 1.1: 0x3C0000 - 0x260000 */
 #endif
 #ifndef PICO_HOST_FAT_PHYS
 #define PICO_HOST_FAT_PHYS       0x3C0000u   /* Quad: physical flash offset */

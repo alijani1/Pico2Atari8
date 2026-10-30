@@ -190,5 +190,25 @@ the `duo5200` env** (`A8_UNZIP_PHYS` / `A8_SETTINGS_PHYS`), not scratch
 registers: [0..3] are taken and [4..7] belong to the SDK's reboot.
 
 Not yet:
-- the 5200 keypads (0-9 * #) as keys;
-- the Quad (still in the arcade slot).
+- the 5200 keypads (0-9 * #) as keys.
+
+## Status (2026-10-30): Quad CX / CX-W 1.1
+
+The plan above (`maximum_size = 0x2C0000`, slot at `0x2C0000`) would have
+moved the Quad's LittleFS, which sits just below `maximum_size`, and the
+CX-W's 512 KB LittleFS starts at `0x2DF000`, over the old unzip and
+settings areas. So `maximum_size` stays `0x360000` and the Atari areas go
+below the CX-W's LittleFS, the same on both variants (one image):
+
+| Physical | Size | Use |
+|---|---|---|
+| `0x000000 .. 0x23FFFF` | 2.25 MB | Quad firmware (`build_release.py` `FIRMWARE_LIMITS`) |
+| `0x240000 .. 0x25FFFF` | 128 KB | Pico2Atari8 unzip area |
+| `0x260000 .. 0x2BFFFF` | 384 KB | Atari 8-bit slot |
+| `0x2C0000 .. 0x2C0FFF` | 4 KB | Pico2Atari8 settings |
+| `0x2C1000 ..` | | unused, up to LittleFS (CX-W `0x2DF000`, CX `0x347000`) |
+| `0x360000 .. 0x3BFFFF` | 384 KB | arcade slot (unchanged) |
+| `0x3C0000 .. 0x3FFFFF` | 256 KB | ARCADE ROMS drive (unchanged) |
+
+The chain-boot window runs `0x260000 .. 0x3FFFFF`; the ROM drive is at
+window offset `0x160000`. `music2` was dropped on the Quad too.

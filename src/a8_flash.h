@@ -6,13 +6,13 @@
 #include <stdint.h>
 
 #ifndef A8_UNZIP_PHYS
-#define A8_UNZIP_PHYS    0x320000u   /* Quad: free flash below its LittleFS (platformio.ini) */
+#define A8_UNZIP_PHYS    0x240000u   /* Quad 1.1: reserved below CX-W's LittleFS (platformio.ini) */
 #endif
 #ifndef A8_UNZIP_SIZE
 #define A8_UNZIP_SIZE    0x20000u    /* 128 KB */
 #endif
 #ifndef A8_SETTINGS_PHYS
-#define A8_SETTINGS_PHYS 0x340000u   /* Quad: 4 KB after the unzip area (docs/FLASH_LAYOUT.md) */
+#define A8_SETTINGS_PHYS 0x2C0000u   /* Quad 1.1: 4 KB after the Atari 8-bit slot (docs/FLASH_LAYOUT.md) */
 #endif
 
 void a8_flash_init(void);                                  /* map window 1 (at boot) */
