@@ -8,7 +8,8 @@
  *   Red / Blue        fire 1 / RETURN
  *   Green / Yellow    OPTION / SPACE
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
- *   MENU              hold 1 s in a game: back to the game list
+ *   MENU              in a game: tap = next colour palette, hold 1 s =
+ *                     back to the game list
  *   Side buttons      game list: up / down; in a game, right = FPS overlay
  *                     on / off, left = disk drive 1 off / on (some disk
  *                     games won't start while a drive answers)
@@ -105,6 +106,13 @@ static uint8_t port_dirs(int n) {
 
 static uint32_t menu_since = 0;
 static bool menu_seen_up = false;
+static bool menu_tapped = false;
+
+bool a8_input_menu_tapped(void) {
+    bool t = menu_tapped;
+    menu_tapped = false;
+    return t;
+}
 
 bool a8_input_frame(void) {
     a8_input_t in;
@@ -139,7 +147,12 @@ bool a8_input_frame(void) {
     /* MENU held 1 s: leave the game. A press already down when the game
      * started (from the menu) counts only after it has been released. */
     bool m = low(PIN_MENU);
-    if (!m) { menu_seen_up = true; menu_since = 0; return false; }
+    if (!m) {
+        uint32_t now = millis();
+        if (menu_seen_up && menu_since && now - menu_since < 1000) menu_tapped = true;
+        menu_seen_up = true; menu_since = 0;
+        return false;
+    }
     if (!menu_seen_up) return false;
     uint32_t now = millis();
     if (!menu_since) menu_since = now | 1;

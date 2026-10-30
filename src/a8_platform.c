@@ -18,6 +18,7 @@
 #include <string.h>
 #include "atari.h"
 #include "afile.h"
+#include "util.h"
 #include "akey.h"
 #include "memory.h"
 #include "cartridge.h"
@@ -29,6 +30,8 @@
 #include "sound.h"
 #include "ui.h"
 #include "screen.h"
+#include "colours.h"
+#include "colours_ntsc.h"
 #include "sio.h"
 #include "a8_platform.h"
 #include "pico_audio.h"
@@ -273,6 +276,62 @@ int UI_SelectCartType(int k)
 int UI_SelectCartTypeBetween(int *types)
 {
 	return types && types[0] ? types[0] : CARTRIDGE_NONE;
+}
+
+/* ---- palettes ------------------------------------------------------------
+ * atari800's generated NTSC palette with different settings, plus a
+ * PALETTE.ACT file (768 bytes R,G,B - what Altirra and other emulators
+ * export) when the drive has one. green_pct trims the panel's green.
+ *
+ * The stock palette draws $1x "gold" with more green than red (104,123,8)
+ * and its reds brownish. Rotating the hues (tint +0.10, colour delay 25)
+ * was the best fit to the GTIA colour names over a sweep of tint / delay
+ * (tools/host, PALETTE=): gold (160,150,0), red $46 (183,57,111) - all 15
+ * hues turn together, so gold can't get warmer without red turning pinker. */
+static const struct {
+	int preset;
+	double saturation, tint, delay;
+	int green_pct;
+} palettes[] = {
+	{ COLOURS_PRESET_STANDARD, 0.0,  0.0,  26.8, 100 },   /* 1 atari800 standard */
+	{ COLOURS_PRESET_VIBRANT,  0.26, 0.0,  26.8, 100 },   /* 2 vibrant */
+	{ COLOURS_PRESET_VIBRANT,  0.6,  0.0,  26.8, 100 },   /* 3 vibrant, more saturation */
+	{ COLOURS_PRESET_VIBRANT,  0.6,  0.10, 25.0, 100 },   /* 4 ... hues turned: gold, red */
+	{ COLOURS_PRESET_VIBRANT,  0.6,  0.10, 25.0,  85 },   /* 5 ... and less green */
+};
+#define N_PALETTES ((int)(sizeof(palettes) / sizeof(palettes[0])))
+#define A8_PALETTE_FILE "/PALETTE.ACT"
+static int palette_file_ok = -1;     /* -1 not checked yet */
+
+int a8_palette_count(void)
+{
+	if (palette_file_ok < 0) {
+		FILE *f = fopen(A8_PALETTE_FILE, "rb");
+		palette_file_ok = f != NULL;
+		if (f) fclose(f);
+	}
+	return N_PALETTES + palette_file_ok;
+}
+
+/* n = 1 .. a8_palette_count(); returns the panel green gain (%). */
+int a8_set_palette(int n)
+{
+	if (n < 1 || n > a8_palette_count()) n = 1;
+	if (n > N_PALETTES) {                              /* the file */
+		Util_strlcpy(COLOURS_NTSC_external.filename, A8_PALETTE_FILE,
+		             sizeof(COLOURS_NTSC_external.filename));
+		COLOURS_NTSC_external.adjust = FALSE;
+		if (!COLOURS_EXTERNAL_Read(&COLOURS_NTSC_external)) n = 1;
+		else { Colours_Update(); Log_print("palette %d: %s", n, A8_PALETTE_FILE); return 100; }
+	}
+	COLOURS_EXTERNAL_Remove(&COLOURS_NTSC_external);
+	Colours_SetPreset((Colours_preset_t)palettes[n - 1].preset);
+	Colours_setup->saturation = palettes[n - 1].saturation;
+	Colours_setup->hue = palettes[n - 1].tint;
+	Colours_setup->color_delay = palettes[n - 1].delay;
+	Colours_Update();
+	Log_print("palette %d", n);
+	return palettes[n - 1].green_pct;
 }
 
 /* Disk drive 1 off (as if switched off: it no longer answers) or back on. */

@@ -9,12 +9,12 @@ TFT_eSPI &a8_tft(void);
 uint8_t *a8_display_scratch(size_t *size);
 
 void a8_display_init(void);        /* panel on, landscape, DMA (core 0, at boot) */
-void a8_display_palette(void);     /* Colours_table -> panel colours */
-void a8_display_start(void);       /* hand the panel to core 1 for the game */
+void a8_display_palette(int green_pct);   /* Colours_table -> panel colours (green trimmed) */
+void a8_display_start(int green_pct);     /* hand the panel to core 1 for the game */
 void a8_display_stop(void);        /* ... and take it back */
 void a8_display_core1_loop(void);  /* core 1: send a frame when one is ready */
-void a8_display_toggle_fps(void);  /* "E60 S58" overlay on / off (on at start) */
-void a8_display_toast(const char *text);   /* message top-left for 2 s (digits, D E F I N O R S V) */
+void a8_display_toggle_fps(void);  /* "E60 S58" overlay on / off (off at start) */
+void a8_display_toast(const char *text);   /* message top-left for 2 s (digits, C D E F I L N O R S U V) */
 void a8_display_stats(uint32_t *shown, uint32_t *skipped);
 /* Average push time (us) and rows sent per push, since the last call. */
 uint32_t a8_display_push_us(uint32_t *avg_rows);

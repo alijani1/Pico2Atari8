@@ -85,6 +85,36 @@ static bool start_as_800 = false;
  * AltirraOS is built in; real Atari ROM files on the drive (ATARIXL.ROM,
  * ATARIOSB.ROM - root or ATARI folder) are used instead when present: some
  * early games jump into the original OS and crash on AltirraOS. */
+/* Colour palette: kept in the handoff flags (bits 4-6, the palette number;
+ * 0 = default), which the Quad saves along with the volume. */
+static const int PALETTE_DEFAULT = 4;
+static const int PALETTE_SHIFT = 4, PALETTE_MASK = 0x70;
+static int palette = PALETTE_DEFAULT;
+static volatile bool palette_next = false;
+
+static int palette_load(void) {
+    int f = handoff_flags_read();
+    int n = f < 0 ? 0 : (f & PALETTE_MASK) >> PALETTE_SHIFT;
+    return n ? n : PALETTE_DEFAULT;
+}
+
+static void palette_save(int n) {
+    int f = handoff_flags_read();
+    handoff_flags_write(((f < 0 ? 0 : f) & ~PALETTE_MASK) | (n << PALETTE_SHIFT));
+}
+
+/* On the emulator stack, between frames: the next palette. */
+static void palette_cycle(void) {
+    palette = palette % a8_palette_count() + 1;
+    a8_display_palette(a8_set_palette(palette));
+    palette_save(palette);
+    char msg[12];
+    snprintf(msg, sizeof(msg), "COLOUR %d", palette);
+    a8_display_toast(msg);
+}
+
+static int start_green = 100;
+
 static void emu_start(void) {
     static char arg0[] = "atari800", xl[] = "-xl", atari[] = "-atari", ntsc[] = "-ntsc",
                 nobasic[] = "-nobasic", osb_opt[] = "-osb_rom", osb_file[] = "/ATARIOSB.ROM",
@@ -105,12 +135,16 @@ static void emu_start(void) {
     a8_stage = "Atari800_Initialise";
     if (!Atari800_Initialise(&argc, argv))
         Serial.println("[a8] Atari800_Initialise failed");
+    palette = palette_load();
+    start_green = a8_set_palette(palette);
     a8_stage = "initialised";
 }
 
 static volatile bool g_gave_up = false;
 
+
 static void emu_frame(void) {
+    if (palette_next) { palette_next = false; palette_cycle(); }
     if (g_frames == 0) a8_stage = "first frame";
     a8_frame();
     if (a8_crashed && !a8_handle_crash(game_file)) g_gave_up = true;
@@ -182,13 +216,15 @@ void setup() {
     on_emu_stack(emu_start);
     Serial.printf("[a8] started, emulator stack %lu bytes used, heap free %d bytes\n",
                   (unsigned long)emu_stack_used(), rp2040.getFreeHeap());
-    a8_display_start();
+    a8_display_start(start_green);
     pico_audio_amp_on();
     g_emulating = true;
 }
 
 void loop() {
-    if (a8_input_frame()) {
+    bool leave = a8_input_frame();
+    if (a8_input_menu_tapped()) palette_next = true;
+    if (leave) {
         /* MENU held: back to the game list */
         pico_audio_amp_off();
         a8_display_stop();

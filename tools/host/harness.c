@@ -169,6 +169,17 @@ int main(int argc, char **argv) {
     a8argv[a8argc++] = argv[1];
     a8argv[a8argc] = NULL;
     if (!Atari800_Initialise(&a8argc, a8argv)) { printf("Atari800_Initialise failed\n"); return 2; }
+    if (getenv("PALNUM")) a8_set_palette(atoi(getenv("PALNUM")));
+    if (getenv("PALETTE")) {          /* the 256 colours as a 16 x 16 grid (hue x lum) */
+        FILE *pf = fopen(getenv("PALETTE"), "wb");
+        fprintf(pf, "P6\n256 256\n255\n");
+        for (int y = 0; y < 256; y++)
+            for (int x = 0; x < 256; x++) {
+                int c = Colours_table[(y / 16) * 16 + x / 16];
+                fputc((c >> 16) & 0xff, pf); fputc((c >> 8) & 0xff, pf); fputc(c & 0xff, pf);
+            }
+        fclose(pf);
+    }
     printf("initialised: machine %d, %d KB RAM, OS %d, heap %zu KB (peak %zu KB)\n",
            Atari800_machine_type, MEMORY_ram_size, Atari800_os_version,
            heap_now / 1024, heap_peak / 1024);
