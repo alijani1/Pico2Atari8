@@ -17,13 +17,33 @@ All three are read through QMI address-translation window 1 (0x10400000 =
 physical 0), so they can be anywhere; the slot's chain-boot window has to
 reach the ROM drive (it may cover the arcade slot on the way).
 
-## Making room: the firmware's raw audio
+## Making room: the firmware's audio
 
-Both firmwares are mostly constant data, chiefly mini-game audio and images
-stored uncompressed (2.6 MB of the Duo 5200's 3.0 MB). The biggest:
+Both firmwares share the same mini-game sounds (`include/sounds.hpp`),
+already 8-bit mono (`scripts/downsample_sound_8bit.py`) and played at
+16 kHz (`PMTA_SAMPLE_RATE`), one byte a sample. They are still most of the
+constant data (2.6 MB of the Duo 5200's 3.0 MB). The biggest:
 
-| Asset | Size |
-|---|---|
+| Asset | Size (8-bit, 16 kHz) | Length |
+|---|---|---|
+| `music2` | 979 KB | 61 s |
+| `music1` | 254 KB | 16 s |
+| `ambiant` | 164 KB | 10 s |
+| `bitmap_5200_Trackball` (5200, an image) | 128 KB | |
+| `menu16s8` | 125 KB | 8 s |
+| `theend` / `jawdeath` / `victory` | 86 / 69 / 54 KB | |
+
+`music2` alone covers either device, any one of these ways:
+
+| Option for `music2` | Size | Saves |
+|---|---|---|
+| 8-bit at 8 kHz | 490 KB | 489 KB |
+| 4-bit IMA ADPCM at 16 kHz (keeps the rate; a small decoder in PicoMultiTrackAudio) | 490 KB | 489 KB |
+| A shorter loop (~30 s), as now | ~490 KB | ~489 KB |
+
+The Quad needs ~113 KB of it, the Duo 5200 ~386 KB (below).
+
+---|---|
 | `music2` | 979 KB |
 | `music1` | 254 KB |
 | `ambiant` | 164 KB |
@@ -111,8 +131,8 @@ Pico2Arcade's 5200 build does.
 
 ## Asked of both firmwares
 
-1. **Shrink the firmware** to the size above (the raw audio) and lower its
-   size limit, so the areas above stay free.
+1. **Shrink the firmware** to the size above (the audio, above) and lower
+   its size limit, so the areas above stay free.
 2. **The Atari 8-bit slot**, chain-booted like the arcade slot but with its
    own magic, so both images can be installed and launched.
 3. **Pass the locations** in watchdog scratch registers, as for the ROM
