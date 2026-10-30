@@ -28,6 +28,7 @@
 #include "hardware/spi.h"
 #include "a8_display.h"
 #include "a8_platform.h"
+#include "a8_osk.h"
 
 extern "C" {
 #include "screen.h"
@@ -72,17 +73,40 @@ static const uint8_t GLYPH_DIGIT[10][7] = {
 };
 static const uint8_t GLYPH_E[7] = { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F };
 static const uint8_t GLYPH_S[7] = { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E };
-/* letters for the messages ("DRIVE OFF" / "DRIVE ON") */
+/* 5 x 7 letters and punctuation (messages, the on-screen keyboard) */
 static const struct { char c; uint8_t g[7]; } GLYPH_LETTERS[] = {
+    { 'A', { 0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11 } },
+    { 'B', { 0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E } },
+    { 'C', { 0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E } },
     { 'D', { 0x1C, 0x12, 0x11, 0x11, 0x11, 0x12, 0x1C } },
     { 'E', { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F } },
     { 'F', { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10 } },
+    { 'G', { 0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F } },
+    { 'H', { 0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11 } },
     { 'I', { 0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E } },
+    { 'J', { 0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C } },
+    { 'K', { 0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11 } },
+    { 'L', { 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F } },
+    { 'M', { 0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11 } },
     { 'N', { 0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11 } },
     { 'O', { 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E } },
+    { 'P', { 0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10 } },
+    { 'Q', { 0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D } },
     { 'R', { 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11 } },
     { 'S', { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E } },
+    { 'T', { 0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04 } },
+    { 'U', { 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E } },
     { 'V', { 0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04 } },
+    { 'W', { 0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A } },
+    { 'X', { 0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11 } },
+    { 'Y', { 0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04 } },
+    { 'Z', { 0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F } },
+    { ';', { 0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x04, 0x08 } },
+    { ',', { 0x00, 0x00, 0x00, 0x00, 0x0C, 0x04, 0x08 } },
+    { '.', { 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C } },
+    { '/', { 0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x00 } },
+    { '-', { 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00 } },
+    { '=', { 0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00 } },
 };
 static const uint8_t *glyph(char c) {
     if (c >= '0' && c <= '9') return GLYPH_DIGIT[c - '0'];
@@ -102,12 +126,51 @@ void a8_display_toast(const char *text) {
 static const uint8_t OV_BG = 0x00, OV_FG = 0x0F;       /* Atari black / white */
 static const int OV_SCALE = 2, OV_CHAR_W = 6 * OV_SCALE, OV_H = 7 * OV_SCALE + 4;
 
-static void __not_in_flash_func(ov_glyph)(int x, int y, const uint8_t *g) {
+static void __not_in_flash_func(ov_glyph_s)(int x, int y, const uint8_t *g, int scale, uint8_t colour) {
     for (int r = 0; r < 7; r++)
         for (int c = 0; c < 5; c++)
             if (g[r] & (0x10 >> c))
-                for (int dy = 0; dy < OV_SCALE; dy++)
-                    memset(frame8 + (y + r * OV_SCALE + dy) * SCR_W + x + c * OV_SCALE, OV_FG, OV_SCALE);
+                for (int dy = 0; dy < scale; dy++)
+                    memset(frame8 + (y + r * scale + dy) * SCR_W + x + c * scale, colour, scale);
+}
+
+static void __not_in_flash_func(ov_glyph)(int x, int y, const uint8_t *g) {
+    ov_glyph_s(x, y, g, OV_SCALE, OV_FG);
+}
+
+/* ---- on-screen keyboard (a8_osk.cpp) ------------------------------------
+ * Over the bottom of the picture: 5 rows of 10 grid columns, 32 x 20 px a
+ * column. Single characters are drawn at twice size, labels (ESC, DEL,
+ * SPACE, RET) at normal size. Atari palette indices: black frame, grey
+ * keys, blue cursor, white text. */
+static const int OSK_CELL_W = SCR_W / A8_OSK_COLS, OSK_CELL_H = 20;
+static const int OSK_Y = SCR_H - A8_OSK_ROWS * OSK_CELL_H - 2;
+static const uint8_t OSK_FRAME = 0x00, OSK_KEY = 0x04, OSK_CURSOR = 0x96, OSK_TEXT = 0x0F;
+
+static void __not_in_flash_func(draw_osk)(void) {
+    for (int y = OSK_Y - 2; y < SCR_H; y++) memset(frame8 + y * SCR_W, OSK_FRAME, SCR_W);
+    int cr, ci;
+    a8_osk_cursor(&cr, &ci);
+    for (int r = 0; r < A8_OSK_ROWS; r++) {
+        int n;
+        const A8Key *keys = a8_osk_row(r, &n);
+        int col = 0;
+        for (int i = 0; i < n; i++) {
+            int x0 = col * OSK_CELL_W + 1, w = keys[i].span * OSK_CELL_W - 2;
+            int y0 = OSK_Y + r * OSK_CELL_H + 1, h = OSK_CELL_H - 2;
+            uint8_t face = (r == cr && i == ci) ? OSK_CURSOR : OSK_KEY;
+            for (int y = y0; y < y0 + h; y++) memset(frame8 + y * SCR_W + x0, face, w);
+            const char *t = keys[i].label;
+            int len = (int)strlen(t), scale = len == 1 ? 2 : 1;
+            int tw = len * 6 * scale - scale, th = 7 * scale;
+            int tx = x0 + (w - tw) / 2, ty = y0 + (h - th) / 2;
+            for (int k = 0; k < len; k++) {
+                const uint8_t *g = glyph(t[k]);
+                if (g) ov_glyph_s(tx + k * 6 * scale, ty, g, scale, OSK_TEXT);
+            }
+            col += keys[i].span;
+        }
+    }
 }
 
 /* A short message in the top-left corner of the snapshot. */
@@ -233,6 +296,7 @@ static void __not_in_flash_func(push_frame)(void) {
     uint32_t sent = 0;
     if (fps_on) draw_fps();
     if (toast_until && (int32_t)(toast_until - millis()) > 0) draw_toast();
+    if (a8_osk_is_open()) draw_osk();
     tft.startWrite();
     int y = 0;
     while (y < SCR_H) {

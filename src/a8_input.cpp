@@ -5,7 +5,9 @@
  *   Ports 1-4 (DB9)   Atari joysticks 1-4 (the 400/800 had four ports;
  *                     XL/XE machines read only the first two)
  *   Joy-Con stick     also joystick 1; its click = fire 1
- *   Red / Blue        fire 1 / RETURN
+ *   Red               fire 1
+ *   Blue              tap: RETURN; hold 1/2 s: on-screen keyboard (stick
+ *                     moves, fire types; tap Blue closes it)
  *   Green / Yellow    OPTION / SPACE
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
@@ -17,6 +19,7 @@
 #include "a8_input.h"
 #include "a8_platform.h"
 #include "a8_display.h"
+#include "a8_osk.h"
 
 extern "C" {
 #include "akey.h"
@@ -119,8 +122,45 @@ bool a8_input_frame(void) {
     in.select = low(PIN_SELECT);
     in.option = low(PIN_GREEN);
     in.key = -1;
-    if (low(PIN_BLUE))        in.key = AKEY_RETURN;
-    else if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
+    if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
+
+    /* Blue: a tap is RETURN (sent on release, so a hold doesn't type it);
+     * held 1/2 s it opens the on-screen keyboard; a tap while it's open
+     * closes it. */
+    static bool blue_was = true;          /* one still held from the menu: ignored */
+    static uint32_t blue_since = 0;
+    static bool blue_used = false;        /* this press opened / closed the keyboard */
+    static int return_frames = 0;
+    uint32_t t = millis();
+    bool blue = low(PIN_BLUE);
+    if (blue && !blue_was) {
+        blue_since = t | 1;
+        blue_used = false;
+        if (a8_osk_is_open()) { a8_osk_close(); blue_used = true; }
+    }
+    if (blue && blue_since && !blue_used && t - blue_since >= 500) { a8_osk_open(); blue_used = true; }
+    if (!blue && blue_was && blue_since && !blue_used) return_frames = 4;
+    if (!blue) blue_since = 0;
+    blue_was = blue;
+    if (return_frames > 0) { in.key = AKEY_RETURN; return_frames--; }
+
+    /* The keyboard takes joystick 1 and its fire: the stick moves the
+     * cursor (auto-repeat), fire types the key (held while fire is). */
+    if (a8_osk_is_open()) {
+        static uint8_t dirs_was = 0;
+        static uint32_t repeat_at = 0;
+        uint8_t dirs = in.stick[0];
+        uint8_t edge = dirs & ~dirs_was;
+        if (dirs && dirs == dirs_was && (int32_t)(t - repeat_at) >= 0) { edge = dirs; repeat_at = t + 120; }
+        else if (edge) repeat_at = t + 350;
+        dirs_was = dirs;
+        int dx = (edge & A8_RIGHT) ? 1 : (edge & A8_LEFT) ? -1 : 0;
+        int dy = (edge & A8_DOWN) ? 1 : (edge & A8_UP) ? -1 : 0;
+        if (dx || dy) a8_osk_move(dx, dy);
+        if (in.trig[0]) in.key = a8_osk_key();
+        in.stick[0] = 0;
+        in.trig[0] = 0;
+    }
     a8_input = in;
 
     /* Right side button: FPS overlay on / off; left: disk drive 1 off / on
