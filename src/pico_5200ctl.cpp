@@ -7,8 +7,8 @@
  * GameAdapterRGBPico (src/pio_rc.cpp), a PIO state machine per pin counts
  * the time, so interrupts can't skew it: one count = 0.8 us (2.5 MHz PIO
  * clock, 2 instructions a loop). A 5200 stick reads about 400 counts (left
- * / up) to 3335 (right / down), resting near 2300 (1.9 ms); 4500 = no
- * controller. Here the counters are started one frame and read the next,
+ * / up) to 3335 (right / down) or more, resting near 2300 (1.9 ms); 8000 =
+ * no controller. Here the counters are started one frame and read the next,
  * so the read never blocks the emulator.
  *
  * Fire A / Fire B are GPIO 10 / 11 (port 1) and 12 / 13 (port 2), active LOW.
@@ -37,7 +37,8 @@
 static const uint8_t FIRE_PINS[2][2] = { { 10, 11 }, { 12, 13 } };   /* Fire A, Fire B */
 
 static const uint8_t RC_PINS[4] = { 40, 41, 42, 43 };   /* p1 x, p1 y, p2 x, p2 y */
-static const uint32_t RC_MAX  = 4500;       /* timeout (counts): no controller */
+static const uint32_t RC_MAX  = 8000;       /* timeout (counts, 6.4 ms): no controller. 4500 (the
+                                               host's) was too short: a stick pushed hard reads more */
 static const uint32_t RC_LOW  = 400;        /* full left / up, a first guess (only grows outward) */
 static const uint32_t RC_HIGH = 3000;       /* full right / down, likewise (reads up to ~3335) */
 static const uint32_t RC_REST_DEAD = 20;    /* counts either side of rest = exactly the centre */
@@ -253,7 +254,7 @@ void ctl5200_init(void) {
 
 void ctl5200_poll(void) {
     if (rc_pio) {
-        if (rc_running && (time_us_32() - rc_started_us) >= 4000) rc_collect();   /* > 3.6 ms: all done */
+        if (rc_running && (time_us_32() - rc_started_us) >= 7000) rc_collect();   /* > 6.4 ms: all done */
         if (!rc_running) {
             delayMicroseconds(200);           /* drain the caps (1.5 k x 22 nF) */
             rc_start();
