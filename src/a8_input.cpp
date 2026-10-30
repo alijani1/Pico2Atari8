@@ -151,17 +151,19 @@ static uint8_t joycon_read(int16_t *pot_x = nullptr, int16_t *pot_y = nullptr) {
 }
 
 #ifdef PICO_5200
-/* the analog stick as a joystick: past about a third of its travel */
-static uint8_t port_dirs(int n) {
+/* the analog stick as a joystick: past `edge` of its travel (pot units,
+ * of ~107 each way) - about a third in a game, 70 % in the menus */
+static uint8_t port_dirs(int n, int edge = 36) {
     int16_t x = ctl5200_pot(n, 0), y = ctl5200_pot(n, 1);
     if (x < 0) return 0;
     uint8_t d = 0;
-    if (x < 114 - 36) d |= A8_LEFT;
-    if (x > 114 + 36) d |= A8_RIGHT;
-    if (y < 114 - 36) d |= A8_UP;
-    if (y > 114 + 36) d |= A8_DOWN;
+    if (x < 114 - edge) d |= A8_LEFT;
+    if (x > 114 + edge) d |= A8_RIGHT;
+    if (y < 114 - edge) d |= A8_UP;
+    if (y > 114 + edge) d |= A8_DOWN;
     return d;
 }
+static const int MENU_EDGE = 75;
 static bool port_fire(int n) { return ctl5200_fire_a(n) || ctl5200_fire_b(n); }
 static bool port_fire_a(int n) { return ctl5200_fire_a(n); }
 static bool port_fire_b(int n) { return ctl5200_fire_b(n); }
@@ -174,7 +176,8 @@ static const int KEYPAD_5200[15] = {
 static const int KEYPAD_800[12] = {
     AKEY_0, AKEY_1, AKEY_2, AKEY_3, AKEY_4, AKEY_5, AKEY_6, AKEY_7, AKEY_8, AKEY_9, -1, -1 };
 #else
-static uint8_t port_dirs(int n) {
+static uint8_t port_dirs(int n, int edge = 0) {
+    (void)edge;
     uint8_t d = 0;
     if (low(PORT_PINS[n][0])) d |= A8_UP;
     if (low(PORT_PINS[n][1])) d |= A8_DOWN;
@@ -186,6 +189,7 @@ static bool port_fire(int n) { return low(PORT_PINS[n][4]); }
 static bool port_fire_a(int n) { return port_fire(n); }
 static bool port_fire_b(int n) { (void)n; return false; }
 static void ports_poll(void) {}
+static const int MENU_EDGE = 0;
 #endif
 
 /* ---- in a game ------------------------------------------------------- */
@@ -224,9 +228,16 @@ bool a8_input_frame(void) {
         }
         if (pad >= 0) in.key = KEYPAD_5200[pad];
 #endif
-        int16_t jx, jy;                       /* the Joy-Con, while it's off centre */
+        /* the Joy-Con stands in for controller 1's stick while it's
+         * clearly pushed (past 15 %: a resting one may wander a little)
+         * and controller 1's own stick is at rest (or unplugged) */
+        int16_t jx, jy;
         nav = in.stick[0] | joycon_read(&jx, &jy);
-        if (jx != A8_POT_NONE || jy != A8_POT_NONE) {
+        bool pushed = (jx != A8_POT_NONE && (jx < 114 - 16 || jx > 114 + 16)) ||
+                      (jy != A8_POT_NONE && (jy < 114 - 16 || jy > 114 + 16));
+        bool c1_rests = (in.pot[0] == A8_POT_NONE || in.pot[0] == 114) &&
+                        (in.pot[1] == A8_POT_NONE || in.pot[1] == 114);
+        if (pushed && c1_rests) {
             in.pot[0] = jx != A8_POT_NONE ? jx : 114;
             in.pot[1] = jy != A8_POT_NONE ? jy : 114;
         }
@@ -338,7 +349,7 @@ bool a8_input_frame(void) {
 uint8_t a8_input_menu(void) {
     uint8_t b = 0;
     ports_poll();
-    uint8_t d = port_dirs(0) | joycon_read();
+    uint8_t d = port_dirs(0, MENU_EDGE) | joycon_read();
     if ((d & A8_UP)   || low(PIN_SIDE_UP))   b |= A8M_UP;
     if ((d & A8_DOWN) || low(PIN_SIDE_DOWN)) b |= A8M_DOWN;
     if (d & A8_LEFT)  b |= A8M_LEFT;

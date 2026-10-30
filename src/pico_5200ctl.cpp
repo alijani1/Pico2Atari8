@@ -7,7 +7,7 @@
  * GameAdapterRGBPico (src/pio_rc.cpp), a PIO state machine per pin counts
  * the time, so interrupts can't skew it: one count = 0.8 us (2.5 MHz PIO
  * clock, 2 instructions a loop). A 5200 stick reads about 400 counts (left
- * / up) to 3335 (right / down) or more, resting near 2300 (1.9 ms); 8000 =
+ * / up) to 5000-5900 (right / down), resting near 2300 (1.9 ms); 7500 =
  * no controller. Here the counters are started one frame and read the next,
  * so the read never blocks the emulator.
  *
@@ -31,16 +31,18 @@
 #include "hardware/pio.h"
 #include "hardware/gpio.h"
 #include "hardware/sync.h"
+#include "a8_display.h"
 
 /* ---- sticks ------------------------------------------------------------ */
 
 static const uint8_t FIRE_PINS[2][2] = { { 10, 11 }, { 12, 13 } };   /* Fire A, Fire B */
 
 static const uint8_t RC_PINS[4] = { 40, 41, 42, 43 };   /* p1 x, p1 y, p2 x, p2 y */
-static const uint32_t RC_MAX  = 8000;       /* timeout (counts, 6.4 ms): no controller. 4500 (the
-                                               host's) was too short: a stick pushed hard reads more */
+static const uint32_t RC_MAX  = 7500;       /* timeout (counts, 6 ms): no controller. 4500 (the
+                                               host's) was too short: pushed hard, a stick reads ~5900 */
 static const uint32_t RC_LOW  = 400;        /* full left / up, a first guess (only grows outward) */
-static const uint32_t RC_HIGH = 3000;       /* full right / down, likewise (reads up to ~3335) */
+static const uint32_t RC_HIGH = 5000;       /* full right / down, likewise (pushed hard ~5900); at
+                                               3000 a small push already read as a full one */
 static const uint32_t RC_REST_DEAD = 20;    /* counts either side of rest = exactly the centre */
 static const float    RC_PIO_HZ = 2500000.0f;
 
@@ -154,6 +156,7 @@ static void rc_collect(void) {
         if (!there) {
             if (pt.present && ++pt.missed >= 10) {
                 pt.present = false;
+                a8_display_toast(n ? "CTRL 2 OUT" : "CTRL 1 OUT");
                 Serial.printf("[5200] controller %d unplugged\n", n + 1);
             }
             pt.seen = 0;
@@ -169,6 +172,7 @@ static void rc_collect(void) {
                 pt.ax[a].hi = RC_HIGH;
             }
             Serial.printf("[5200] controller %d: rest %lu, %lu\n", n + 1, (unsigned long)x, (unsigned long)y);
+            a8_display_toast(n ? "CTRL 2 IN" : "CTRL 1 IN");
         }
         for (int a = 0; a < 2; a++) {
             Axis &ax = pt.ax[a];
@@ -254,7 +258,7 @@ void ctl5200_init(void) {
 
 void ctl5200_poll(void) {
     if (rc_pio) {
-        if (rc_running && (time_us_32() - rc_started_us) >= 7000) rc_collect();   /* > 6.4 ms: all done */
+        if (rc_running && (time_us_32() - rc_started_us) >= 6500) rc_collect();   /* > 6 ms: all done */
         if (!rc_running) {
             delayMicroseconds(200);           /* drain the caps (1.5 k x 22 nF) */
             rc_start();

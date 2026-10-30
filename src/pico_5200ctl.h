@@ -23,7 +23,7 @@ bool    ctl5200_fire_b(int port);            /* top button */
  * -1 for none (the lowest pressed on either controller). */
 int     ctl5200_key(void);
 
-/* Controller test: an axis's last count (0.8 us each; 8000 = timed out), its
+/* Controller test: an axis's last count (0.8 us each; 7500 = timed out), its
  * rest and the range seen; a controller's keys held (bit k = key k). */
 void     ctl5200_diag(int port, int axis, uint32_t *count, uint32_t *rest, uint32_t *lo, uint32_t *hi);
 uint16_t ctl5200_keys(int port);
