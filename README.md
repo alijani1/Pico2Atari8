@@ -39,9 +39,19 @@ tap of Blue closes the keyboard and the game carries on.
 
 **Disk drive off.** Some disk games refuse to start while a drive answers
 (this Shamus disk reboots on START if any drive replies to a status
-request). The left side button switches disk drive 1 off and on, like the
-switch on a real drive: let the game load, press it ("DRIVE OFF"), then
-START.
+request). The DRV key on the on-screen keyboard switches disk drive 1 off
+and on, like the switch on a real drive: let the game load, type DRV
+("DRIVE OFF"), then START.
+
+**Settings** (a row at the end of the game list; saved in flash):
+
+| Setting | Choices |
+|---|---|
+| Keyboard | Auto-pause (default): the game pauses while the keyboard is open / Keep running |
+| FPS display | Off (default) / On |
+| Volume | 0-100 % (shared with the Quad) |
+| Default machine | 800XL (default) / 400/800 - SELECT in the list starts the other |
+| TV system | NTSC (default) / PAL |
 
 ## Quad Ultimate CX
 
@@ -64,8 +74,8 @@ the Quad's **arcade slot** (replacing Pico2Arcade there), and
 | Blue | | tap: RETURN; hold ½ s: on-screen keyboard - the game pauses, fire types a key, tap Blue closes |
 | Yellow | | SPACE |
 | Green | | OPTION |
-| START / SELECT | START = play; SELECT = play as a 400/800 (four joysticks, OS-B) | START / SELECT |
-| Side buttons | up / down | right: FPS overlay on / off (off at start) (`E60 S58` = emulator / screen frames a second); left: disk drive 1 off / on |
+| START / SELECT | START = play; SELECT = play on the other machine (400/800: four joysticks, OS-B) | START / SELECT |
+| Side buttons | up / down | |
 | MENU | back to the Quad | hold 1 s: back to the game list |
 
 ## Building

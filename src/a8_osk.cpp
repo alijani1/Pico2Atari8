@@ -4,7 +4,10 @@
  *    Q   W   E   R   T   Y   U   I   O   P
  *    A   S   D   F   G   H   J   K   L   ;
  *    Z   X   C   V   B   N   M   ,   .   /
- *   ESC DEL [    SPACE     ] [ RET ]  -   =
+ *   ESC DEL [  SPACE   ] [ RET ]  -   =  DRV
+ *
+ * DRV isn't an Atari key: it switches disk drive 1 off and on (some disk
+ * games won't start while a drive answers).
  *
  * Opened by holding Blue (a8_input.cpp), drawn over the bottom of the
  * picture by a8_display.cpp. The cursor moves on a 10-column grid; up/down
@@ -26,12 +29,13 @@ static const A8Key ROW3[] = { K("A", AKEY_a), K("S", AKEY_s), K("D", AKEY_d), K(
                               K("H", AKEY_h), K("J", AKEY_j), K("K", AKEY_k), K("L", AKEY_l), K(";", AKEY_SEMICOLON) };
 static const A8Key ROW4[] = { K("Z", AKEY_z), K("X", AKEY_x), K("C", AKEY_c), K("V", AKEY_v), K("B", AKEY_b),
                               K("N", AKEY_n), K("M", AKEY_m), K(",", AKEY_COMMA), K(".", AKEY_FULLSTOP), K("/", AKEY_SLASH) };
-static const A8Key ROW5[] = { K("ESC", AKEY_ESCAPE), K("DEL", AKEY_BACKSPACE), { "SPACE", AKEY_SPACE, 4 },
-                              { "RET", AKEY_RETURN, 2 }, K("-", AKEY_MINUS), K("=", AKEY_EQUAL) };
+static const A8Key ROW5[] = { K("ESC", AKEY_ESCAPE), K("DEL", AKEY_BACKSPACE), { "SPACE", AKEY_SPACE, 3 },
+                              { "RET", AKEY_RETURN, 2 }, K("-", AKEY_MINUS), K("=", AKEY_EQUAL),
+                              K("DRV", A8_OSK_DRIVE) };
 #undef K
 
 static const struct { const A8Key *keys; int n; } ROWS[A8_OSK_ROWS] = {
-    { ROW1, 10 }, { ROW2, 10 }, { ROW3, 10 }, { ROW4, 10 }, { ROW5, 6 },
+    { ROW1, 10 }, { ROW2, 10 }, { ROW3, 10 }, { ROW4, 10 }, { ROW5, 7 },
 };
 
 static volatile bool open_ = false;

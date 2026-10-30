@@ -14,14 +14,18 @@ flash the Quad firmware happens not to use.
 | `0x360000 .. 0x3BFFFF` | 384 KB | arcade slot (Pico2Arcade, or Pico2Atari8 for now) |
 | `0x3C0000 .. 0x3FFFFF` | 256 KB | ARCADE ROMS drive (FAT12) |
 
-Pico2Atari8 unpacks zipped games into **`0x320000 .. 0x33FFFF` (128 KB)**,
-inside the unused gap (`A8_UNZIP_PHYS` / `A8_UNZIP_SIZE`, platformio.ini).
+Pico2Atari8 uses, inside the unused gap:
+
+| Physical | Size | Use |
+|---|---|---|
+| `0x31F000 .. 0x31FFFF` | 4 KB | its settings (`A8_SETTINGS_PHYS`) |
+| `0x320000 .. 0x33FFFF` | 128 KB | zipped games, unpacked (`A8_UNZIP_PHYS` / `A8_UNZIP_SIZE`) |
 
 ## Asked of the next Quad firmware
 
-1. **Reserve the unzip area** `0x320000 .. 0x33FFFF`: lower
-   `board_upload.maximum_size` to `0x320000` (3.125 MB; the firmware is
-   2.86 MB) and keep LittleFS/EEPROM where they are.
+1. **Reserve the settings sector and the unzip area** `0x31F000 ..
+   0x33FFFF`: lower `board_upload.maximum_size` to `0x31F000` (the firmware
+   is 2.86 MB) and keep LittleFS/EEPROM where they are.
 2. **A slot of its own for Pico2Atari8** (it's ~310 KB; 384 KB like the
    arcade slot), chain-booted like the arcade with its own magic, so both
    can be installed. That needs about 384 KB more below the unzip area, so

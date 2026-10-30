@@ -3,7 +3,8 @@
  * Lists the Atari files on the ARCADE ROMS drive (root, ATARI and ROMS
  * folders): .xex .com .exe executables, .car .rom .bin cartridges and .atr
  * .xfd disk images and .zip files holding one of those (a8_zip.cpp), by
- * their long names, sorted, then "ROM Drive (USB)",
+ * their long names, sorted, then "Settings" (a8_settings.cpp) and
+ * "ROM Drive (USB)",
  * which reboots into USB drive mode to copy games over (pico_drive.cpp).
  * Up/down scroll, fire / START picks (an 800XL), SELECT picks as a
  * 400/800 (four joysticks, OS-B), MENU goes back to the Quad.
@@ -16,8 +17,9 @@
 #include "pico_romfs.h"
 #include "pico_handoff.h"
 #include "pico_drive.h"
+#include "a8_settings.h"
 
-static const int MAX_GAMES = 128;      /* + the ROM drive row */
+static const int MAX_GAMES = 128;      /* + the Settings and ROM drive rows */
 struct Game { char path[24]; char name[40]; bool osb; char kind[5]; };
 
 /* What the file is, shown at the right of its row: two files can share a
@@ -30,10 +32,11 @@ static const char *kind_of(const char *path) {
     if (!strcasecmp(dot, ".car") || !strcasecmp(dot, ".rom") || !strcasecmp(dot, ".bin")) return "CART";
     return "XEX";
 }
-static bool picked_800 = false;
-bool a8_menu_picked_800(void) { return picked_800; }
-static Game games[MAX_GAMES + 1];
-static int found = 0;                  /* games on the drive; the row after them is the drive */
+static bool picked_alt = false, picked_osb = false;
+bool a8_menu_picked_alt(void) { return picked_alt; }
+bool a8_menu_picked_osb(void) { return picked_osb; }
+static Game games[MAX_GAMES + 2];
+static int found = 0;                  /* games on the drive; then Settings, then the drive */
 static int game_count = 0;
 
 /* Atari OS / BASIC ROM files (used by the emulator, not games) */
@@ -99,7 +102,8 @@ static void draw_frame(void) {
     tft.drawFastHLine(0, 25, 320, COL_HINT);
     tft.setTextColor(COL_HINT, COL_BG);
     tft.setCursor(8, 222);
-    tft.print("FIRE: play   SELECT: as 400/800   MENU: back");
+    tft.print(a8_settings.machine_800 ? "FIRE: play   SELECT: as 800XL   MENU: back"
+                                      : "FIRE: play   SELECT: as 400/800   MENU: back");
 }
 
 static void draw_row(int idx, int top, bool sel) {
@@ -111,7 +115,7 @@ static void draw_row(int idx, int top, bool sel) {
     tft.setTextFont(2);
     tft.setTextColor(COL_TEXT, bg);
     tft.setCursor(12, y + 1);
-    if (idx == found) tft.setTextColor(sel ? COL_TEXT : 0x07FF, bg);   /* the drive row */
+    if (idx >= found) tft.setTextColor(sel ? COL_TEXT : 0x07FF, bg);   /* Settings, drive */
     tft.print(games[idx].name);
     if (idx < found && games[idx].kind[0]) {
         tft.setTextColor(sel ? COL_TEXT : COL_HINT, bg);
@@ -138,10 +142,10 @@ static void draw_empty(void) {
     TFT_eSPI &tft = a8_tft();
     tft.setTextFont(2);
     tft.setTextColor(COL_TEXT, COL_BG);
-    int y = LIST_Y + ROW_H + 24;
+    int y = LIST_Y + 2 * ROW_H + 24;
     tft.setCursor(12, y);       tft.print("No Atari games found.");
     tft.setTextColor(COL_HINT, COL_BG);
-    tft.setCursor(12, y += 24); tft.print("Pick ROM Drive (USB) above and copy");
+    tft.setCursor(12, y += 24); tft.print("Pick ROM Drive (USB) and copy");
     tft.setCursor(12, y += 18); tft.print(".xex .car .rom or .atr files onto the");
     tft.setCursor(12, y += 18); tft.print("drive from your computer (root or");
     tft.setCursor(12, y += 18); tft.print("an ATARI folder).");
@@ -155,6 +159,10 @@ const char *a8_menu_pick(void) {
     qsort(games, game_count, sizeof(Game), by_name);
     found = game_count;
     Serial.printf("[menu] %d games\n", found);
+    Game &settings = games[game_count++];
+    settings.path[0] = 0;
+    settings.kind[0] = 0;
+    strcpy(settings.name, "Settings");
     Game &drive = games[game_count++];
     drive.path[0] = 0;
     drive.kind[0] = 0;
@@ -221,10 +229,19 @@ const char *a8_menu_pick(void) {
             if (pressed & (A8M_OK | A8M_ALT)) {
                 bool as_800 = (pressed & A8M_ALT) != 0;
                 while (a8_input_menu() & (A8M_OK | A8M_ALT)) delay(10);
-                if (sel == found) pico_drive_request();      /* reboots into drive mode */
-                picked_800 = as_800 || games[sel].osb;
+                if (sel == found) {                         /* Settings */
+                    a8_settings_screen();
+                    draw_frame();
+                    draw_list(top, sel);
+                    if (found == 0) draw_empty();
+                    prev = 0xFF;
+                    continue;
+                }
+                if (sel == found + 1) pico_drive_request();  /* reboots into drive mode */
+                picked_alt = as_800;
+                picked_osb = games[sel].osb;
                 Serial.printf("[menu] run %s (%s)%s\n", games[sel].path, games[sel].name,
-                              picked_800 ? " as a 400/800" : "");
+                              as_800 ? " - the other machine" : "");
                 return games[sel].path;
             }
         }

@@ -25,6 +25,8 @@
 #include "pico_handoff.h"
 #include "pico_romfs.h"
 #include "a8_zip.h"
+#include "a8_flash.h"
+#include "a8_settings.h"
 
 extern "C" {
 #include "atari.h"
@@ -86,7 +88,7 @@ static bool start_as_800 = false;
  * ATARIOSB.ROM - root or ATARI folder) are used instead when present: some
  * early games jump into the original OS and crash on AltirraOS. */
 static void emu_start(void) {
-    static char arg0[] = "atari800", xl[] = "-xl", atari[] = "-atari", ntsc[] = "-ntsc",
+    static char arg0[] = "atari800", xl[] = "-xl", atari[] = "-atari", ntsc[] = "-ntsc", pal[] = "-pal",
                 nobasic[] = "-nobasic", colors[] = "-colors-preset", vibrant[] = "vibrant",
                 osb_opt[] = "-osb_rom", osb_file[] = "/ATARIOSB.ROM",
                 xl_opt[] = "-xlxe_rom", xl_file[] = "/ATARIXL.ROM";
@@ -94,7 +96,7 @@ static void emu_start(void) {
     int argc = 0;
     argv[argc++] = arg0;
     argv[argc++] = start_as_800 ? atari : xl;
-    argv[argc++] = ntsc;
+    argv[argc++] = a8_settings.pal ? pal : ntsc;
     argv[argc++] = nobasic;
     argv[argc++] = colors;          /* atari800's vibrant palette: its stock one */
     argv[argc++] = vibrant;         /* looked dull on the panel (brownish reds) */
@@ -102,8 +104,9 @@ static void emu_start(void) {
     if (romfs_exists(xl_file))  { argv[argc++] = xl_opt;  argv[argc++] = xl_file; }
     argv[argc++] = game_file;
     argv[argc] = nullptr;
-    Serial.printf("[a8] %s, OS-B ROM file %s, XL ROM file %s\n",
-                  start_as_800 ? "800" : "800XL", romfs_exists(osb_file) ? "yes" : "no",
+    Serial.printf("[a8] %s %s, OS-B ROM file %s, XL ROM file %s\n",
+                  start_as_800 ? "800" : "800XL", a8_settings.pal ? "PAL" : "NTSC",
+                  romfs_exists(osb_file) ? "yes" : "no",
                   romfs_exists(xl_file) ? "yes" : "no");
     a8_stage = "Atari800_Initialise";
     if (!Atari800_Initialise(&argc, argv))
@@ -136,6 +139,8 @@ static void log_file(const char *path) {
 void setup() {
     Serial.begin(115200);
     a8_debug_init();
+    a8_flash_init();
+    a8_settings_load();
     int vol = handoff_volume_read();
     pico_audio_set_volume_pct(vol >= 0 ? vol : 50);
     board_pins_load();                 /* audio / amp pins (Quad profile) */
@@ -146,7 +151,9 @@ void setup() {
 
     const char *path = a8_menu_pick();
     strncpy(game_file, path, sizeof(game_file) - 1);
-    start_as_800 = a8_menu_picked_800();
+    /* the default machine, or the other one if picked with SELECT; a
+     * 400/800 game by its name always on the 800 */
+    start_as_800 = (a8_settings.machine_800 != a8_menu_picked_alt()) || a8_menu_picked_osb();
     log_file(game_file);
 
     /* A zip: unpack its game into the flash area first (before the audio
@@ -186,6 +193,7 @@ void setup() {
     on_emu_stack(emu_start);
     Serial.printf("[a8] started, emulator stack %lu bytes used, heap free %d bytes\n",
                   (unsigned long)emu_stack_used(), rp2040.getFreeHeap());
+    a8_display_set_fps(a8_settings.fps);
     a8_display_start();
     pico_audio_amp_on();
     g_emulating = true;

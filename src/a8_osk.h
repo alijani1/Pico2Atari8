@@ -4,6 +4,7 @@
 
 #define A8_OSK_ROWS 5
 #define A8_OSK_COLS 10          /* grid columns; a key spans 1 or more */
+#define A8_OSK_DRIVE (-100)     /* the DRV "key": disk drive 1 off / on */
 
 struct A8Key {
     const char *label;

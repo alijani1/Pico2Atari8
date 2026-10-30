@@ -19,8 +19,7 @@
  *
  * FPS overlay: "E60 S58" (emulator / screen frames a second) is drawn into
  * the snapshot's top-right corner before hashing, so it travels with the
- * picture. Toggled with a8_display_toggle_fps() (the Quad's right side
- * button in a game).
+ * picture. On / off: Settings > FPS display (a8_display_set_fps).
  */
 #include <Arduino.h>
 #include <TFT_eSPI.h>
@@ -54,7 +53,7 @@ static bool hashes_valid = false;
 
 /* ---- FPS overlay ----------------------------------------------------- */
 
-static volatile bool fps_on = false;     /* right side button turns it on */
+static volatile bool fps_on = false;     /* Settings > FPS display */
 static volatile uint32_t frames_emulated = 0;          /* every frame core 0 finished */
 static int fps_emu = 0, fps_scr = 0;                    /* last second's rates */
 
@@ -200,7 +199,7 @@ static void __not_in_flash_func(draw_fps)(void) {
     }
 }
 
-void a8_display_toggle_fps(void) { fps_on = !fps_on; }
+void a8_display_set_fps(bool on) { fps_on = on; }
 
 /* Core 1, once a second: the rates for the overlay. */
 static void fps_tick(void) {

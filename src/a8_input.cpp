@@ -12,15 +12,14 @@
  *   Green / Yellow    OPTION / SPACE
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
- *   Side buttons      game list: up / down; in a game, right = FPS overlay
- *                     on / off, left = disk drive 1 off / on (some disk
- *                     games won't start while a drive answers)
+ *   Side buttons      game list: up / down
  */
 #include <Arduino.h>
 #include "a8_input.h"
 #include "a8_platform.h"
 #include "a8_display.h"
 #include "a8_osk.h"
+#include "a8_settings.h"
 
 extern "C" {
 #include "akey.h"
@@ -112,7 +111,9 @@ static bool menu_seen_up = false;
 
 static bool osk_running = false;
 
-bool a8_input_osk_paused(void) { return a8_osk_is_open() && !osk_running; }
+bool a8_input_osk_paused(void) {
+    return a8_osk_is_open() && !osk_running && !a8_settings.keyboard_keep_running;
+}
 
 bool a8_input_frame(void) {
     a8_input_t in;
@@ -167,7 +168,15 @@ bool a8_input_frame(void) {
          * press and release; otherwise it stays paused. */
         static const int KEY_DOWN_FRAMES = 4, KEY_UP_FRAMES = 4;
         static int down_left = 0, up_left = 0, key = -1;
-        if (key < 0 && in.trig[0]) {                 /* a new key */
+        static bool fire_was = false;
+        bool fire_edge = in.trig[0] && !fire_was;
+        fire_was = in.trig[0];
+        if (fire_edge && a8_osk_key() == A8_OSK_DRIVE) {    /* DRV: not an Atari key */
+            bool on = a8_toggle_drive1();
+            a8_display_toast(on ? "DRIVE ON" : "DRIVE OFF");
+            in.trig[0] = 0;
+        }
+        if (key < 0 && in.trig[0] && a8_osk_key() != A8_OSK_DRIVE) {   /* a new key */
             key = a8_osk_key();
             down_left = KEY_DOWN_FRAMES;
             up_left = KEY_UP_FRAMES;
@@ -190,18 +199,6 @@ bool a8_input_frame(void) {
     }
     a8_input = in;
 
-    /* Right side button: FPS overlay on / off; left: disk drive 1 off / on
-     * (on press; one still held from the menu is ignored) */
-    static bool left_was = true, right_was = true;
-    bool left = low(PIN_SIDE_UP), right = low(PIN_SIDE_DOWN);
-    if (right && !right_was) a8_display_toggle_fps();
-    if (left && !left_was) {
-        bool on = a8_toggle_drive1();
-        Serial.printf("[input] left side button: disk drive 1 %s%c", on ? "on" : "off", 10);
-        a8_display_toast(on ? "DRIVE ON" : "DRIVE OFF");
-    }
-    left_was = left;
-    right_was = right;
 
     /* MENU held 1 s: leave the game. A press already down when the game
      * started (from the menu) counts only after it has been released. */

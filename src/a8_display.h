@@ -14,7 +14,7 @@ void a8_display_start(void);       /* hand the panel to core 1 for the game */
 void a8_display_stop(void);        /* ... and take it back */
 void a8_display_core1_loop(void);  /* core 1: send a frame when one is ready */
 void a8_display_refresh(void);     /* paused: show the last frame again (with overlays) */
-void a8_display_toggle_fps(void);  /* "E60 S58" overlay on / off (off at start) */
+void a8_display_set_fps(bool on);  /* "E60 S58" overlay (Settings > FPS display) */
 void a8_display_toast(const char *text);   /* message top-left for 2 s (digits, D E F I N O R S V) */
 void a8_display_stats(uint32_t *shown, uint32_t *skipped);
 /* Average push time (us) and rows sent per push, since the last call. */
