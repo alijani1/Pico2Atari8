@@ -106,6 +106,25 @@ int a8z_find(const uint8_t *zip, size_t size, a8z_entry *out) {
     return 0;
 }
 
+struct ends { uint32_t usize; uint8_t *head; unsigned n; uint8_t *tail; };
+
+static void put_ends(uint32_t index, const uint8_t *data, void *ctx) {
+    struct ends *x = (struct ends *)ctx;
+    uint32_t at = index * A8Z_SECTOR;
+    for (unsigned i = 0; i < x->n; i++)
+        if (i >= at && i < at + A8Z_SECTOR) x->head[i] = data[i - at];
+    for (uint32_t i = x->usize >= 6 ? x->usize - 6 : 0; i < x->usize; i++)
+        if (i >= at && i < at + A8Z_SECTOR) x->tail[i - (x->usize - 6)] = data[i - at];
+}
+
+int a8z_ends(const a8z_entry *e, uint8_t *dict, uint8_t *sector,
+             uint8_t *head, unsigned n, uint8_t tail[6]) {
+    struct ends x = { e->usize, head, n, tail };
+    uint32_t written;
+    if (e->usize < 6 || n > 16) return 0;
+    return a8z_extract(e, dict, sector, put_ends, &x, &written) == A8Z_OK;
+}
+
 int a8z_extract(const a8z_entry *e, uint8_t *dict, uint8_t *sector,
                 void (*put)(uint32_t index, const uint8_t *data, void *ctx), void *ctx,
                 uint32_t *written_out) {

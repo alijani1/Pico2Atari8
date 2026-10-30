@@ -35,6 +35,11 @@ int a8z_extract(const a8z_entry *e, uint8_t *dict, uint8_t *sector,
                 void (*put)(uint32_t index, const uint8_t *data, void *ctx), void *ctx,
                 uint32_t *written);
 
+/* The first `n` (<= 16) and last 6 bytes of the file, inflated as above
+ * (the whole file is unpacked on the way, nothing kept). 1 = done. */
+int a8z_ends(const a8z_entry *e, uint8_t *dict, uint8_t *sector,
+             uint8_t *head, unsigned n, uint8_t tail[6]);
+
 #ifdef __cplusplus
 }
 #endif

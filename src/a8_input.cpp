@@ -17,10 +17,9 @@
  * same device buttons and Joy-Con, but the ports are two Atari 5200
  * controllers instead of DB9 joysticks, and there are no side buttons:
  *
- *   5200 controllers  joysticks 1-2: the analog stick as directions (RC
- *                     charge time, as Pico2Arcade reads it); Fire A or
- *                     Fire B = fire
- *   (keypads)         not read yet - the on-screen keyboard (Blue) types
+ *   5200 controllers  joysticks 1-2 (pico_5200ctl.cpp): the analog stick
+ *                     as directions; Fire A or Fire B = fire; keypad 0-9 =
+ *                     the number keys, START = START
  *
  * A 5200 game (either device; a8_is_5200) has its own controls:
  *
@@ -28,8 +27,9 @@
  *   Red / click       bottom fire;  Green  top fire
  *   START / SELECT    START / PAUSE;  Yellow  *
  *   Blue              the keypad on screen: 0-9 * # START PAUSE RESET
- *   5200 controllers  (Duo) directions and Fire A as before, Fire B = top
- *                     fire; the analog stick and keypad come in phase 2
+ *   5200 controllers  (Duo) the real thing: analog sticks, bottom (A) and
+ *                     top (B) fire, keypads (START PAUSE RESET too). The
+ *                     Joy-Con, once moved, stands in for controller 1's stick.
  */
 #include <Arduino.h>
 #include "a8_input.h"
@@ -37,6 +37,7 @@
 #include "a8_display.h"
 #include "a8_osk.h"
 #include "a8_settings.h"
+#include "pico_5200ctl.h"
 
 extern "C" {
 #include "akey.h"
@@ -44,8 +45,6 @@ extern "C" {
 
 #ifdef PICO_5200
 static const int NUM_PORTS = 2;
-static const int8_t RC_PINS[2][2]   = { { 40, 41 }, { 42, 43 } };   /* stick x, y */
-static const int8_t FIRE_PINS[2][2] = { { 10, 11 }, { 12, 13 } };   /* Fire A, Fire B */
 static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
 #else
 static const int NUM_PORTS = 4;
@@ -116,86 +115,10 @@ static int16_t axis_pot(const JoyAxis &a, int v) {
 
 static inline bool low(int p) { return p >= 0 && digitalRead(p) == LOW; }
 
-#ifdef PICO_5200
-/* ---- Atari 5200 controller sticks -------------------------------------
- * Ported from Pico2Arcade (src/pico_input.cpp rc_stick_read): each pot's
- * capacitor rests discharged (OUTPUT LOW); released to INPUT it charges
- * through the pot, and the time until the pin reads HIGH grows with the
- * resistance - longer = right (X) / down (Y), about 0-1.3 ms over the
- * stick's travel. Blocks for up to 2 ms, so it runs at most every 16 ms.
- * Centre = where the stick rests at its first reading; a direction triggers
- * at 25 % of the travel seen on that side of it (the nominal travel until
- * the stick has moved). Unplugged (both axes time out) = start over. */
-static const uint32_t RC_TIMEOUT_US = 2000;     /* no controller / pot beyond range */
-static const uint32_t RC_NOMINAL_US = 1334;     /* full travel, nominal */
-static uint8_t rc_dirs[2];                      /* A8_UP/DOWN/LEFT/RIGHT per port */
-
-static void rc_init(void) {
-    for (auto &port : RC_PINS)
-        for (int8_t p : port) {
-            gpio_init(p);
-            gpio_disable_pulls(p);
-            gpio_put(p, 0);
-            gpio_set_dir(p, GPIO_OUT);          /* park discharged */
-        }
-}
-
-static void rc_read(void) {
-    static uint32_t lastUs = 0;
-    static uint32_t lo[2][2] = { { 0xFFFFFFFFu, 0xFFFFFFFFu }, { 0xFFFFFFFFu, 0xFFFFFFFFu } };
-    static uint32_t hi[2][2];
-    static int32_t  rest[2][2] = { { -1, -1 }, { -1, -1 } };   /* charge time at rest */
-    uint32_t now = time_us_32();
-    if (lastUs != 0 && now - lastUs < 16000) return;
-    lastUs = now;
-
-    uint32_t t[2][2] = { { 0, 0 }, { 0, 0 } };
-    uint32_t t0 = time_us_32();
-    for (auto &port : RC_PINS)                  /* release all four caps together */
-        for (int8_t p : port) gpio_set_dir(p, GPIO_IN);
-    for (;;) {
-        uint32_t el = time_us_32() - t0;
-        bool all = true;
-        for (int n = 0; n < 2; n++)
-            for (int a = 0; a < 2; a++) {
-                if (!t[n][a] && gpio_get(RC_PINS[n][a])) t[n][a] = el + 1;
-                if (!t[n][a]) all = false;
-            }
-        if (all || el >= RC_TIMEOUT_US) break;
-    }
-    for (auto &port : RC_PINS)                  /* discharge again (pin LOW) */
-        for (int8_t p : port) gpio_set_dir(p, GPIO_OUT);
-
-    for (int n = 0; n < 2; n++) {
-        if (!t[n][0] && !t[n][1]) {             /* no controller: forget its calibration */
-            for (int a = 0; a < 2; a++) { lo[n][a] = 0xFFFFFFFFu; hi[n][a] = 0; rest[n][a] = -1; }
-            rc_dirs[n] = 0;
-            continue;
-        }
-        uint8_t dirs = 0;
-        for (int a = 0; a < 2; a++) {
-            if (!t[n][a]) continue;             /* timed out: no pot on this axis */
-            if (rest[n][a] < 0) rest[n][a] = (int32_t)t[n][a];   /* first reading: at rest */
-            if (t[n][a] < lo[n][a]) lo[n][a] = t[n][a];
-            if (t[n][a] > hi[n][a]) hi[n][a] = t[n][a];
-            const int32_t minSpan = RC_NOMINAL_US / 4, nomThr = RC_NOMINAL_US / 8;
-            int32_t spanNeg = rest[n][a] - (int32_t)lo[n][a], spanPos = (int32_t)hi[n][a] - rest[n][a];
-            int32_t thrNeg = (spanNeg >= minSpan) ? spanNeg / 4 : nomThr;
-            int32_t thrPos = (spanPos >= minSpan) ? spanPos / 4 : nomThr;
-            int32_t d = (int32_t)t[n][a] - rest[n][a];
-            if (d >  thrPos) dirs |= (a == 0) ? A8_RIGHT : A8_DOWN;
-            if (d < -thrNeg) dirs |= (a == 0) ? A8_LEFT  : A8_UP;
-        }
-        rc_dirs[n] = dirs;
-    }
-}
-#endif
 
 void a8_input_init(void) {
 #ifdef PICO_5200
-    for (auto &port : FIRE_PINS)
-        for (int8_t p : port) pinMode(p, INPUT_PULLUP);
-    rc_init();
+    ctl5200_init();
 #else
     for (auto &port : PORT_PINS)
         for (int8_t p : port) pinMode(p, INPUT_PULLUP);
@@ -228,10 +151,28 @@ static uint8_t joycon_read(int16_t *pot_x = nullptr, int16_t *pot_y = nullptr) {
 }
 
 #ifdef PICO_5200
-static uint8_t port_dirs(int n) { rc_read(); return rc_dirs[n]; }
-static bool port_fire(int n) { return low(FIRE_PINS[n][0]) || low(FIRE_PINS[n][1]); }
-static bool port_fire_a(int n) { return low(FIRE_PINS[n][0]); }
-static bool port_fire_b(int n) { return low(FIRE_PINS[n][1]); }
+/* the analog stick as a joystick: past about a third of its travel */
+static uint8_t port_dirs(int n) {
+    int16_t x = ctl5200_pot(n, 0), y = ctl5200_pot(n, 1);
+    if (x < 0) return 0;
+    uint8_t d = 0;
+    if (x < 114 - 36) d |= A8_LEFT;
+    if (x > 114 + 36) d |= A8_RIGHT;
+    if (y < 114 - 36) d |= A8_UP;
+    if (y > 114 + 36) d |= A8_DOWN;
+    return d;
+}
+static bool port_fire(int n) { return ctl5200_fire_a(n) || ctl5200_fire_b(n); }
+static bool port_fire_a(int n) { return ctl5200_fire_a(n); }
+static bool port_fire_b(int n) { return ctl5200_fire_b(n); }
+static void ports_poll(void) { ctl5200_poll(); }
+/* keypad key (ctl5200_key) as the 5200's and as the 800's key */
+static const int KEYPAD_5200[15] = {
+    AKEY_5200_0, AKEY_5200_1, AKEY_5200_2, AKEY_5200_3, AKEY_5200_4, AKEY_5200_5, AKEY_5200_6,
+    AKEY_5200_7, AKEY_5200_8, AKEY_5200_9, AKEY_5200_ASTERISK, AKEY_5200_HASH,
+    AKEY_5200_START, AKEY_5200_PAUSE, AKEY_5200_RESET };
+static const int KEYPAD_800[12] = {
+    AKEY_0, AKEY_1, AKEY_2, AKEY_3, AKEY_4, AKEY_5, AKEY_6, AKEY_7, AKEY_8, AKEY_9, -1, -1 };
 #else
 static uint8_t port_dirs(int n) {
     uint8_t d = 0;
@@ -244,6 +185,7 @@ static uint8_t port_dirs(int n) {
 static bool port_fire(int n) { return low(PORT_PINS[n][4]); }
 static bool port_fire_a(int n) { return port_fire(n); }
 static bool port_fire_b(int n) { (void)n; return false; }
+static void ports_poll(void) {}
 #endif
 
 /* ---- in a game ------------------------------------------------------- */
@@ -263,6 +205,10 @@ bool a8_input_frame(void) {
     for (int n = 0; n < 8; n++) in.pot[n] = A8_POT_NONE;
     in.key = -1;
     uint8_t nav;                          /* moves the on-screen keyboard's cursor */
+    ports_poll();
+#ifdef PICO_5200
+    int pad = ctl5200_key();
+#endif
     if (a8_is_5200()) {
         /* the Joy-Con is controller 1's analog stick; a controller's own
          * directions count while the Joy-Con rests (input.c) */
@@ -271,7 +217,19 @@ bool a8_input_frame(void) {
             in.trig[n] = port_fire_a(n);
             if (port_fire_b(n)) in.shift = 1;
         }
-        nav = in.stick[0] | joycon_read(&in.pot[0], &in.pot[1]);
+#ifdef PICO_5200
+        for (int n = 0; n < 2; n++) {         /* the controllers' own sticks */
+            in.pot[2 * n] = ctl5200_pot(n, 0);
+            in.pot[2 * n + 1] = ctl5200_pot(n, 1);
+        }
+        if (pad >= 0) in.key = KEYPAD_5200[pad];
+#endif
+        int16_t jx, jy;                       /* the Joy-Con, while it's off centre */
+        nav = in.stick[0] | joycon_read(&jx, &jy);
+        if (jx != A8_POT_NONE || jy != A8_POT_NONE) {
+            in.pot[0] = jx != A8_POT_NONE ? jx : 114;
+            in.pot[1] = jy != A8_POT_NONE ? jy : 114;
+        }
         if (low(PIN_RED) || low(PIN_CLICK)) in.trig[0] = 1;
         if (low(PIN_GREEN)) in.shift = 1;                 /* top fire */
         if (low(PIN_YELLOW)) in.key = AKEY_5200_ASTERISK;
@@ -282,10 +240,14 @@ bool a8_input_frame(void) {
             in.stick[n] = port_dirs(n);
             in.trig[n] = port_fire(n);
         }
+#ifdef PICO_5200
+        if (pad >= 0 && pad < 12) in.key = KEYPAD_800[pad];
+        if (pad == 12) in.start = 1;
+#endif
         in.stick[0] |= joycon_read();
         nav = in.stick[0];
         if (low(PIN_RED) || low(PIN_CLICK)) in.trig[0] = 1;
-        in.start  = low(PIN_START);
+        in.start  |= low(PIN_START);
         in.select = low(PIN_SELECT);
         in.option = low(PIN_GREEN);
         if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
@@ -375,6 +337,7 @@ bool a8_input_frame(void) {
 
 uint8_t a8_input_menu(void) {
     uint8_t b = 0;
+    ports_poll();
     uint8_t d = port_dirs(0) | joycon_read();
     if ((d & A8_UP)   || low(PIN_SIDE_UP))   b |= A8M_UP;
     if ((d & A8_DOWN) || low(PIN_SIDE_DOWN)) b |= A8M_DOWN;
@@ -385,3 +348,32 @@ uint8_t a8_input_menu(void) {
     if (low(PIN_SELECT)) b |= A8M_ALT;
     return b;
 }
+
+/* ---- controller test (a8_ctltest.cpp) ---------------------------------- */
+
+void a8_input_joycon_diag(int raw[2], int centre[2], int lo[2], int hi[2], int16_t pot[2]) {
+    JoyAxis *axes[2] = { &joy_x, &joy_y };
+    for (int a = 0; a < 2; a++) {
+        raw[a] = axis_sample(*axes[a]);
+        int half;
+        axis_centre(*axes[a], &centre[a], &half);
+        lo[a] = axes[a]->lo;
+        hi[a] = axes[a]->hi;
+        pot[a] = axis_pot(*axes[a], raw[a]);
+    }
+}
+
+bool a8_input_button(int which) {
+    static const int PINS[A8B_COUNT] = { PIN_RED, PIN_GREEN, PIN_BLUE, PIN_YELLOW,
+                                         PIN_START, PIN_SELECT, PIN_CLICK, PIN_MENU };
+    return which >= 0 && which < A8B_COUNT && low(PINS[which]);
+}
+
+uint8_t a8_input_port_dirs(int n, bool *fire) {
+    ports_poll();
+    if (n < 0 || n >= NUM_PORTS) { *fire = false; return 0; }
+    *fire = port_fire(n);
+    return port_dirs(n);
+}
+
+int a8_input_num_ports(void) { return NUM_PORTS; }

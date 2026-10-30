@@ -35,8 +35,8 @@ bool romfs_init(void);
 bool romfs_exists(const char *path);
 /* Read the whole file into a malloc'd buffer (caller frees). */
 bool romfs_slurp(const char *path, uint8_t **out, size_t *out_sz);
-/* Every file on the drive - root, then the ATARI and ROMS folders. `path`
- * ("/ATARI/GAME.XEX") opens it with romfs_slurp; `display` is its long name
+/* Every file on the drive - the root, and its folders three deep (hidden /
+ * system ones skipped). `path` ("/ATARI/5200/GAME.A52", 8.3 names) opens it with romfs_slurp; `display` is its long name
  * when it has one. Return false from the callback to stop. Flash boards only. */
 typedef bool (*romfs_list_cb)(const char *path, const char *display, uint32_t size, void *ctx);
 void romfs_list(romfs_list_cb cb, void *ctx);

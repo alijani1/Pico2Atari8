@@ -58,13 +58,14 @@ and on, like the switch on a real drive: let the game load, type DRV
 | Volume | 0-100 % (shared with the Quad) |
 | Default machine | 800XL (default) / 400/800 - SELECT in the list starts the other |
 | TV system | NTSC (default) / PAL |
+| Controller test | every control live: the 5200 controllers' sticks (as the pot value the game gets, plus the raw counts and the range learnt), Fire A / B and keys; the Quad's joystick ports; the Joy-Con; the device buttons. MENU goes back |
 
 ## Atari 5200
 
 A 5200 game starts on an emulated 5200 (16 KB, NTSC) on either device. Its
 BIOS is the built-in Altirra 5200 OS; copy your own `5200.ROM` (2 KB) onto
 the drive (root or `ATARI` folder) and it's used instead. The list labels
-5200 games **5200**.
+5200 games **5200**, zipped ones too.
 
 A raw `.bin` / `.rom` carries no type, so it's told by its last bytes (an
 800 cartridge ends in its run address, a `$00` "cartridge here" byte and an
@@ -82,7 +83,7 @@ guessed from where its code jumps to. Rename a game `.a52` to make sure.
 | Yellow | `*` |
 | Blue | the controller keypad on screen: 0-9 `*` `#` START PAUSE RESET (as the keyboard: the game pauses, fire presses a key) |
 | MENU | hold 1 s: back to the game list |
-| 5200 controllers (Duo) | for now as joysticks: directions and Fire A, Fire B = top fire. Their analog sticks and keypads: next |
+| 5200 controllers (Duo) | controllers 1 and 2: analog stick, Fire A = bottom, Fire B = top, keypad 0-9 `*` `#` START PAUSE RESET. The Joy-Con stands in for controller 1's stick while it's moved. In a 400/800/XL game they're joysticks (Fire A or B = fire, keypad digits = number keys, START = START) |
 
 ## Quad Ultimate CX
 
@@ -95,7 +96,7 @@ Pico2Arcade, comes with the Quad release, and shares its ARCADE ROMS drive.
 2. **Mini-Games → Atari 8-bit** opens the game list.
 3. To copy games: pick **ROM Drive (USB)** at the end of the list. The
    Quad shows up on your computer as the **ARCADE ROMS** drive; copy the
-   files into the root or an `ATARI` folder, eject, and press MENU or START.
+   files anywhere on it (folders are fine, three deep), eject, and press MENU or START.
 
 | Control | In the game list | In a game |
 |---|---|---|

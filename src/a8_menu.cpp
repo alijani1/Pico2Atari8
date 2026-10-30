@@ -1,7 +1,7 @@
 /* a8_menu.cpp - the game list.
  *
- * Lists the Atari files on the ARCADE ROMS drive (root, ATARI and ROMS
- * folders): .xex .com .exe executables, .car .rom .bin cartridges, .a52
+ * Lists the Atari files on the ARCADE ROMS drive (the root and its folders,
+ * three deep): .xex .com .exe executables, .car .rom .bin cartridges, .a52
  * 5200 cartridges and .atr .xfd disk images and .zip files holding one of
  * those (a8_zip.cpp; not
  * the arcade's zips - a8z_is_game), by
@@ -24,10 +24,20 @@
 #include "a8_platform.h"
 
 static const int MAX_GAMES = 128;      /* + the Settings and ROM drive rows */
-struct Game { char path[24]; char name[40]; bool osb; char kind[5]; };
+struct Game { char path[48]; char name[40]; bool osb; char kind[5]; };
 
 /* What the file is, shown at the right of its row: two files can share a
  * name ("Slime" = SLIME.BIN and SLIME.ZIP). */
+/* A raw cartridge of `size` bytes ending in `tail`: a 5200 one? */
+static bool raw_5200(const uint8_t *tail, size_t size) {
+    int r = a8_raw_cart_is_5200(tail, (long)size);
+#ifdef PICO_5200
+    return r != 0;                       /* can't tell: a 5200 one here (main.cpp) */
+#else
+    return r > 0;
+#endif
+}
+
 static const char *kind_of(const char *path) {
     const char *dot = strrchr(path, '.');
     if (!dot) return "";
@@ -38,17 +48,15 @@ static const char *kind_of(const char *path) {
         /* a 5200 cartridge by its last bytes (a8_raw_cart_is_5200) */
         const uint8_t *p;
         size_t size;
-        if (romfs_map(path, &p, &size) && size >= 4096) {
-            int r = a8_raw_cart_is_5200(p + size - 6, (long)size);
-#ifdef PICO_5200
-            if (r != 0) return "5200";      /* can't tell: a 5200 one here (main.cpp) */
-#else
-            if (r > 0) return "5200";
-#endif
-        }
+        if (romfs_map(path, &p, &size) && size >= 4096 && raw_5200(p + size - 6, size)) return "5200";
         return "CART";
     }
-    if (!strcasecmp(dot, ".car")) return "CART";
+    if (!strcasecmp(dot, ".car")) {
+        const uint8_t *p;
+        size_t size;
+        if (romfs_map(path, &p, &size) && size >= 16 && a8_car_is_5200(p)) return "5200";
+        return "CART";
+    }
     return "XEX";
 }
 static bool picked_alt = false, picked_osb = false;
@@ -78,22 +86,43 @@ static bool supported(const char *path) {
 }
 
 /* A zip is listed only if it holds an Atari game (a8z_is_game): the drive
- * is shared with the arcade, whose game zips sit beside ours. */
-static bool atari_zip(const char *path) {
+ * is shared with the arcade, whose game zips sit beside ours. Then its kind:
+ * "5200" for a 5200 game (an .a52; a .car of a 5200 type or a .bin / .rom
+ * that looks like one - unpacked here just to see its ends), else "ZIP".
+ * nullptr = not an Atari game. */
+static const char *zip_kind(const char *path) {
+    size_t cap;
+    uint8_t *buf = a8_display_scratch(&cap);       /* idle until a game starts */
     const uint8_t *zip;
     size_t zsize;
-    if (!romfs_map(path, &zip, &zsize)) {
-        size_t cap;
-        uint8_t *buf = a8_display_scratch(&cap);   /* idle until a game starts */
-        if (!romfs_read(path, buf, cap, &zsize)) return false;
+    if (romfs_map(path, &zip, &zsize)) {
+        /* the whole scratch is free for unpacking */
+    } else {
+        if (!romfs_read(path, buf, cap, &zsize)) return nullptr;
         zip = buf;
     }
-    return a8z_is_game(zip, zsize);
+    if (!a8z_is_game(zip, zsize)) return nullptr;
+    a8z_entry e;
+    if (!a8z_find(zip, zsize, &e)) return "ZIP";
+    const char *dot = strrchr(e.name, '.');
+    if (!dot) return "ZIP";
+    if (!strcasecmp(dot, ".a52")) return "5200";
+    bool car = !strcasecmp(dot, ".car");
+    if (!car && strcasecmp(dot, ".bin") && strcasecmp(dot, ".rom")) return "ZIP";
+    if (!car && (e.usize < 4096 || e.usize > 40 * 1024)) return "ZIP";   /* 5200 carts: 4-40 KB */
+    /* dict + sector after the zip (if it's in the scratch too) */
+    size_t used = zip == buf ? (zsize + 3) & ~(size_t)3 : 0;
+    if (used + A8Z_DICT + A8Z_SECTOR > cap) return "ZIP";
+    uint8_t head[16], tail[6];
+    if (!a8z_ends(&e, buf + used, buf + used + A8Z_DICT, head, sizeof(head), tail)) return "ZIP";
+    if (car) return a8_car_is_5200(head) ? "5200" : "ZIP";
+    return raw_5200(tail, e.usize) ? "5200" : "ZIP";
 }
 
 static bool add_game(const char *path, const char *display, uint32_t size, void *) {
     if (!supported(path) || size == 0) return true;
-    if (!strcasecmp(kind_of(path), "ZIP") && !atari_zip(path)) {
+    const char *kind = kind_of(path);
+    if (!strcasecmp(kind, "ZIP") && !(kind = zip_kind(path))) {
         Serial.printf("[menu] %-22s skipped: no Atari game inside\n", path);
         return true;
     }
@@ -108,7 +137,7 @@ static bool add_game(const char *path, const char *display, uint32_t size, void 
     for (size_t i = 0; i < n; i++) low[i] = (char)tolower((unsigned char)display[i]);
     low[n] = 0;
     g.osb = strstr(low, "osb") || strstr(low, "os-b") || strstr(low, "400-800");
-    strncpy(g.kind, kind_of(path), sizeof(g.kind) - 1);
+    strncpy(g.kind, kind, sizeof(g.kind) - 1);
     g.kind[sizeof(g.kind) - 1] = 0;
     Serial.printf("[menu] %-22s %-5s %7lu  %s\n", path, g.kind, (unsigned long)size, display);
     /* shown without its extension */

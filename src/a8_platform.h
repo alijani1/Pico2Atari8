@@ -46,6 +46,8 @@ int  a8_raw_cart_is_5200(const uint8_t *tail, long size);
 /* The file is a 5200 game: .a52, or a raw cartridge that looks like one
  * (unknown ones count as 5200 when unknown_5200). */
 int  a8_file_is_5200(const char *path, int unknown_5200);
+/* A .car file's header (16 bytes) names a 5200 cartridge type. */
+int  a8_car_is_5200(const uint8_t *header);
 void a8_frame(void);                 /* keyboard, emulate one frame, show it */
 void a8_silent_frame(void);          /* paused: a frame's time of silence */
 int  a8_toggle_drive1(void);         /* drive 1 off / back on; true = now on */

@@ -189,6 +189,23 @@ int a8_raw_cart_is_5200(const uint8_t *tail, long size)
 	return -1;
 }
 
+int a8_car_is_5200(const uint8_t *header)
+{
+	int type;
+	if (memcmp(header, "CART", 4) != 0)
+		return FALSE;
+	type = (header[4] << 24) | (header[5] << 16) | (header[6] << 8) | header[7];
+	switch (type) {
+	case CARTRIDGE_5200_32: case CARTRIDGE_5200_EE_16: case CARTRIDGE_5200_40:
+	case CARTRIDGE_5200_40_ALT: case CARTRIDGE_5200_NS_16: case CARTRIDGE_5200_8:
+	case CARTRIDGE_5200_4: case CARTRIDGE_5200_SUPER_64: case CARTRIDGE_5200_SUPER_128:
+	case CARTRIDGE_5200_SUPER_256: case CARTRIDGE_5200_SUPER_512:
+		return TRUE;
+	default:
+		return FALSE;
+	}
+}
+
 int a8_file_is_5200(const char *path, int unknown_5200)
 {
 	const char *dot = strrchr(path, '.');

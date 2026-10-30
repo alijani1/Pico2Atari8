@@ -10,6 +10,7 @@
  *                                                 the game list starts the
  *                                                 other one)
  *   TV system        NTSC / PAL
+ *   Controller test  every control live (a8_ctltest.cpp)
  *
  * Saved in a 4 KB flash sector of our own (A8_SETTINGS_PHYS), written only
  * when something changed.
@@ -19,6 +20,7 @@
 #include "a8_display.h"
 #include "a8_flash.h"
 #include "a8_input.h"
+#include "a8_ctltest.h"
 #include "pico_audio.h"
 #include "pico_handoff.h"
 
@@ -75,10 +77,10 @@ static void save(void) {
 
 /* ---- the screen -------------------------------------------------------- */
 
-enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_BACK, ROWS };
+enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_TEST, ROW_BACK, ROWS };
 static const char *const NAMES[ROWS] = { "Keyboard", "FPS display", "Volume", "Default machine",
-                                         "TV system", "Back" };
-static const int ROW_H = 26, LIST_Y = 40;
+                                         "TV system", "Controller test", "Back" };
+static const int ROW_H = 24, LIST_Y = 36;
 static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2A69,
                       COL_TITLE = 0xFD20, COL_HINT = TFT_DARKGREY, COL_VALUE = 0x07FF;
 
@@ -169,7 +171,15 @@ void a8_settings_screen(void) {
         if (sel != old) { draw_row(old, false); draw_row(sel, true); }
         if (pressed & (A8M_LEFT | A8M_RIGHT | A8M_OK)) {
             if (sel == ROW_BACK) { if (pressed & A8M_OK) break; }
-            else {
+            else if (sel == ROW_TEST) {
+                if (pressed & A8M_OK) {
+                    while (a8_input_menu() & A8M_OK) delay(10);
+                    a8_ctltest_screen();
+                    draw_screen(sel);
+                    prev = 0xFF;                 /* MENU still down: not a "back" */
+                    continue;
+                }
+            } else {
                 int dir = (pressed & A8M_LEFT) ? -1 : 1;
                 if (change(sel, dir)) dirty = true;
                 draw_row(sel, true);

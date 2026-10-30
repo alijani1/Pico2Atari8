@@ -174,10 +174,11 @@ static const uint8_t *scan_dir(const uint8_t *dir, uint32_t count, const char *n
     return nullptr;
 }
 
-/* Find a directory entry in a subdirectory's cluster chain. */
-static const uint8_t *scan_subdir(uint32_t cluster, const char *name83) {
+/* Find a directory entry in a subdirectory's cluster chain (wantAttr 0x10:
+ * a folder). */
+static const uint8_t *scan_subdir(uint32_t cluster, const char *name83, uint8_t wantAttr = 0) {
     for (int guard = 0; cluster_ok(cluster) && guard < 4096; guard++) {
-        const uint8_t *e = scan_dir(vol + cluster_ofs(cluster), clusterBytes / 32, name83, 0);
+        const uint8_t *e = scan_dir(vol + cluster_ofs(cluster), clusterBytes / 32, name83, wantAttr);
         if (e) return e;
         cluster = fat_next(cluster);
         if (fat_eoc(cluster)) break;
@@ -192,9 +193,9 @@ static const uint8_t *find_dir(const char *name) {
     return scan_dir(vol + rootOfs, rootEntries, n83, 0x10);
 }
 
-/* Directory entry for `path`: "/DIR/NAME.EXT" looks in that root folder;
- * a bare name (or "/roms/NAME.EXT") in the root, then the ROMS folder,
- * then the ATARI folder. */
+/* Directory entry for `path`: "/DIR/SUB/NAME.EXT" follows the folders
+ * (8.3 names); a bare name (or "/roms/NAME.EXT") is looked for in the root,
+ * then the ROMS folder, then the ATARI folder. */
 static const uint8_t *find_file(const char *path) {
     if (!vol) return nullptr;
     const char *name = strrchr(path, '/');
@@ -202,17 +203,21 @@ static const uint8_t *find_file(const char *path) {
     char n83[11];
     if (!to_83(name, n83)) return nullptr;
     const char *p = (path[0] == '/') ? path + 1 : path;
-    const char *slash = strchr(p, '/');
-    if (slash && slash == strrchr(p, '/')) {
-        char dir[13];
-        size_t n = (size_t)(slash - p);
-        if (n < sizeof(dir)) {
+    if (strchr(p, '/') && strncasecmp(p, "roms/", 5) != 0) {
+        /* walk the folders */
+        const uint8_t *d = nullptr;
+        while (const char *slash = strchr(p, '/')) {
+            char dir[13], d83[11];
+            size_t n = (size_t)(slash - p);
+            if (n == 0 || n >= sizeof(dir)) return nullptr;
             memcpy(dir, p, n); dir[n] = 0;
-            if (strcasecmp(dir, "roms") != 0) {
-                const uint8_t *d = find_dir(dir);
-                return d ? scan_subdir(rd16(d + 26), n83) : nullptr;
-            }
+            if (!to_83(dir, d83)) return nullptr;
+            d = d ? scan_subdir(rd16(d + 26), d83, 0x10)
+                  : scan_dir(vol + rootOfs, rootEntries, d83, 0x10);
+            if (!d) return nullptr;
+            p = slash + 1;
         }
+        return scan_subdir(rd16(d + 26), n83);
     }
     const uint8_t *e = scan_dir(vol + rootOfs, rootEntries, n83, 0);
     if (e) return e;
@@ -241,9 +246,15 @@ static void lfn_piece(const uint8_t *e, char *lfn, size_t cap) {
     }
 }
 
-/* Calls cb for each file among `count` entries at `dir`. Returns true once
- * the callback asked to stop. `lfn` carries a long name across clusters. */
-static bool list_entries(const uint8_t *dir, uint32_t count, const char *folder,
+static const int LIST_DEPTH = 3;           /* folders below the root that are listed */
+static bool list_folder(uint32_t cluster, const char *folder, int depth,
+                        romfs_list_cb cb, void *ctx);
+
+/* Calls cb for each file among `count` entries at `dir`, and goes into its
+ * folders (`depth` deep at most; hidden and system ones skipped). Returns
+ * true once the callback asked to stop. `lfn` carries a long name across
+ * clusters. */
+static bool list_entries(const uint8_t *dir, uint32_t count, const char *folder, int depth,
                          romfs_list_cb cb, void *ctx, char *lfn, size_t cap) {
     for (uint32_t i = 0; i < count; i++) {
         const uint8_t *e = dir + i * 32;
@@ -255,7 +266,23 @@ static bool list_entries(const uint8_t *dir, uint32_t count, const char *folder,
             lfn_piece(e, lfn, cap);
             continue;
         }
-        if ((attr & 0x18) || e[0] == '.') { lfn[0] = 0; continue; }   /* dir / label */
+        if ((attr & 0x08) || e[0] == '.') { lfn[0] = 0; continue; }   /* label, . and .. */
+        if (attr & 0x10) {                                  /* a folder */
+            lfn[0] = 0;
+            if (depth >= LIST_DEPTH || (attr & 0x06)) continue;
+            char dn[13], sub[48];
+            int k = 0;
+            for (int j = 0; j < 8 && e[j] != ' '; j++) dn[k++] = (char)e[j];
+            if (e[8] != ' ') {
+                dn[k++] = '.';
+                for (int j = 8; j < 11 && e[j] != ' '; j++) dn[k++] = (char)e[j];
+            }
+            dn[k] = 0;
+            if (folder) snprintf(sub, sizeof(sub), "%s/%s", folder, dn);
+            else        snprintf(sub, sizeof(sub), "%s", dn);
+            if (list_folder(rd16(e + 26), sub, depth + 1, cb, ctx)) return true;
+            continue;
+        }
         char n83[13];
         int k = 0;
         for (int j = 0; j < 8 && e[j] != ' '; j++) n83[k++] = (char)e[j];
@@ -264,7 +291,7 @@ static bool list_entries(const uint8_t *dir, uint32_t count, const char *folder,
             for (int j = 8; j < 11 && e[j] != ' '; j++) n83[k++] = (char)e[j];
         }
         n83[k] = 0;
-        char path[24];
+        char path[64];
         if (folder) snprintf(path, sizeof(path), "/%s/%s", folder, n83);
         else        snprintf(path, sizeof(path), "/%s", n83);
         bool more = cb(path, lfn[0] ? lfn : n83, rd32(e + 28), ctx);
@@ -274,24 +301,24 @@ static bool list_entries(const uint8_t *dir, uint32_t count, const char *folder,
     return false;
 }
 
+static bool list_folder(uint32_t cluster, const char *folder, int depth,
+                        romfs_list_cb cb, void *ctx) {
+    char lfn[64];
+    lfn[0] = 0;
+    for (int guard = 0; cluster_ok(cluster) && guard < 4096; guard++) {
+        if (list_entries(vol + cluster_ofs(cluster), clusterBytes / 32, folder, depth, cb, ctx, lfn, sizeof(lfn)))
+            return true;
+        cluster = fat_next(cluster);
+        if (fat_eoc(cluster)) break;
+    }
+    return false;
+}
+
 extern "C" void romfs_list(romfs_list_cb cb, void *ctx) {
     if (!vol) return;
     char lfn[64];
     lfn[0] = 0;
-    if (list_entries(vol + rootOfs, rootEntries, nullptr, cb, ctx, lfn, sizeof(lfn))) return;
-    static const char *const dirs[] = { "ATARI", "ROMS" };
-    for (const char *dn : dirs) {
-        const uint8_t *d = find_dir(dn);
-        if (!d) continue;
-        uint32_t cluster = rd16(d + 26);
-        lfn[0] = 0;
-        for (int guard = 0; cluster_ok(cluster) && guard < 4096; guard++) {
-            if (list_entries(vol + cluster_ofs(cluster), clusterBytes / 32, dn, cb, ctx, lfn, sizeof(lfn)))
-                return;
-            cluster = fat_next(cluster);
-            if (fat_eoc(cluster)) break;
-        }
-    }
+    list_entries(vol + rootOfs, rootEntries, nullptr, 0, cb, ctx, lfn, sizeof(lfn));
 }
 
 extern "C" bool romfs_exists(const char *path) { return find_file(path) != nullptr; }
