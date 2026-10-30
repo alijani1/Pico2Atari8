@@ -159,8 +159,8 @@ int main(int argc, char **argv) {
     /* MACHINE=-atari (400/800) or -xl (default, as the device) */
     char *machine = getenv("MACHINE") ? getenv("MACHINE") : "-xl";
     /* A8_ARGS="-osb_rom /path/ATARIOSB.ROM -800-rev b-ntsc": more options */
-    char *a8argv[32] = { "atari800", machine, "-ntsc", "-nobasic" };
-    int a8argc = 4;
+    char *a8argv[32] = { "atari800", machine, "-ntsc", "-nobasic", "-colors-preset", "vibrant" };
+    int a8argc = 6;
     static char extra[512];
     if (getenv("A8_ARGS")) {
         strncpy(extra, getenv("A8_ARGS"), sizeof(extra) - 1);
@@ -169,7 +169,6 @@ int main(int argc, char **argv) {
     a8argv[a8argc++] = argv[1];
     a8argv[a8argc] = NULL;
     if (!Atari800_Initialise(&a8argc, a8argv)) { printf("Atari800_Initialise failed\n"); return 2; }
-    if (getenv("PALNUM")) a8_set_palette(atoi(getenv("PALNUM")));
     if (getenv("PALETTE")) {          /* the 256 colours as a 16 x 16 grid (hue x lum) */
         FILE *pf = fopen(getenv("PALETTE"), "wb");
         fprintf(pf, "P6\n256 256\n255\n");

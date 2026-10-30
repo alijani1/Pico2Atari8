@@ -72,19 +72,16 @@ static const uint8_t GLYPH_DIGIT[10][7] = {
 };
 static const uint8_t GLYPH_E[7] = { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F };
 static const uint8_t GLYPH_S[7] = { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E };
-/* letters for the messages ("DRIVE OFF", "COLOUR 3") */
+/* letters for the messages ("DRIVE OFF" / "DRIVE ON") */
 static const struct { char c; uint8_t g[7]; } GLYPH_LETTERS[] = {
-    { 'C', { 0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E } },
     { 'D', { 0x1C, 0x12, 0x11, 0x11, 0x11, 0x12, 0x1C } },
     { 'E', { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F } },
     { 'F', { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10 } },
     { 'I', { 0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E } },
-    { 'L', { 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F } },
     { 'N', { 0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11 } },
     { 'O', { 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E } },
     { 'R', { 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11 } },
     { 'S', { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E } },
-    { 'U', { 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E } },
     { 'V', { 0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04 } },
 };
 static const uint8_t *glyph(char c) {
@@ -174,19 +171,16 @@ void a8_display_init(void) {
                   (unsigned long)(spi_get_baudrate(spi0) / 1000000));
 }
 
-void a8_display_palette(int green_pct) {
+void a8_display_palette(void) {
     for (int i = 0; i < 256; i++) {
         int rgb = Colours_table[i];
-        int r = (rgb >> 16) & 0xFF, g = ((rgb >> 8) & 0xFF) * green_pct / 100, b = rgb & 0xFF;
-        if (g > 255) g = 255;
-        uint16_t c = (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+        uint16_t c = (uint16_t)(((rgb >> 8) & 0xF800) | ((rgb >> 5) & 0x07E0) | ((rgb >> 3) & 0x001F));
         pal565[i] = (uint16_t)((c >> 8) | (c << 8));
     }
-    hashes_valid = false;                /* every row needs the new colours */
 }
 
-void a8_display_start(int green_pct) {
-    a8_display_palette(green_pct);
+void a8_display_start(void) {
+    a8_display_palette();
     tft.fillScreen(TFT_BLACK);
     hashes_valid = false;                /* send the first frame whole */
     running = true;

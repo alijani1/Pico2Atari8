@@ -16,7 +16,8 @@ Status: **in development — Quad Ultimate CX first.**
   unpacked into a reserved flash area when it starts (about a second for a
   90 KB disk) and runs from there; see [docs/QUAD_FLASH.md](docs/QUAD_FLASH.md).
 
-The machine is an 800XL with 64 KB, NTSC, BASIC off. The Atari operating
+The machine is an 800XL with 64 KB, NTSC, BASIC off, with atari800's
+vibrant palette. The Atari operating
 system is **AltirraOS** (Avery Lee's free replacement, built in), so no
 Atari ROM files are needed.
 
@@ -28,12 +29,6 @@ they're used instead. When a game crashes the emulated 6502 on the XL, it
 is restarted on an 800 (OS-B if the file is there); files named with
 `-osb` or `(OS-B)` start on the 800 straight away. If it crashes there too,
 the screen says so and MENU goes back to the list.
-
-**Colours.** Press Yellow in a game to step through the palettes (the choice
-is kept): 1 atari800 standard, 2 vibrant, 3 vibrant with more saturation,
-4 (default) the same with the hues turned so gold is gold and reds aren't
-brown, 5 the same with less green. A `PALETTE.ACT` on the drive (768 bytes
-of R,G,B, e.g. exported from Altirra) is offered as 6.
 
 **Disk drive off.** Some disk games refuse to start while a drive answers
 (this Shamus disk reboots on START if any drive replies to a status
@@ -60,7 +55,7 @@ the Quad's **arcade slot** (replacing Pico2Arcade there), and
 | Joy-Con stick / click | move / play | joystick 1 / fire 1 |
 | Red | play | fire 1 |
 | Blue | | RETURN |
-| Yellow | | next colour palette (`COLOUR 1`-`5`, or `6` = your `PALETTE.ACT`) |
+| Yellow | | SPACE |
 | Green | | OPTION |
 | START / SELECT | START = play; SELECT = play as a 400/800 (four joysticks, OS-B) | START / SELECT |
 | Side buttons | up / down | right: FPS overlay on / off (off at start) (`E60 S58` = emulator / screen frames a second); left: disk drive 1 off / on |

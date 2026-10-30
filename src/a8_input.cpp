@@ -6,8 +6,7 @@
  *                     XL/XE machines read only the first two)
  *   Joy-Con stick     also joystick 1; its click = fire 1
  *   Red / Blue        fire 1 / RETURN
- *   Green             OPTION
- *   Yellow            next colour palette (for now: SPACE is off its button)
+ *   Green / Yellow    OPTION / SPACE
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
  *   Side buttons      game list: up / down; in a game, right = FPS overlay
@@ -106,13 +105,6 @@ static uint8_t port_dirs(int n) {
 
 static uint32_t menu_since = 0;
 static bool menu_seen_up = false;
-static bool palette_pressed = false;
-
-bool a8_input_palette_pressed(void) {
-    bool t = palette_pressed;
-    palette_pressed = false;
-    return t;
-}
 
 bool a8_input_frame(void) {
     a8_input_t in;
@@ -128,6 +120,7 @@ bool a8_input_frame(void) {
     in.option = low(PIN_GREEN);
     in.key = -1;
     if (low(PIN_BLUE))        in.key = AKEY_RETURN;
+    else if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
     a8_input = in;
 
     /* Right side button: FPS overlay on / off; left: disk drive 1 off / on
@@ -142,12 +135,6 @@ bool a8_input_frame(void) {
     }
     left_was = left;
     right_was = right;
-
-    /* Yellow: next colour palette (on press) */
-    static bool yellow_was = true;
-    bool yellow = low(PIN_YELLOW);
-    if (yellow && !yellow_was) palette_pressed = true;
-    yellow_was = yellow;
 
     /* MENU held 1 s: leave the game. A press already down when the game
      * started (from the menu) counts only after it has been released. */

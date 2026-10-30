@@ -36,11 +36,6 @@ extern a8_input_t a8_input;
 int  a8_guess_cart_type(int kb);
 void a8_frame(void);                 /* keyboard, emulate one frame, show it */
 int  a8_toggle_drive1(void);         /* drive 1 off / back on; true = now on */
-/* Palettes 1..a8_palette_count() (the last is PALETTE.ACT if the drive has
- * one). a8_set_palette recomputes Colours_table; returns the panel's green
- * gain in % for a8_display_palette. Call between frames (core 0). */
-int  a8_palette_count(void);
-int  a8_set_palette(int n);
 /* Set by a8_frame when the 6502 hit a crash opcode. a8_handle_crash then
  * restarts the game (path) on an 800 if it was on the XL: true if it did,
  * false if it was on the 800 already. */
