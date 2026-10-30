@@ -47,7 +47,7 @@ and on, like the switch on a real drive: let the game load, type DRV
 
 | Setting | Choices |
 |---|---|
-| Keyboard | Pause + 1 key (default): the game pauses, the first key typed is sent and closes the keyboard / Auto-pause: paused while open, each key runs the game briefly, Blue closes / Keep running |
+| Keyboard | Pause+Auto Resume (default): the game pauses, the first key typed is sent and closes the keyboard / Auto-pause: paused while open, each key runs the game briefly, Blue closes / Keep running |
 | FPS display | Off (default) / On |
 | Volume | 0-100 % (shared with the Quad) |
 | Default machine | 800XL (default) / 400/800 - SELECT in the list starts the other |

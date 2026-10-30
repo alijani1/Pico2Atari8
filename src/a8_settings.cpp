@@ -1,6 +1,6 @@
 /* a8_settings.cpp - the Settings screen and where its choices are kept.
  *
- *   Keyboard         Pause + 1 key / Auto-pause / Keep running
+ *   Keyboard         Pause+Auto Resume / Auto-pause / Keep running
  *                                                (on-screen keyboard)
  *   FPS display      Off / On
  *   Volume           0 - 100 %                   (shared with the Quad: it
@@ -32,7 +32,7 @@ struct Stored {
 
 A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false };
 
-static const char *const KEYBOARD_NAMES[A8_KBD_MODES] = { "Pause + 1 key", "Auto-pause", "Keep running" };
+static const char *const KEYBOARD_NAMES[A8_KBD_MODES] = { "Pause+Auto Resume", "Auto-pause", "Keep running" };
 
 static uint32_t checksum(const Stored &s) {
     return s.magic ^ (s.keyboard << 1) ^ (s.fps << 3) ^ (s.machine_800 << 5) ^ (s.pal << 7) ^ 0xA5A5A5A5u;
