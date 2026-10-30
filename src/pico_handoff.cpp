@@ -39,7 +39,7 @@ extern "C" void handoff_flags_write(int flags) {
 
 extern "C" void handoff_relaunch_arcade(void) {
     Serial.println("[handoff] relaunch arcade");
-    watchdog_hw->scratch[HANDOFF_SCRATCH_ARCADE] = HANDOFF_ARCADE_MAGIC;
+    watchdog_hw->scratch[HANDOFF_SCRATCH_ARCADE] = HANDOFF_RELAUNCH_MAGIC;
     delay(50);
     rp2040.reboot();
 }

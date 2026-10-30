@@ -16,6 +16,13 @@ extern "C" {
 
 #define HANDOFF_SCRATCH_ARCADE 0
 #define HANDOFF_ARCADE_MAGIC   0xA7CADE01u
+/* Duo 5200 host (from 1.2): Pico2Atari8 has its own slot, chain-booted by
+ * this magic (GameAdapterRGBPico include/arcade.hpp ATARI8_MAGIC). On the
+ * Quad it still sits in the arcade slot, so it relaunches with the arcade's. */
+#define HANDOFF_ATARI8_MAGIC   0xA7A8B001u
+#ifndef HANDOFF_RELAUNCH_MAGIC
+#define HANDOFF_RELAUNCH_MAGIC HANDOFF_ARCADE_MAGIC
+#endif
 #define HANDOFF_SCRATCH_VOLUME 1
 #define HANDOFF_VOLUME_TAG     0x564F0000u
 /* Quad Ultimate CX host only (GameAdapterRGBPico include/arcade.hpp): where

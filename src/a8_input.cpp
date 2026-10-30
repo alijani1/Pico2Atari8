@@ -12,6 +12,15 @@
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
  *   Side buttons      game list: up / down; in a game, right = RETURN
+ *
+ * Duo 5200 Ultimate (PICO_5200, GameAdapterRGBPico data/duo5200.json): the
+ * same device buttons and Joy-Con, but the ports are two Atari 5200
+ * controllers instead of DB9 joysticks, and there are no side buttons:
+ *
+ *   5200 controllers  joysticks 1-2: the analog stick as directions (RC
+ *                     charge time, as Pico2Arcade reads it); Fire A or
+ *                     Fire B = fire
+ *   (keypads)         not read yet - the on-screen keyboard (Blue) types
  */
 #include <Arduino.h>
 #include "a8_input.h"
@@ -24,15 +33,23 @@ extern "C" {
 #include "akey.h"
 }
 
+#ifdef PICO_5200
+static const int NUM_PORTS = 2;
+static const int8_t RC_PINS[2][2]   = { { 40, 41 }, { 42, 43 } };   /* stick x, y */
+static const int8_t FIRE_PINS[2][2] = { { 10, 11 }, { 12, 13 } };   /* Fire A, Fire B */
+static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
+#else
+static const int NUM_PORTS = 4;
 static const int8_t PORT_PINS[4][5] = {     /* up down left right fire */
     { 28, 29, 30, 31, 12 },
     { 24, 25, 26, 27, 10 },
     { 32, 33, 34, 35, 11 },
     { 36, 37, 38, 39, 13 },
 };
+static const int PIN_SIDE_UP = 3, PIN_SIDE_DOWN = 2;
+#endif
 static const int PIN_RED = 14, PIN_GREEN = 15, PIN_BLUE = 16, PIN_YELLOW = 17;
 static const int PIN_SELECT = 19, PIN_START = 20, PIN_MENU = 18, PIN_CLICK = 21;
-static const int PIN_SIDE_UP = 3, PIN_SIDE_DOWN = 2;
 static const int PIN_JOY_X = 44, PIN_JOY_Y = 45;
 
 /* ---- Joy-Con ---------------------------------------------------------
@@ -67,14 +84,95 @@ static int8_t axis_read(JoyAxis &a) {
     return 0;
 }
 
-static inline bool low(int p) { return digitalRead(p) == LOW; }
+static inline bool low(int p) { return p >= 0 && digitalRead(p) == LOW; }
+
+#ifdef PICO_5200
+/* ---- Atari 5200 controller sticks -------------------------------------
+ * Ported from Pico2Arcade (src/pico_input.cpp rc_stick_read): each pot's
+ * capacitor rests discharged (OUTPUT LOW); released to INPUT it charges
+ * through the pot, and the time until the pin reads HIGH grows with the
+ * resistance - longer = right (X) / down (Y), about 0-1.3 ms over the
+ * stick's travel. Blocks for up to 2 ms, so it runs at most every 16 ms.
+ * Centre = where the stick rests at its first reading; a direction triggers
+ * at 25 % of the travel seen on that side of it (the nominal travel until
+ * the stick has moved). Unplugged (both axes time out) = start over. */
+static const uint32_t RC_TIMEOUT_US = 2000;     /* no controller / pot beyond range */
+static const uint32_t RC_NOMINAL_US = 1334;     /* full travel, nominal */
+static uint8_t rc_dirs[2];                      /* A8_UP/DOWN/LEFT/RIGHT per port */
+
+static void rc_init(void) {
+    for (auto &port : RC_PINS)
+        for (int8_t p : port) {
+            gpio_init(p);
+            gpio_disable_pulls(p);
+            gpio_put(p, 0);
+            gpio_set_dir(p, GPIO_OUT);          /* park discharged */
+        }
+}
+
+static void rc_read(void) {
+    static uint32_t lastUs = 0;
+    static uint32_t lo[2][2] = { { 0xFFFFFFFFu, 0xFFFFFFFFu }, { 0xFFFFFFFFu, 0xFFFFFFFFu } };
+    static uint32_t hi[2][2];
+    static int32_t  rest[2][2] = { { -1, -1 }, { -1, -1 } };   /* charge time at rest */
+    uint32_t now = time_us_32();
+    if (lastUs != 0 && now - lastUs < 16000) return;
+    lastUs = now;
+
+    uint32_t t[2][2] = { { 0, 0 }, { 0, 0 } };
+    uint32_t t0 = time_us_32();
+    for (auto &port : RC_PINS)                  /* release all four caps together */
+        for (int8_t p : port) gpio_set_dir(p, GPIO_IN);
+    for (;;) {
+        uint32_t el = time_us_32() - t0;
+        bool all = true;
+        for (int n = 0; n < 2; n++)
+            for (int a = 0; a < 2; a++) {
+                if (!t[n][a] && gpio_get(RC_PINS[n][a])) t[n][a] = el + 1;
+                if (!t[n][a]) all = false;
+            }
+        if (all || el >= RC_TIMEOUT_US) break;
+    }
+    for (auto &port : RC_PINS)                  /* discharge again (pin LOW) */
+        for (int8_t p : port) gpio_set_dir(p, GPIO_OUT);
+
+    for (int n = 0; n < 2; n++) {
+        if (!t[n][0] && !t[n][1]) {             /* no controller: forget its calibration */
+            for (int a = 0; a < 2; a++) { lo[n][a] = 0xFFFFFFFFu; hi[n][a] = 0; rest[n][a] = -1; }
+            rc_dirs[n] = 0;
+            continue;
+        }
+        uint8_t dirs = 0;
+        for (int a = 0; a < 2; a++) {
+            if (!t[n][a]) continue;             /* timed out: no pot on this axis */
+            if (rest[n][a] < 0) rest[n][a] = (int32_t)t[n][a];   /* first reading: at rest */
+            if (t[n][a] < lo[n][a]) lo[n][a] = t[n][a];
+            if (t[n][a] > hi[n][a]) hi[n][a] = t[n][a];
+            const int32_t minSpan = RC_NOMINAL_US / 4, nomThr = RC_NOMINAL_US / 8;
+            int32_t spanNeg = rest[n][a] - (int32_t)lo[n][a], spanPos = (int32_t)hi[n][a] - rest[n][a];
+            int32_t thrNeg = (spanNeg >= minSpan) ? spanNeg / 4 : nomThr;
+            int32_t thrPos = (spanPos >= minSpan) ? spanPos / 4 : nomThr;
+            int32_t d = (int32_t)t[n][a] - rest[n][a];
+            if (d >  thrPos) dirs |= (a == 0) ? A8_RIGHT : A8_DOWN;
+            if (d < -thrNeg) dirs |= (a == 0) ? A8_LEFT  : A8_UP;
+        }
+        rc_dirs[n] = dirs;
+    }
+}
+#endif
 
 void a8_input_init(void) {
+#ifdef PICO_5200
+    for (auto &port : FIRE_PINS)
+        for (int8_t p : port) pinMode(p, INPUT_PULLUP);
+    rc_init();
+#else
     for (auto &port : PORT_PINS)
         for (int8_t p : port) pinMode(p, INPUT_PULLUP);
+#endif
     const int buttons[] = { PIN_RED, PIN_GREEN, PIN_BLUE, PIN_YELLOW, PIN_SELECT,
                             PIN_START, PIN_MENU, PIN_CLICK, PIN_SIDE_UP, PIN_SIDE_DOWN };
-    for (int p : buttons) pinMode(p, INPUT_PULLUP);
+    for (int p : buttons) if (p >= 0) pinMode(p, INPUT_PULLUP);
     /* Joy-Con: a first guess at the centre; it keeps learning (axis_read) */
     analogReadResolution(12);
     delay(20);                               /* let the ADC settle */
@@ -94,6 +192,10 @@ static uint8_t joycon_dirs(void) {
     return d;
 }
 
+#ifdef PICO_5200
+static uint8_t port_dirs(int n) { rc_read(); return rc_dirs[n]; }
+static bool port_fire(int n) { return low(FIRE_PINS[n][0]) || low(FIRE_PINS[n][1]); }
+#else
 static uint8_t port_dirs(int n) {
     uint8_t d = 0;
     if (low(PORT_PINS[n][0])) d |= A8_UP;
@@ -102,6 +204,8 @@ static uint8_t port_dirs(int n) {
     if (low(PORT_PINS[n][3])) d |= A8_RIGHT;
     return d;
 }
+static bool port_fire(int n) { return low(PORT_PINS[n][4]); }
+#endif
 
 /* ---- in a game ------------------------------------------------------- */
 
@@ -117,9 +221,9 @@ bool a8_input_osk_paused(void) {
 bool a8_input_frame(void) {
     a8_input_t in;
     memset(&in, 0, sizeof(in));
-    for (int n = 0; n < 4; n++) {
+    for (int n = 0; n < NUM_PORTS; n++) {
         in.stick[n] = port_dirs(n);
-        in.trig[n] = low(PORT_PINS[n][4]);
+        in.trig[n] = port_fire(n);
     }
     in.stick[0] |= joycon_dirs();
     if (low(PIN_RED) || low(PIN_CLICK)) in.trig[0] = 1;
@@ -216,7 +320,7 @@ uint8_t a8_input_menu(void) {
     if ((d & A8_DOWN) || low(PIN_SIDE_DOWN)) b |= A8M_DOWN;
     if (d & A8_LEFT)  b |= A8M_LEFT;
     if (d & A8_RIGHT) b |= A8M_RIGHT;
-    if (low(PORT_PINS[0][4]) || low(PIN_RED) || low(PIN_CLICK) || low(PIN_START)) b |= A8M_OK;
+    if (port_fire(0) || low(PIN_RED) || low(PIN_CLICK) || low(PIN_START)) b |= A8M_OK;
     if (low(PIN_MENU)) b |= A8M_BACK;
     if (low(PIN_SELECT)) b |= A8M_ALT;
     return b;

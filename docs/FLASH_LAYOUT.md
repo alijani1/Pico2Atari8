@@ -172,3 +172,23 @@ The unzip area is written on every zipped-game launch (only the 4 KB
 sectors the game needs) and the settings sector only when a setting
 changes. NOR flash is good for ~100,000 erases per sector: decades of daily
 use.
+
+## Status (2026-10-30): Duo 5200 1.2
+
+Done:
+- GameAdapterRGBPico `include/arcade.hpp` (`ATARI8_*`) has the slot at
+  `0x2A0000`, launched with magic `0xA7A8B001`.
+- The Mini-Games menu has an "Atari 8-bit" entry.
+- `build_release.py` bundles this repo's `duo5200` image.
+- The firmware limit is `0x280000`, and `music2` was dropped.
+- Here, the `duo5200` env uses `HANDOFF_RELAUNCH_MAGIC` = the Atari 8-bit
+  magic, and `src/a8_input.cpp` reads the two 5200 controllers.
+
+The ROM drive is shared with the arcade, and the host passes its location
+(scratch[0]/[2]/[3]). The **unzip area and settings sector are build flags of
+the `duo5200` env** (`A8_UNZIP_PHYS` / `A8_SETTINGS_PHYS`), not scratch
+registers: [0..3] are taken and [4..7] belong to the SDK's reboot.
+
+Not yet:
+- the 5200 keypads (0-9 * #) as keys;
+- the Quad (still in the arcade slot).
