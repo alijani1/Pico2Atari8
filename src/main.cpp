@@ -223,7 +223,7 @@ void setup() {
 
 void loop() {
     bool leave = a8_input_frame();
-    if (a8_input_menu_tapped()) palette_next = true;
+    if (a8_input_palette_pressed()) palette_next = true;
     if (leave) {
         /* MENU held: back to the game list */
         pico_audio_amp_off();

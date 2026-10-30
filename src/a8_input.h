@@ -17,8 +17,8 @@
 void    a8_input_init(void);
 /* Fill a8_input for the next frame. True = MENU held: leave the game. */
 bool    a8_input_frame(void);
-/* MENU was tapped (pressed and let go within 1 s) since the last call. */
-bool    a8_input_menu_tapped(void);
+/* The palette button (Yellow) was pressed since the last call. */
+bool    a8_input_palette_pressed(void);
 uint8_t a8_input_menu(void);
 
 #endif
