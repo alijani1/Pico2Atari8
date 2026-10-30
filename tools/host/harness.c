@@ -16,6 +16,7 @@
  *            POT=x,y     controller 1's analog stick (6..220), all along
  *            TOP_AT=n    hold the top fire button from frame n for 10 frames
  *            KEY_AT=n    hold keypad 5 from frame n for 10 frames
+ *            PCM=file    write the sound out (raw 16-bit mono)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,7 +106,15 @@ volatile const char *a8_stage = "";
 void a8_log_write(const char *line) { printf("[a8] %s\n", line); }
 
 void pico_audio_init(int rate) { (void)rate; }
-size_t pico_audio_push_s16(const void *d, size_t n) { (void)d; return n; }
+/* PCM=file: the sound as raw 16-bit mono at A8_SAMPLE_RATE */
+static FILE *pcm;
+size_t pico_audio_push_s16(const void *d, size_t n) {
+    if (getenv("PCM")) {
+        if (!pcm) pcm = fopen(getenv("PCM"), "wb");
+        fwrite(d, 1, n, pcm);
+    }
+    return n;
+}
 
 /* the device shows the middle 320 columns (a8_display.cpp) */
 static uint32_t frame_hash(void) {

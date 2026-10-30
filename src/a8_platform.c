@@ -7,8 +7,8 @@
  * (blitted to the TFT on core 1) and the sound to the PWM ring.
  *
  * Upstream's generic sound.c (a floating-point sync buffer for desktop
- * audio APIs) is replaced by the few Sound_* functions below: POKEY renders
- * one frame of samples straight into the PWM ring, waiting for room - which
+ * audio APIs) is replaced by the few Sound_* functions below: each frame's
+ * POKEY samples go straight into the PWM ring, waiting for room - which
  * also paces the emulator to real time, so PLATFORM_Sleep does nothing.
  */
 #include "config.h"
@@ -309,11 +309,11 @@ static unsigned frame_samples(void)
 	return n > A8_MAX_FRAME_SAMPLES ? A8_MAX_FRAME_SAMPLES : n;
 }
 
-/* Send n samples of sound_buf, waiting for room: this is what holds the
+/* Send n samples from buf, waiting for room: this is what holds the
  * emulator to real time. */
-static void push_samples(unsigned n)
+static void push_samples(const int16_t *buf, unsigned n)
 {
-	const uint8_t *p = (const uint8_t *)sound_buf;
+	const uint8_t *p = (const uint8_t *)buf;
 	size_t left = n * 2;
 	while (left) {
 		size_t done = pico_audio_push_s16(p, left);
@@ -322,12 +322,17 @@ static void push_samples(unsigned n)
 	}
 }
 
+/* The frame's sound as the core made it: every POKEY write renders the
+ * samples up to that CPU cycle first (POKEYSND_Update), so a register that
+ * changes many times a frame is heard each time - digitized speech (Berzerk)
+ * is the volume set thousands of times a second. (Rendering the whole frame
+ * here at the end, as before, heard only each frame's last value: speech
+ * became a 60 Hz buzz.) */
 void Sound_Update(void)
 {
 	if (!Sound_enabled || sound_paused) return;
-	unsigned n = frame_samples();
-	POKEYSND_Process(sound_buf, (int)n);
-	push_samples(n);
+	unsigned n = (unsigned)POKEYSND_UpdateProcessBuffer();
+	push_samples((const int16_t *)POKEYSND_process_buffer, n);
 }
 
 /* Paused: a frame of silence, at the same pace (an empty PWM ring clicks). */
@@ -335,7 +340,7 @@ void a8_silent_frame(void)
 {
 	unsigned n = frame_samples();
 	memset(sound_buf, 0, n * sizeof(sound_buf[0]));
-	push_samples(n);
+	push_samples(sound_buf, n);
 }
 
 /* ---- UI stubs (upstream's text UI isn't built) ------------------------- */
