@@ -2,7 +2,8 @@
  *
  * Lists the Atari files on the ARCADE ROMS drive (root, ATARI and ROMS
  * folders): .xex .com .exe executables, .car .rom .bin cartridges and .atr
- * .xfd disk images and .zip files holding one of those (a8_zip.cpp), by
+ * .xfd disk images and .zip files holding one of those (a8_zip.cpp; not
+ * the arcade's zips - a8z_is_game), by
  * their long names, sorted, then "Settings" (a8_settings.cpp) and
  * "ROM Drive (USB)",
  * which reboots into USB drive mode to copy games over (pico_drive.cpp).
@@ -18,6 +19,7 @@
 #include "pico_handoff.h"
 #include "pico_drive.h"
 #include "a8_settings.h"
+#include "a8_unzip_core.h"
 
 static const int MAX_GAMES = 128;      /* + the Settings and ROM drive rows */
 struct Game { char path[24]; char name[40]; bool osb; char kind[5]; };
@@ -58,8 +60,26 @@ static bool supported(const char *path) {
     return false;
 }
 
+/* A zip is listed only if it holds an Atari game (a8z_is_game): the drive
+ * is shared with the arcade, whose game zips sit beside ours. */
+static bool atari_zip(const char *path) {
+    const uint8_t *zip;
+    size_t zsize;
+    if (!romfs_map(path, &zip, &zsize)) {
+        size_t cap;
+        uint8_t *buf = a8_display_scratch(&cap);   /* idle until a game starts */
+        if (!romfs_read(path, buf, cap, &zsize)) return false;
+        zip = buf;
+    }
+    return a8z_is_game(zip, zsize);
+}
+
 static bool add_game(const char *path, const char *display, uint32_t size, void *) {
     if (!supported(path) || size == 0) return true;
+    if (!strcasecmp(kind_of(path), "ZIP") && !atari_zip(path)) {
+        Serial.printf("[menu] %-22s skipped: no Atari game inside\n", path);
+        return true;
+    }
     if (game_count >= MAX_GAMES) return false;
     Game &g = games[game_count++];
     strncpy(g.path, path, sizeof(g.path) - 1);

@@ -24,17 +24,63 @@ static int game_ext(const char *name, int len) {
     return 0;
 }
 
-int a8z_find(const uint8_t *zip, size_t size, a8z_entry *out) {
+/* Notes and pictures that often come with a game */
+static int doc_ext(const char *name, int len) {
+    static const char *const exts[] = { ".txt", ".nfo", ".diz", ".doc", ".pdf",
+                                        ".md", ".htm", ".html", ".jpg", ".png", ".gif" };
+    for (unsigned i = 0; i < sizeof(exts) / sizeof(exts[0]); i++) {
+        int n = (int)strlen(exts[i]);
+        if (len > n && strncasecmp(name + len - n, exts[i], n) == 0) return 1;
+    }
+    return 0;
+}
+
+/* The central directory and its entry count, or NULL. */
+static const uint8_t *central_dir(const uint8_t *zip, size_t size, uint32_t *count) {
     /* end of central directory: in the last 64 KB + 22 bytes */
-    if (size < 22) return 0;
+    if (size < 22) return NULL;
     size_t lo = size > 65557 ? size - 65557 : 0;
     const uint8_t *eocd = NULL;
     for (size_t i = size - 22 + 1; i-- > lo; )
         if (rd32(zip + i) == 0x06054b50u) { eocd = zip + i; break; }
-    if (!eocd) return 0;
-    uint32_t count = rd16(eocd + 10), cd = rd32(eocd + 16);
-    if (cd >= size) return 0;
-    const uint8_t *p = zip + cd;
+    if (!eocd) return NULL;
+    uint32_t cd = rd32(eocd + 16);
+    if (cd >= size) return NULL;
+    *count = rd16(eocd + 10);
+    return zip + cd;
+}
+
+int a8z_is_game(const uint8_t *zip, size_t size) {
+    uint32_t count;
+    const uint8_t *p = central_dir(zip, size, &count);
+    if (!p) return 0;
+    int cart_like = 0, files = 0;
+    for (uint32_t i = 0; i < count && p + 46 <= zip + size; i++) {
+        if (rd32(p) != 0x02014b50u) return 0;
+        unsigned nlen = rd16(p + 28), elen = rd16(p + 30), clen = rd16(p + 32);
+        const char *name = (const char *)(p + 46);
+        if (p + 46 + nlen > zip + size) return 0;
+        if (nlen > 0 && name[nlen - 1] != '/' && !doc_ext(name, (int)nlen)) {   /* not a folder or notes */
+            files++;
+            if (game_ext(name, (int)nlen)) {
+                if ((nlen > 4 && strncasecmp(name + nlen - 4, ".bin", 4) == 0) ||
+                    (nlen > 4 && strncasecmp(name + nlen - 4, ".rom", 4) == 0))
+                    cart_like++;
+                else
+                    return 1;                             /* .xex .atr .car ... */
+            }
+        }
+        p += 46 + nlen + elen + clen;
+    }
+    /* a .bin / .rom counts only alone (notes aside): arcade zips hold many
+     * ROM chips (Donkey Kong's are .bin) */
+    return cart_like == 1 && files == 1;
+}
+
+int a8z_find(const uint8_t *zip, size_t size, a8z_entry *out) {
+    uint32_t count;
+    const uint8_t *p = central_dir(zip, size, &count);
+    if (!p) return 0;
     for (uint32_t i = 0; i < count && p + 46 <= zip + size; i++) {
         if (rd32(p) != 0x02014b50u) return 0;
         unsigned method = rd16(p + 10), nlen = rd16(p + 28), elen = rd16(p + 30), clen = rd16(p + 32);

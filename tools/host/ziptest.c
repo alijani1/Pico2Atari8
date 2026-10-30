@@ -26,6 +26,7 @@ int main(int argc, char **argv) {
     static uint8_t zip[1 << 20];
     size_t n = fread(zip, 1, sizeof(zip), f);
     fclose(f);
+    printf("listed as an Atari game: %s\n", a8z_is_game(zip, n) ? "yes" : "no");
     a8z_entry e;
     if (!a8z_find(zip, n, &e)) { printf("no Atari file\n"); return 2; }
     static uint8_t dict[A8Z_DICT], sector[A8Z_SECTOR];

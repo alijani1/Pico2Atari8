@@ -15,6 +15,9 @@ Status: **in development — Quad Ultimate CX first.**
 - **Zip files** holding any of those (one game per zip). The game is
   unpacked into a reserved flash area when it starts (about a second for a
   90 KB disk) and runs from there; see [docs/FLASH_LAYOUT.md](docs/FLASH_LAYOUT.md).
+  The arcade's game zips on the same drive are left out of the list: a zip
+  shows only if it holds an `.xex` `.com` `.exe` `.car` `.atr` `.xfd`, or a
+  `.bin` / `.rom` as its only file (notes like `.txt` aside).
 
 The machine is an 800XL with 64 KB, NTSC, BASIC off, with atari800's
 vibrant palette. The Atari operating
