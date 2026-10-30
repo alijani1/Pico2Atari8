@@ -217,6 +217,12 @@ void loop() {
         delay(20);
         return;
     }
+    if (a8_input_osk_paused()) {
+        /* keyboard open: the game holds still, the keyboard is redrawn */
+        a8_display_refresh();
+        a8_silent_frame();
+        return;
+    }
     uint32_t t0 = time_us_32();
     on_emu_stack(emu_frame);
     static uint32_t busy = 0, frames = 0, last = 0;

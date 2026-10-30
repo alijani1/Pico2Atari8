@@ -6,8 +6,9 @@
  *                     XL/XE machines read only the first two)
  *   Joy-Con stick     also joystick 1; its click = fire 1
  *   Red               fire 1
- *   Blue              tap: RETURN; hold 1/2 s: on-screen keyboard (stick
- *                     moves, fire types; tap Blue closes it)
+ *   Blue              tap: RETURN; hold 1/2 s: on-screen keyboard - the
+ *                     game pauses; fire types the key (the game runs while
+ *                     it's held and briefly after), tap Blue closes it
  *   Green / Yellow    OPTION / SPACE
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
@@ -109,6 +110,10 @@ static uint8_t port_dirs(int n) {
 static uint32_t menu_since = 0;
 static bool menu_seen_up = false;
 
+static bool osk_running = false;
+
+bool a8_input_osk_paused(void) { return a8_osk_is_open() && !osk_running; }
+
 bool a8_input_frame(void) {
     a8_input_t in;
     memset(&in, 0, sizeof(in));
@@ -157,9 +162,31 @@ bool a8_input_frame(void) {
         int dx = (edge & A8_RIGHT) ? 1 : (edge & A8_LEFT) ? -1 : 0;
         int dy = (edge & A8_DOWN) ? 1 : (edge & A8_UP) ? -1 : 0;
         if (dx || dy) a8_osk_move(dx, dy);
-        if (in.trig[0]) in.key = a8_osk_key();
+        /* Typing: the game runs while fire holds the key down (at least
+         * KEY_DOWN_FRAMES) and KEY_UP_FRAMES after, so it sees a whole
+         * press and release; otherwise it stays paused. */
+        static const int KEY_DOWN_FRAMES = 4, KEY_UP_FRAMES = 4;
+        static int down_left = 0, up_left = 0, key = -1;
+        if (key < 0 && in.trig[0]) {                 /* a new key */
+            key = a8_osk_key();
+            down_left = KEY_DOWN_FRAMES;
+            up_left = KEY_UP_FRAMES;
+        }
+        if (key >= 0) {
+            if (in.trig[0] || down_left > 0) {         /* down */
+                in.key = key;
+                if (down_left > 0) down_left--;
+            } else if (up_left > 0) {                  /* up, the game still runs */
+                up_left--;
+            } else {
+                key = -1;                              /* done: pause again */
+            }
+        }
+        osk_running = key >= 0;
         in.stick[0] = 0;
         in.trig[0] = 0;
+    } else {
+        osk_running = false;
     }
     a8_input = in;
 

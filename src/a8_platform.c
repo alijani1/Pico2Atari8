@@ -219,17 +219,20 @@ void Sound_WriteConfig(FILE *fp) { (void)fp; }
 
 /* One frame of POKEY output. NTSC is 59.92 frames/s, PAL 49.86: the
  * fraction is carried over so the average rate is exact. */
-void Sound_Update(void)
+/* Samples in the next frame: rate / fps, in fixed point (fps x 1000). */
+static unsigned frame_samples(void)
 {
-	if (!Sound_enabled || sound_paused) return;
-	/* samples this frame = rate / fps, in fixed point (fps x 1000) */
 	unsigned fps1000 = Atari800_tv_mode == Atari800_TV_PAL ? 49860 : 59923;
 	sound_acc += (unsigned)A8_SAMPLE_RATE * 1000u;
 	unsigned n = sound_acc / fps1000;
 	sound_acc -= n * fps1000;
-	if (n > A8_MAX_FRAME_SAMPLES) n = A8_MAX_FRAME_SAMPLES;
-	POKEYSND_Process(sound_buf, (int)n);
-	/* Wait for room: this is what holds the emulator to real time. */
+	return n > A8_MAX_FRAME_SAMPLES ? A8_MAX_FRAME_SAMPLES : n;
+}
+
+/* Send n samples of sound_buf, waiting for room: this is what holds the
+ * emulator to real time. */
+static void push_samples(unsigned n)
+{
 	const uint8_t *p = (const uint8_t *)sound_buf;
 	size_t left = n * 2;
 	while (left) {
@@ -237,6 +240,22 @@ void Sound_Update(void)
 		p += done; left -= done;
 		if (left) a8_idle();
 	}
+}
+
+void Sound_Update(void)
+{
+	if (!Sound_enabled || sound_paused) return;
+	unsigned n = frame_samples();
+	POKEYSND_Process(sound_buf, (int)n);
+	push_samples(n);
+}
+
+/* Paused: a frame of silence, at the same pace (an empty PWM ring clicks). */
+void a8_silent_frame(void)
+{
+	unsigned n = frame_samples();
+	memset(sound_buf, 0, n * sizeof(sound_buf[0]));
+	push_samples(n);
 }
 
 /* ---- UI stubs (upstream's text UI isn't built) ------------------------- */

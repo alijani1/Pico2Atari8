@@ -266,6 +266,10 @@ extern "C" void a8_display_frame(void) {
     frame_ready = true;
 }
 
+/* Paused: the emulator makes no frames, but the keyboard on top changes.
+ * Re-send the last picture (still in Screen_atari) when core 1 is free. */
+void a8_display_refresh(void) { a8_display_frame(); }
+
 /* Core 1: send a snapshot. In RAM: core 0 runs the emulator out of flash,
  * and the two cores share the flash cache. */
 static uint32_t __not_in_flash_func(hash_row)(const uint8_t *row) {

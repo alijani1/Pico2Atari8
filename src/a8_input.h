@@ -17,6 +17,8 @@
 void    a8_input_init(void);
 /* Fill a8_input for the next frame. True = MENU held: leave the game. */
 bool    a8_input_frame(void);
+/* The on-screen keyboard is open and no key is being typed: hold the game. */
+bool    a8_input_osk_paused(void);
 uint8_t a8_input_menu(void);
 
 #endif
