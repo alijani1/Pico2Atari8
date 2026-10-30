@@ -30,7 +30,7 @@ is restarted on an 800 (OS-B if the file is there); files named with
 `-osb` or `(OS-B)` start on the 800 straight away. If it crashes there too,
 the screen says so and MENU goes back to the list.
 
-**Keyboard.** Hold Blue for half a second in a game and an on-screen
+**Keyboard.** Press Blue in a game and an on-screen
 keyboard with most of the Atari's keys (0-9, A-Z, ; , . / - =, ESC, DEL,
 SPACE, RETURN) opens over the bottom of the picture, and the game pauses.
 The stick (or Joy-Con) moves the cursor; fire types the key: the game runs
@@ -71,11 +71,11 @@ the Quad's **arcade slot** (replacing Pico2Arcade there), and
 | Ports 1–4 | port 1: move / fire = play | Atari joysticks 1–4 (on an 800XL only 1–2 exist: start four-player games such as M.U.L.E. with SELECT) |
 | Joy-Con stick / click | move / play | joystick 1 / fire 1 |
 | Red | play | fire 1 |
-| Blue | | tap: RETURN; hold ½ s: on-screen keyboard - the game pauses, fire types a key (Settings > Keyboard) |
+| Blue | | on-screen keyboard: press to open / close - the game pauses, fire types a key (Settings > Keyboard) |
 | Yellow | | SPACE |
 | Green | | OPTION |
 | START / SELECT | START = play; SELECT = play on the other machine (400/800: four joysticks, OS-B) | START / SELECT |
-| Side buttons | up / down | |
+| Side buttons | up / down | right: RETURN |
 | MENU | back to the Quad | hold 1 s: back to the game list |
 
 ## Building

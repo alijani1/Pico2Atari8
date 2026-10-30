@@ -6,13 +6,12 @@
  *                     XL/XE machines read only the first two)
  *   Joy-Con stick     also joystick 1; its click = fire 1
  *   Red               fire 1
- *   Blue              tap: RETURN; hold 1/2 s: on-screen keyboard (fire
- *                     types the key; Settings > Keyboard: pause + 1 key /
- *                     auto-pause / keep running); tap Blue closes it
+ *   Blue              on-screen keyboard: opens / closes (fire types the
+ *                     key; Settings > Keyboard)
  *   Green / Yellow    OPTION / SPACE
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
- *   Side buttons      game list: up / down
+ *   Side buttons      game list: up / down; in a game, right = RETURN
  */
 #include <Arduino.h>
 #include "a8_input.h"
@@ -130,25 +129,20 @@ bool a8_input_frame(void) {
     in.key = -1;
     if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
 
-    /* Blue: a tap is RETURN (sent on release, so a hold doesn't type it);
-     * held 1/2 s it opens the on-screen keyboard; a tap while it's open
-     * closes it. */
+    /* Right side button: RETURN. */
+    if (low(PIN_SIDE_DOWN)) in.key = AKEY_RETURN;
+
+    /* Blue: the on-screen keyboard, open / close on each press. (It used to
+     * be RETURN on a tap as well, and a short first press typed a RETURN
+     * before the keyboard opened.) */
     static bool blue_was = true;          /* one still held from the menu: ignored */
-    static uint32_t blue_since = 0;
-    static bool blue_used = false;        /* this press opened / closed the keyboard */
-    static int return_frames = 0;
     uint32_t t = millis();
     bool blue = low(PIN_BLUE);
     if (blue && !blue_was) {
-        blue_since = t | 1;
-        blue_used = false;
-        if (a8_osk_is_open()) { a8_osk_close(); blue_used = true; }
+        if (a8_osk_is_open()) a8_osk_close();
+        else a8_osk_open();
     }
-    if (blue && blue_since && !blue_used && t - blue_since >= 500) { a8_osk_open(); blue_used = true; }
-    if (!blue && blue_was && blue_since && !blue_used) return_frames = 4;
-    if (!blue) blue_since = 0;
     blue_was = blue;
-    if (return_frames > 0) { in.key = AKEY_RETURN; return_frames--; }
 
     /* The keyboard takes joystick 1 and its fire: the stick moves the
      * cursor (auto-repeat), fire types the key (held while fire is). */
