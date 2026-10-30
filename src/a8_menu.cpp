@@ -1,8 +1,9 @@
 /* a8_menu.cpp - the game list.
  *
  * Lists the Atari files on the ARCADE ROMS drive (root, ATARI and ROMS
- * folders): .xex .com .exe executables, .car .rom .bin cartridges and .atr
- * .xfd disk images and .zip files holding one of those (a8_zip.cpp; not
+ * folders): .xex .com .exe executables, .car .rom .bin cartridges, .a52
+ * 5200 cartridges and .atr .xfd disk images and .zip files holding one of
+ * those (a8_zip.cpp; not
  * the arcade's zips - a8z_is_game), by
  * their long names, sorted, then "Settings" (a8_settings.cpp) and
  * "ROM Drive (USB)",
@@ -20,6 +21,7 @@
 #include "pico_drive.h"
 #include "a8_settings.h"
 #include "a8_unzip_core.h"
+#include "a8_platform.h"
 
 static const int MAX_GAMES = 128;      /* + the Settings and ROM drive rows */
 struct Game { char path[24]; char name[40]; bool osb; char kind[5]; };
@@ -31,7 +33,22 @@ static const char *kind_of(const char *path) {
     if (!dot) return "";
     if (!strcasecmp(dot, ".zip")) return "ZIP";
     if (!strcasecmp(dot, ".atr") || !strcasecmp(dot, ".xfd")) return "DISK";
-    if (!strcasecmp(dot, ".car") || !strcasecmp(dot, ".rom") || !strcasecmp(dot, ".bin")) return "CART";
+    if (!strcasecmp(dot, ".a52")) return "5200";
+    if (!strcasecmp(dot, ".rom") || !strcasecmp(dot, ".bin")) {
+        /* a 5200 cartridge by its last bytes (a8_raw_cart_is_5200) */
+        const uint8_t *p;
+        size_t size;
+        if (romfs_map(path, &p, &size) && size >= 4096) {
+            int r = a8_raw_cart_is_5200(p + size - 6, (long)size);
+#ifdef PICO_5200
+            if (r != 0) return "5200";      /* can't tell: a 5200 one here (main.cpp) */
+#else
+            if (r > 0) return "5200";
+#endif
+        }
+        return "CART";
+    }
+    if (!strcasecmp(dot, ".car")) return "CART";
     return "XEX";
 }
 static bool picked_alt = false, picked_osb = false;
@@ -55,7 +72,7 @@ static bool supported(const char *path) {
     const char *dot = strrchr(path, '.');
     if (!dot) return false;
     static const char *const exts[] = { ".xex", ".com", ".exe", ".car", ".rom",
-                                        ".bin", ".atr", ".xfd", ".zip" };
+                                        ".bin", ".a52", ".atr", ".xfd", ".zip" };
     for (const char *e : exts) if (strcasecmp(dot, e) == 0) return true;
     return false;
 }

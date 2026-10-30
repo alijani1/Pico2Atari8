@@ -16,7 +16,7 @@ static uint32_t rd32(const uint8_t *p) {
 
 static int game_ext(const char *name, int len) {
     static const char *const exts[] = { ".xex", ".com", ".exe", ".car", ".rom",
-                                        ".bin", ".atr", ".xfd" };
+                                        ".bin", ".a52", ".atr", ".xfd" };
     for (unsigned i = 0; i < sizeof(exts) / sizeof(exts[0]); i++) {
         int n = (int)strlen(exts[i]);
         if (len > n && strncasecmp(name + len - n, exts[i], n) == 0) return 1;

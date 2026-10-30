@@ -27,13 +27,25 @@ typedef struct {
     uint8_t trig[4];       /* fire button per port, 1 = pressed */
     uint8_t start, select, option;
     int     key;           /* AKEY_* code held, or -1 for none */
-    int     shift;         /* SHIFT held with it */
+    int     shift;         /* SHIFT held with it (5200: the top fire button) */
+    int16_t pot[8];        /* 5200 analog sticks, x/y per port (6 left/up ..
+                              114 centre .. 220 right/down); A8_POT_NONE = use
+                              the stick's directions */
 } a8_input_t;
+
+#define A8_POT_NONE (-1)
 
 extern a8_input_t a8_input;
 
 /* a8_platform.c */
 int  a8_guess_cart_type(int kb);
+int  a8_is_5200(void);               /* the machine is a 5200 (now) */
+/* A raw cartridge (.bin / .rom) of `size` bytes ending in `tail` (its last
+ * 6 bytes): 1 = a 5200 one, 0 = a 400/800/XL one, -1 = can't tell. */
+int  a8_raw_cart_is_5200(const uint8_t *tail, long size);
+/* The file is a 5200 game: .a52, or a raw cartridge that looks like one
+ * (unknown ones count as 5200 when unknown_5200). */
+int  a8_file_is_5200(const char *path, int unknown_5200);
 void a8_frame(void);                 /* keyboard, emulate one frame, show it */
 void a8_silent_frame(void);          /* paused: a frame's time of silence */
 int  a8_toggle_drive1(void);         /* drive 1 off / back on; true = now on */

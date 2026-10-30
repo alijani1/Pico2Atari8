@@ -1,7 +1,7 @@
 # Pico2Atari8
 
-**Atari 8-bit computer games on iCode devices** — the Atari 400/800/XL/XE,
-emulated by [atari800](https://github.com/atari800/atari800) on the
+**Atari 8-bit computer games on iCode devices** — the Atari 400/800/XL/XE
+and the Atari 5200, emulated by [atari800](https://github.com/atari800/atari800) on the
 RP2350, with your original Atari joysticks.
 
 Status: **in development — Quad Ultimate CX first.**
@@ -11,6 +11,9 @@ Status: **in development — Quad Ultimate CX first.**
 - **Executables** — `.xex` `.com` `.exe`
 - **Cartridges** — `.car` (any type), `.rom` / `.bin` (standard 2–16 KB and
   XEGS sizes)
+- **Atari 5200 cartridges** — `.a52`, `.bin` / `.rom` that look like 5200
+  ones, and `.car` of a 5200 type (4, 8, 16 one- and two-chip, 32 and
+  40 KB, and the homebrew Super Carts); see [Atari 5200](#atari-5200)
 - **Disk images** — `.atr` `.xfd` (read-only)
 - **Zip files** holding any of those (one game per zip). The game is
   unpacked into a reserved flash area when it starts (about a second for a
@@ -55,6 +58,31 @@ and on, like the switch on a real drive: let the game load, type DRV
 | Volume | 0-100 % (shared with the Quad) |
 | Default machine | 800XL (default) / 400/800 - SELECT in the list starts the other |
 | TV system | NTSC (default) / PAL |
+
+## Atari 5200
+
+A 5200 game starts on an emulated 5200 (16 KB, NTSC) on either device. Its
+BIOS is the built-in Altirra 5200 OS; copy your own `5200.ROM` (2 KB) onto
+the drive (root or `ATARI` folder) and it's used instead. The list labels
+5200 games **5200**.
+
+A raw `.bin` / `.rom` carries no type, so it's told by its last bytes (an
+800 cartridge ends in its run address, a `$00` "cartridge here" byte and an
+option byte; a 5200 one in its title, year and start address). One that
+matches neither is a 5200 game on the Duo 5200 and an 800 one on the Quad.
+A 16 KB 5200 cartridge comes as one chip or (more often) two; which is
+guessed from where its code jumps to. Rename a game `.a52` to make sure.
+
+| Control | In a 5200 game |
+|---|---|
+| Joy-Con stick | controller 1's analog stick (the stick's position, not just its direction) |
+| Red / Joy-Con click | bottom fire |
+| Green | top fire |
+| START / SELECT | START / PAUSE |
+| Yellow | `*` |
+| Blue | the controller keypad on screen: 0-9 `*` `#` START PAUSE RESET (as the keyboard: the game pauses, fire presses a key) |
+| MENU | hold 1 s: back to the game list |
+| 5200 controllers (Duo) | for now as joysticks: directions and Fire A, Fire B = top fire. Their analog sticks and keypads: next |
 
 ## Quad Ultimate CX
 

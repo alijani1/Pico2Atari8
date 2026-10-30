@@ -18,7 +18,8 @@
 #define SUPPORTS_PLATFORM_SLEEP 1
 #define NO_YPOS_BREAK_FLICKER 1
 #define PAGED_ATTRIB 1              /* 256 page handlers instead of a 64 KB attribute table */
-#define EMUOS_ALTIRRA 1             /* built-in AltirraOS / Altirra BASIC (roms/) */
+#define EMUOS_ALTIRRA 1             /* built-in AltirraOS / Altirra BASIC / 5200 OS (roms/) */
+#define A8_POT_INPUT 1              /* 5200 analog sticks: Atari_POT() in a8_platform.c (input.c patch) */
 
 /* --- C library ---------------------------------------------------------- */
 #define HAVE_STDINT_H 1

@@ -12,6 +12,10 @@
  * Usage: a8_harness <file> [frames=600] [out.ppm]
  *        env START_AT=n  hold START from frame n for 10 frames
  *            FIRE_AT=n   hold fire on stick 1 from frame n for 10 frames
+ *            MACHINE=-5200 (a 5200 game; as main.cpp picks for one), then
+ *            POT=x,y     controller 1's analog stick (6..220), all along
+ *            TOP_AT=n    hold the top fire button from frame n for 10 frames
+ *            KEY_AT=n    hold keypad 5 from frame n for 10 frames
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +31,7 @@
 #include "colours.h"
 #include "platform.h"
 #include "a8_platform.h"
+#include "akey.h"
 
 /* ---- heap accounting (what the Pico would need) ------------------------ */
 
@@ -168,6 +173,7 @@ int main(int argc, char **argv) {
     }
     a8argv[a8argc++] = argv[1];
     a8argv[a8argc] = NULL;
+    printf("a 5200 game by the file (a8_file_is_5200): %s\n", a8_file_is_5200(argv[1], 0) ? "yes" : "no");
     if (!Atari800_Initialise(&a8argc, a8argv)) { printf("Atari800_Initialise failed\n"); return 2; }
     if (getenv("PALETTE")) {          /* the 256 colours as a 16 x 16 grid (hue x lum) */
         FILE *pf = fopen(getenv("PALETTE"), "wb");
@@ -186,7 +192,15 @@ int main(int argc, char **argv) {
     for (frame_no = 0; frame_no < frames; frame_no++) {
         memset(&a8_input, 0, sizeof(a8_input));
         a8_input.key = -1;
-        if (start_at >= 0 && frame_no >= start_at && frame_no < start_at + 10) a8_input.start = 1;
+        for (int i = 0; i < 8; i++) a8_input.pot[i] = A8_POT_NONE;
+        if (getenv("POT")) sscanf(getenv("POT"), "%hd,%hd", &a8_input.pot[0], &a8_input.pot[1]);
+#define HELD(env) (getenv(env) && frame_no >= atol(getenv(env)) && frame_no < atol(getenv(env)) + 10)
+        if (HELD("TOP_AT")) a8_input.shift = 1;
+        if (HELD("KEY_AT")) a8_input.key = AKEY_5200_5;
+        if (start_at >= 0 && frame_no >= start_at && frame_no < start_at + 10) {
+            if (a8_is_5200()) a8_input.key = AKEY_5200_START;   /* as a8_input.cpp */
+            else a8_input.start = 1;
+        }
         if (fire_at >= 0 && frame_no >= fire_at && frame_no < fire_at + 10) a8_input.trig[0] = 1;
         if (getenv("DRIVE_OFF_AT") && frame_no == atol(getenv("DRIVE_OFF_AT"))) a8_toggle_drive1();
         if (getenv("DUMP_AT") && frame_no == atol(getenv("DUMP_AT"))) {  /* RAM -> ram.bin */

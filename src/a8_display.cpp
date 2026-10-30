@@ -106,6 +106,8 @@ static const struct { char c; uint8_t g[7]; } GLYPH_LETTERS[] = {
     { '/', { 0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x00 } },
     { '-', { 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00 } },
     { '=', { 0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00 } },
+    { '*', { 0x00, 0x15, 0x0E, 0x1F, 0x0E, 0x15, 0x00 } },
+    { '#', { 0x0A, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x0A } },
 };
 static const uint8_t *glyph(char c) {
     if (c >= '0' && c <= '9') return GLYPH_DIGIT[c - '0'];
@@ -138,19 +140,19 @@ static void __not_in_flash_func(ov_glyph)(int x, int y, const uint8_t *g) {
 }
 
 /* ---- on-screen keyboard (a8_osk.cpp) ------------------------------------
- * Over the bottom of the picture: 5 rows of 10 grid columns, 32 x 20 px a
- * column. Single characters are drawn at twice size, labels (ESC, DEL,
+ * Over the bottom of the picture: 5 rows (the 5200 keypad: 4) of 10 grid
+ * columns, 32 x 20 px a column. Single characters are drawn at twice size, labels (ESC, DEL,
  * SPACE, RET) at normal size. Atari palette indices: black frame, grey
  * keys, blue cursor, white text. */
 static const int OSK_CELL_W = SCR_W / A8_OSK_COLS, OSK_CELL_H = 20;
-static const int OSK_Y = SCR_H - A8_OSK_ROWS * OSK_CELL_H - 2;
 static const uint8_t OSK_FRAME = 0x00, OSK_KEY = 0x04, OSK_CURSOR = 0x96, OSK_TEXT = 0x0F;
 
 static void __not_in_flash_func(draw_osk)(void) {
+    const int rows = a8_osk_rows(), OSK_Y = SCR_H - rows * OSK_CELL_H - 2;
     for (int y = OSK_Y - 2; y < SCR_H; y++) memset(frame8 + y * SCR_W, OSK_FRAME, SCR_W);
     int cr, ci;
     a8_osk_cursor(&cr, &ci);
-    for (int r = 0; r < A8_OSK_ROWS; r++) {
+    for (int r = 0; r < rows; r++) {
         int n;
         const A8Key *keys = a8_osk_row(r, &n);
         int col = 0;

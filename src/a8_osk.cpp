@@ -9,12 +9,20 @@
  * DRV isn't an Atari key: it switches disk drive 1 off and on (some disk
  * games won't start while a drive answers).
  *
+ * On a 5200 it is the controller's keypad instead:
+ *
+ *    1   2   3   START
+ *    4   5   6   PAUSE
+ *    7   8   9   RESET
+ *    *   0   #
+ *
  * Opened by holding Blue (a8_input.cpp), drawn over the bottom of the
  * picture by a8_display.cpp. The cursor moves on a 10-column grid; up/down
  * land on whichever key covers the same column.
  */
 #include <stddef.h>
 #include "a8_osk.h"
+#include "a8_platform.h"
 
 extern "C" {
 #include "akey.h"
@@ -32,18 +40,38 @@ static const A8Key ROW4[] = { K("Z", AKEY_z), K("X", AKEY_x), K("C", AKEY_c), K(
 static const A8Key ROW5[] = { K("ESC", AKEY_ESCAPE), K("DEL", AKEY_BACKSPACE), { "SPACE", AKEY_SPACE, 3 },
                               { "RET", AKEY_RETURN, 2 }, K("-", AKEY_MINUS), K("=", AKEY_EQUAL),
                               K("DRV", A8_OSK_DRIVE) };
+#define P(l, c) { l, c, 2 }
+static const A8Key PAD1[] = { P("1", AKEY_5200_1), P("2", AKEY_5200_2), P("3", AKEY_5200_3), { "START", AKEY_5200_START, 4 } };
+static const A8Key PAD2[] = { P("4", AKEY_5200_4), P("5", AKEY_5200_5), P("6", AKEY_5200_6), { "PAUSE", AKEY_5200_PAUSE, 4 } };
+static const A8Key PAD3[] = { P("7", AKEY_5200_7), P("8", AKEY_5200_8), P("9", AKEY_5200_9), { "RESET", AKEY_5200_RESET, 4 } };
+static const A8Key PAD4[] = { P("*", AKEY_5200_ASTERISK), P("0", AKEY_5200_0), P("#", AKEY_5200_HASH) };
+#undef P
 #undef K
 
-static const struct { const A8Key *keys; int n; } ROWS[A8_OSK_ROWS] = {
+struct Row { const A8Key *keys; int n; };
+static const Row KEYBOARD[A8_OSK_ROWS] = {
     { ROW1, 10 }, { ROW2, 10 }, { ROW3, 10 }, { ROW4, 10 }, { ROW5, 7 },
 };
+static const Row KEYPAD[4] = { { PAD1, 4 }, { PAD2, 4 }, { PAD3, 4 }, { PAD4, 3 } };
 
 static volatile bool open_ = false;
+static const Row *ROWS = KEYBOARD;
+static int n_rows = A8_OSK_ROWS;
 static int cur_row = 0, cur_idx = 0;
 
 bool a8_osk_is_open(void) { return open_; }
-void a8_osk_open(void) { open_ = true; }
+void a8_osk_open(void) {
+    const Row *want = a8_is_5200() ? KEYPAD : KEYBOARD;
+    if (want != ROWS) {                       /* the other layout: start at its first key */
+        ROWS = want;
+        n_rows = want == KEYPAD ? 4 : A8_OSK_ROWS;
+        cur_row = cur_idx = 0;
+    }
+    open_ = true;
+}
 void a8_osk_close(void) { open_ = false; }
+
+int a8_osk_rows(void) { return n_rows; }
 
 const A8Key *a8_osk_row(int r, int *count) {
     *count = ROWS[r].n;
@@ -78,7 +106,7 @@ void a8_osk_move(int dx, int dy) {
         /* keep the middle of the current key's columns */
         const A8Key &k = ROWS[cur_row].keys[cur_idx];
         int mid = key_col(cur_row, cur_idx) + (k.span - 1) / 2;
-        cur_row = (cur_row + dy + A8_OSK_ROWS) % A8_OSK_ROWS;
+        cur_row = (cur_row + dy + n_rows) % n_rows;
         cur_idx = key_at(cur_row, mid);
     }
 }

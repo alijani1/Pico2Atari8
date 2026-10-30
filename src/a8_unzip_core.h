@@ -22,11 +22,11 @@ typedef struct {
 } a8z_entry;
 
 /* Whether the zip is an Atari game: it holds an .xex .com .exe .car .atr
- * .xfd, or a .bin / .rom as its only file besides notes (.txt, .nfo, ...);
+ * .xfd .a52, or a .bin / .rom as its only file besides notes (.txt, .nfo, ...);
  * arcade zips hold many ROMs. */
 int a8z_is_game(const uint8_t *zip, size_t size);
 
-/* The first .xex .com .exe .car .rom .bin .atr .xfd in the zip. */
+/* The first .xex .com .exe .car .rom .bin .a52 .atr .xfd in the zip. */
 int a8z_find(const uint8_t *zip, size_t size, a8z_entry *out);
 
 /* Inflate it: put() gets each 4 KB piece in order (the last one padded with

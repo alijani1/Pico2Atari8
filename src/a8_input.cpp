@@ -21,6 +21,15 @@
  *                     charge time, as Pico2Arcade reads it); Fire A or
  *                     Fire B = fire
  *   (keypads)         not read yet - the on-screen keyboard (Blue) types
+ *
+ * A 5200 game (either device; a8_is_5200) has its own controls:
+ *
+ *   Joy-Con stick     controller 1's analog stick (POKEY pots 0/1)
+ *   Red / click       bottom fire;  Green  top fire
+ *   START / SELECT    START / PAUSE;  Yellow  *
+ *   Blue              the keypad on screen: 0-9 * # START PAUSE RESET
+ *   5200 controllers  (Duo) directions and Fire A as before, Fire B = top
+ *                     fire; the analog stick and keypad come in phase 2
  */
 #include <Arduino.h>
 #include "a8_input.h"
@@ -72,16 +81,37 @@ static void axis_centre(const JoyAxis &a, int *centre, int *half) {
     *half = both ? (a.hi - a.lo) / 2 : NOMINAL_HALF;
 }
 
-static int8_t axis_read(JoyAxis &a) {
+static int axis_sample(JoyAxis &a) {
     int v = analogRead(a.pin);
     if (v < a.lo) a.lo = v;
     if (v > a.hi) a.hi = v;
+    return v;
+}
+
+static int8_t axis_dir(const JoyAxis &a, int v) {
     int centre, half;
     axis_centre(a, &centre, &half);
     int dead = half * 30 / 100;
     if (v < centre - dead) return -1;
     if (v > centre + dead) return 1;
     return 0;
+}
+
+/* As a 5200 pot: 6 (left / up) .. 114 (centre) .. 220 (right / down), the
+ * travel past a small dead zone spread over the whole range; inside the
+ * dead zone A8_POT_NONE (the core then sees the centre). */
+static const int POT_MIN = 6, POT_CENTRE = 114, POT_MAX = 220;
+static int16_t axis_pot(const JoyAxis &a, int v) {
+    int centre, half;
+    axis_centre(a, &centre, &half);
+    int dead = half * 8 / 100, d = v - centre;
+    if (d >= -dead && d <= dead) return A8_POT_NONE;
+    int range = half - dead;
+    int p = d > 0 ? POT_CENTRE + (d - dead) * (POT_MAX - POT_CENTRE) / range
+                  : POT_CENTRE + (d + dead) * (POT_CENTRE - POT_MIN) / range;
+    if (p < POT_MIN) p = POT_MIN;
+    if (p > POT_MAX) p = POT_MAX;
+    return (int16_t)p;
 }
 
 static inline bool low(int p) { return p >= 0 && digitalRead(p) == LOW; }
@@ -173,7 +203,7 @@ void a8_input_init(void) {
     const int buttons[] = { PIN_RED, PIN_GREEN, PIN_BLUE, PIN_YELLOW, PIN_SELECT,
                             PIN_START, PIN_MENU, PIN_CLICK, PIN_SIDE_UP, PIN_SIDE_DOWN };
     for (int p : buttons) if (p >= 0) pinMode(p, INPUT_PULLUP);
-    /* Joy-Con: a first guess at the centre; it keeps learning (axis_read) */
+    /* Joy-Con: a first guess at the centre; it keeps learning (axis_sample) */
     analogReadResolution(12);
     delay(20);                               /* let the ADC settle */
     long sx = 0, sy = 0;
@@ -182,8 +212,13 @@ void a8_input_init(void) {
     axis_init(joy_y, (int)(sy / 32));
 }
 
-static uint8_t joycon_dirs(void) {
-    int8_t x = axis_read(joy_x), y = axis_read(joy_y);
+/* One Joy-Con reading: its directions, and (pot_x/pot_y given) its
+ * position as 5200 pots. */
+static uint8_t joycon_read(int16_t *pot_x = nullptr, int16_t *pot_y = nullptr) {
+    int vx = axis_sample(joy_x), vy = axis_sample(joy_y);
+    if (pot_x) *pot_x = axis_pot(joy_x, vx);
+    if (pot_y) *pot_y = axis_pot(joy_y, vy);
+    int8_t x = axis_dir(joy_x, vx), y = axis_dir(joy_y, vy);
     uint8_t d = 0;
     if (x < 0) d |= A8_LEFT;
     if (x > 0) d |= A8_RIGHT;
@@ -195,6 +230,8 @@ static uint8_t joycon_dirs(void) {
 #ifdef PICO_5200
 static uint8_t port_dirs(int n) { rc_read(); return rc_dirs[n]; }
 static bool port_fire(int n) { return low(FIRE_PINS[n][0]) || low(FIRE_PINS[n][1]); }
+static bool port_fire_a(int n) { return low(FIRE_PINS[n][0]); }
+static bool port_fire_b(int n) { return low(FIRE_PINS[n][1]); }
 #else
 static uint8_t port_dirs(int n) {
     uint8_t d = 0;
@@ -205,6 +242,8 @@ static uint8_t port_dirs(int n) {
     return d;
 }
 static bool port_fire(int n) { return low(PORT_PINS[n][4]); }
+static bool port_fire_a(int n) { return port_fire(n); }
+static bool port_fire_b(int n) { (void)n; return false; }
 #endif
 
 /* ---- in a game ------------------------------------------------------- */
@@ -221,20 +260,39 @@ bool a8_input_osk_paused(void) {
 bool a8_input_frame(void) {
     a8_input_t in;
     memset(&in, 0, sizeof(in));
-    for (int n = 0; n < NUM_PORTS; n++) {
-        in.stick[n] = port_dirs(n);
-        in.trig[n] = port_fire(n);
-    }
-    in.stick[0] |= joycon_dirs();
-    if (low(PIN_RED) || low(PIN_CLICK)) in.trig[0] = 1;
-    in.start  = low(PIN_START);
-    in.select = low(PIN_SELECT);
-    in.option = low(PIN_GREEN);
+    for (int n = 0; n < 8; n++) in.pot[n] = A8_POT_NONE;
     in.key = -1;
-    if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
+    uint8_t nav;                          /* moves the on-screen keyboard's cursor */
+    if (a8_is_5200()) {
+        /* the Joy-Con is controller 1's analog stick; a controller's own
+         * directions count while the Joy-Con rests (input.c) */
+        for (int n = 0; n < NUM_PORTS; n++) {
+            in.stick[n] = port_dirs(n);
+            in.trig[n] = port_fire_a(n);
+            if (port_fire_b(n)) in.shift = 1;
+        }
+        nav = in.stick[0] | joycon_read(&in.pot[0], &in.pot[1]);
+        if (low(PIN_RED) || low(PIN_CLICK)) in.trig[0] = 1;
+        if (low(PIN_GREEN)) in.shift = 1;                 /* top fire */
+        if (low(PIN_YELLOW)) in.key = AKEY_5200_ASTERISK;
+        if (low(PIN_SELECT)) in.key = AKEY_5200_PAUSE;
+        if (low(PIN_START))  in.key = AKEY_5200_START;
+    } else {
+        for (int n = 0; n < NUM_PORTS; n++) {
+            in.stick[n] = port_dirs(n);
+            in.trig[n] = port_fire(n);
+        }
+        in.stick[0] |= joycon_read();
+        nav = in.stick[0];
+        if (low(PIN_RED) || low(PIN_CLICK)) in.trig[0] = 1;
+        in.start  = low(PIN_START);
+        in.select = low(PIN_SELECT);
+        in.option = low(PIN_GREEN);
+        if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
 
-    /* Right side button: RETURN. */
-    if (low(PIN_SIDE_DOWN)) in.key = AKEY_RETURN;
+        /* Right side button: RETURN. */
+        if (low(PIN_SIDE_DOWN)) in.key = AKEY_RETURN;
+    }
 
     /* Blue: the on-screen keyboard, open / close on each press. (It used to
      * be RETURN on a tap as well, and a short first press typed a RETURN
@@ -253,7 +311,7 @@ bool a8_input_frame(void) {
     if (a8_osk_is_open()) {
         static uint8_t dirs_was = 0;
         static uint32_t repeat_at = 0;
-        uint8_t dirs = in.stick[0];
+        uint8_t dirs = nav;
         uint8_t edge = dirs & ~dirs_was;
         if (dirs && dirs == dirs_was && (int32_t)(t - repeat_at) >= 0) { edge = dirs; repeat_at = t + 120; }
         else if (edge) repeat_at = t + 350;
@@ -295,6 +353,8 @@ bool a8_input_frame(void) {
         osk_running = key >= 0;
         in.stick[0] = 0;
         in.trig[0] = 0;
+        in.pot[0] = in.pot[1] = A8_POT_NONE;
+        in.shift = 0;
     } else {
         osk_running = false;
     }
@@ -315,7 +375,7 @@ bool a8_input_frame(void) {
 
 uint8_t a8_input_menu(void) {
     uint8_t b = 0;
-    uint8_t d = port_dirs(0) | joycon_dirs();
+    uint8_t d = port_dirs(0) | joycon_read();
     if ((d & A8_UP)   || low(PIN_SIDE_UP))   b |= A8M_UP;
     if ((d & A8_DOWN) || low(PIN_SIDE_DOWN)) b |= A8M_DOWN;
     if (d & A8_LEFT)  b |= A8M_LEFT;

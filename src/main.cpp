@@ -81,33 +81,41 @@ static uint32_t emu_stack_used(void) {
 
 static char game_file[96];
 static bool start_as_800 = false;
+static bool start_as_5200 = false;
 
 /* An 800XL with 64 KB (or an 800 with 48 KB for OS-B games), NTSC, BASIC
  * off (as if OPTION were held at power-on), running the chosen file.
  * AltirraOS is built in; real Atari ROM files on the drive (ATARIXL.ROM,
  * ATARIOSB.ROM - root or ATARI folder) are used instead when present: some
- * early games jump into the original OS and crash on AltirraOS. */
+ * early games jump into the original OS and crash on AltirraOS.
+ * A 5200 game runs on a 5200 (16 KB, NTSC only): its BIOS from 5200.ROM if
+ * the drive has it, else the built-in Altirra 5200 OS. (A .car names its
+ * type, and the core switches to the 5200 for a 5200 one by itself.) */
 static void emu_start(void) {
-    static char arg0[] = "atari800", xl[] = "-xl", atari[] = "-atari", ntsc[] = "-ntsc", pal[] = "-pal",
+    static char arg0[] = "atari800", xl[] = "-xl", atari[] = "-atari", a5200[] = "-5200",
+                ntsc[] = "-ntsc", pal[] = "-pal",
                 nobasic[] = "-nobasic", colors[] = "-colors-preset", vibrant[] = "vibrant",
                 osb_opt[] = "-osb_rom", osb_file[] = "/ATARIOSB.ROM",
-                xl_opt[] = "-xlxe_rom", xl_file[] = "/ATARIXL.ROM";
-    char *argv[14];
+                xl_opt[] = "-xlxe_rom", xl_file[] = "/ATARIXL.ROM",
+                bios_opt[] = "-5200_rom", bios_file[] = "/5200.ROM";
+    char *argv[16];
     int argc = 0;
     argv[argc++] = arg0;
-    argv[argc++] = start_as_800 ? atari : xl;
-    argv[argc++] = a8_settings.pal ? pal : ntsc;
+    argv[argc++] = start_as_5200 ? a5200 : start_as_800 ? atari : xl;
+    argv[argc++] = a8_settings.pal && !start_as_5200 ? pal : ntsc;
     argv[argc++] = nobasic;
     argv[argc++] = colors;          /* atari800's vibrant palette: its stock one */
     argv[argc++] = vibrant;         /* looked dull on the panel (brownish reds) */
     if (romfs_exists(osb_file)) { argv[argc++] = osb_opt; argv[argc++] = osb_file; }
     if (romfs_exists(xl_file))  { argv[argc++] = xl_opt;  argv[argc++] = xl_file; }
+    if (romfs_exists(bios_file)) { argv[argc++] = bios_opt; argv[argc++] = bios_file; }
     argv[argc++] = game_file;
     argv[argc] = nullptr;
-    Serial.printf("[a8] %s %s, OS-B ROM file %s, XL ROM file %s\n",
-                  start_as_800 ? "800" : "800XL", a8_settings.pal ? "PAL" : "NTSC",
+    Serial.printf("[a8] %s %s, OS-B ROM file %s, XL ROM file %s, 5200 BIOS file %s\n",
+                  start_as_5200 ? "5200" : start_as_800 ? "800" : "800XL", argv[2] == pal ? "PAL" : "NTSC",
                   romfs_exists(osb_file) ? "yes" : "no",
-                  romfs_exists(xl_file) ? "yes" : "no");
+                  romfs_exists(xl_file) ? "yes" : "no",
+                  romfs_exists(bios_file) ? "yes" : "no");
     a8_stage = "Atari800_Initialise";
     if (!Atari800_Initialise(&argc, argv))
         Serial.println("[a8] Atari800_Initialise failed");
@@ -182,6 +190,13 @@ void setup() {
         for (size_t i = 0; i <= n; i++) low[i] = (char)tolower((unsigned char)inner[i]);
         if (strstr(low, "osb") || strstr(low, "os-b") || strstr(low, "400-800")) start_as_800 = true;
     }
+    /* a 5200 game: .a52, or a raw cartridge that looks like one (one that
+     * can't be told is a 5200 one on the Duo 5200) */
+#ifdef PICO_5200
+    start_as_5200 = a8_file_is_5200(game_file, 1);
+#else
+    start_as_5200 = a8_file_is_5200(game_file, 0);
+#endif
 
     Serial.println("[a8] starting audio");
     pico_audio_init(A8_SAMPLE_RATE);

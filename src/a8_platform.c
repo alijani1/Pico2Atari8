@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <strings.h>
 #include "atari.h"
 #include "afile.h"
 #include "akey.h"
@@ -108,6 +109,10 @@ static void restart_as_800(const char *path)
 int a8_handle_crash(const char *path)
 {
 	a8_crashed = FALSE;
+	if (Atari800_machine_type == Atari800_MACHINE_5200) {
+		Log_print("6502 crashed on the 5200 (PC %04X)", CPU_regPC);
+		return FALSE;
+	}
 	if (Atari800_machine_type == Atari800_MACHINE_XLXE) {
 		Log_print("6502 crashed on the XL (PC %04X): restarting as an 800", CPU_regPC);
 		restart_as_800(path);
@@ -149,6 +154,64 @@ int PLATFORM_PORT(int num)
 	if (num == 1)
 		return ((a8_input.stick[2] & 0x0f) | ((a8_input.stick[3] & 0x0f) << 4)) ^ 0xff;
 	return 0xff;
+}
+
+/* 5200 analog sticks (input.c, A8_POT_INPUT): the Joy-Con's position, or
+ * the centre - then input.c falls back to the stick's directions. Paddles
+ * on the 400/800/XL aren't connected (228, as upstream without a pot). */
+int Atari_POT(int num)
+{
+	if (Atari800_machine_type != Atari800_MACHINE_5200)
+		return 228;
+	if (num < 0 || num > 7 || a8_input.pot[num] == A8_POT_NONE)
+		return INPUT_joy_5200_center;
+	return a8_input.pot[num];
+}
+
+int a8_is_5200(void)
+{
+	return Atari800_machine_type == Atari800_MACHINE_5200;
+}
+
+/* An 800 cartridge ends in its run address, $00 at $BFFC ("a cartridge is
+ * here") and an option byte of bits 0, 2 and 7 at $BFFD, then its init
+ * address. A 5200 one ends in the last character of its title, the year's
+ * last digit as a screen code ($FF: no title screen) at $BFFD, and its
+ * start address, somewhere in $4000-$BFFF. Raw 5200 carts are 4-40 KB. */
+int a8_raw_cart_is_5200(const uint8_t *tail, long size)
+{
+	if (size > 40 * 1024)
+		return 0;
+	if (tail[2] == 0x00 && (tail[3] & ~0x85) == 0)
+		return 0;
+	if (tail[5] >= 0x40 && tail[5] < 0xc0)
+		return 1;
+	return -1;
+}
+
+int a8_file_is_5200(const char *path, int unknown_5200)
+{
+	const char *dot = strrchr(path, '.');
+	if (dot == NULL)
+		return FALSE;
+	if (strcasecmp(dot, ".a52") == 0)
+		return TRUE;
+	if (strcasecmp(dot, ".bin") != 0 && strcasecmp(dot, ".rom") != 0)
+		return FALSE;
+	{
+		FILE *f = fopen(path, "rb");
+		uint8_t tail[6];
+		long size;
+		int r;
+		if (f == NULL)
+			return FALSE;
+		fseek(f, 0, SEEK_END);
+		size = ftell(f);
+		r = size >= 4096 && fseek(f, size - 6, SEEK_SET) == 0 && fread(tail, 1, 6, f) == 6
+		    ? a8_raw_cart_is_5200(tail, size) : 0;
+		fclose(f);
+		return r < 0 ? unknown_5200 : r;
+	}
 }
 
 int PLATFORM_TRIG(int num)
@@ -280,11 +343,47 @@ int UI_Initialise(int *argc, char *argv[])
 }
 void UI_Run(void) {}
 
+/* A raw 5200 cartridge. Sizes say it all but for 16 KB, which comes as one
+ * chip (NS: $8000-$BFFF) or, more often, two (EE: the first 8 KB at $4000
+ * and $6000, the second at $A000). The top 8 KB (the vectors) is at $A000
+ * either way, so look at where the first 8 KB's own JMPs and JSRs go: its
+ * code calls itself at $4000-$7FFF on a two-chip board, at $8000-$9FFF on a
+ * one-chip one. */
+static int guess_5200_cart_type(int kb, const UBYTE *image)
+{
+	switch (kb) {
+	case 4:   return CARTRIDGE_5200_4;
+	case 8:   return CARTRIDGE_5200_8;
+	case 32:  return CARTRIDGE_5200_32;
+	case 40:  return CARTRIDGE_5200_40;
+	case 64:  return CARTRIDGE_5200_SUPER_64;
+	case 128: return CARTRIDGE_5200_SUPER_128;
+	case 256: return CARTRIDGE_5200_SUPER_256;
+	case 512: return CARTRIDGE_5200_SUPER_512;
+	case 16: {
+		int low = 0, high = 0, i;
+		if (image == NULL)
+			return CARTRIDGE_5200_EE_16;
+		for (i = 0; i + 2 < 0x2000; i++) {
+			if (image[i] == 0x4c || image[i] == 0x20) {          /* JMP / JSR abs */
+				UBYTE hi = image[i + 2];
+				if (hi >= 0x40 && hi < 0x80) low++;
+				else if (hi >= 0x80 && hi < 0xa0) high++;
+			}
+		}
+		Log_print("16 KB 5200 cartridge: %d calls to $4000-$7FFF, %d to $8000-$9FFF", low, high);
+		return high > low ? CARTRIDGE_5200_NS_16 : CARTRIDGE_5200_EE_16;
+	}
+	default:  return CARTRIDGE_NONE;
+	}
+}
+
 /* A cartridge whose type can't be told from its size: a .car header names
  * it; a raw .rom of an ambiguous size is the commonest type of that size. */
 int UI_SelectCartType(int k)
 {
-	int t = a8_guess_cart_type(k);
+	int t = Atari800_machine_type == Atari800_MACHINE_5200
+	        ? guess_5200_cart_type(k, CARTRIDGE_main.image) : a8_guess_cart_type(k);
 	Log_print("raw cartridge, %d KB: type %d", k, t);
 	return t;
 }
