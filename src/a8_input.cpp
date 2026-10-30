@@ -6,9 +6,9 @@
  *                     XL/XE machines read only the first two)
  *   Joy-Con stick     also joystick 1; its click = fire 1
  *   Red               fire 1
- *   Blue              tap: RETURN; hold 1/2 s: on-screen keyboard - the
- *                     game pauses; fire types the key (the game runs while
- *                     it's held and briefly after), tap Blue closes it
+ *   Blue              tap: RETURN; hold 1/2 s: on-screen keyboard (fire
+ *                     types the key; Settings > Keyboard: pause + 1 key /
+ *                     auto-pause / keep running); tap Blue closes it
  *   Green / Yellow    OPTION / SPACE
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
@@ -112,7 +112,7 @@ static bool menu_seen_up = false;
 static bool osk_running = false;
 
 bool a8_input_osk_paused(void) {
-    return a8_osk_is_open() && !osk_running && !a8_settings.keyboard_keep_running;
+    return a8_osk_is_open() && !osk_running && a8_settings.keyboard != A8_KBD_KEEP_RUNNING;
 }
 
 bool a8_input_frame(void) {
@@ -175,6 +175,7 @@ bool a8_input_frame(void) {
             bool on = a8_toggle_drive1();
             a8_display_toast(on ? "DRIVE ON" : "DRIVE OFF");
             in.trig[0] = 0;
+            if (a8_settings.keyboard == A8_KBD_ONE_KEY) a8_osk_close();
         }
         if (key < 0 && in.trig[0] && a8_osk_key() != A8_OSK_DRIVE) {   /* a new key */
             key = a8_osk_key();
@@ -188,7 +189,9 @@ bool a8_input_frame(void) {
             } else if (up_left > 0) {                  /* up, the game still runs */
                 up_left--;
             } else {
-                key = -1;                              /* done: pause again */
+                key = -1;                              /* done: pause again ... */
+                if (a8_settings.keyboard == A8_KBD_ONE_KEY)
+                    a8_osk_close();                    /* ... or close, one key typed */
             }
         }
         osk_running = key >= 0;

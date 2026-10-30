@@ -2,8 +2,14 @@
 #ifndef A8_SETTINGS_H
 #define A8_SETTINGS_H
 
+/* On-screen keyboard modes */
+enum { A8_KBD_ONE_KEY = 0,        /* paused; the first key typed is sent and closes it */
+       A8_KBD_AUTO_PAUSE,         /* paused; each key runs the game briefly; Blue closes */
+       A8_KBD_KEEP_RUNNING,       /* the game keeps running */
+       A8_KBD_MODES };
+
 struct A8Settings {
-    bool keyboard_keep_running;   /* on-screen keyboard: false = the game pauses */
+    int  keyboard;                /* A8_KBD_* */
     bool fps;                     /* FPS overlay */
     bool machine_800;             /* default machine: false = 800XL, true = 400/800 */
     bool pal;                     /* TV system: false = NTSC */

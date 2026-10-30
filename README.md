@@ -47,7 +47,7 @@ and on, like the switch on a real drive: let the game load, type DRV
 
 | Setting | Choices |
 |---|---|
-| Keyboard | Auto-pause (default): the game pauses while the keyboard is open / Keep running |
+| Keyboard | Pause + 1 key (default): the game pauses, the first key typed is sent and closes the keyboard / Auto-pause: paused while open, each key runs the game briefly, Blue closes / Keep running |
 | FPS display | Off (default) / On |
 | Volume | 0-100 % (shared with the Quad) |
 | Default machine | 800XL (default) / 400/800 - SELECT in the list starts the other |
@@ -71,7 +71,7 @@ the Quad's **arcade slot** (replacing Pico2Arcade there), and
 | Ports 1–4 | port 1: move / fire = play | Atari joysticks 1–4 (on an 800XL only 1–2 exist: start four-player games such as M.U.L.E. with SELECT) |
 | Joy-Con stick / click | move / play | joystick 1 / fire 1 |
 | Red | play | fire 1 |
-| Blue | | tap: RETURN; hold ½ s: on-screen keyboard - the game pauses, fire types a key, tap Blue closes |
+| Blue | | tap: RETURN; hold ½ s: on-screen keyboard - the game pauses, fire types a key (Settings > Keyboard) |
 | Yellow | | SPACE |
 | Green | | OPTION |
 | START / SELECT | START = play; SELECT = play on the other machine (400/800: four joysticks, OS-B) | START / SELECT |

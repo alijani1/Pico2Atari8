@@ -1,6 +1,7 @@
 /* a8_settings.cpp - the Settings screen and where its choices are kept.
  *
- *   Keyboard         Auto-pause / Keep running   (on-screen keyboard)
+ *   Keyboard         Pause + 1 key / Auto-pause / Keep running
+ *                                                (on-screen keyboard)
  *   FPS display      Off / On
  *   Volume           0 - 100 %                   (shared with the Quad: it
  *                                                 passes its volume in and
@@ -21,18 +22,20 @@
 #include "pico_audio.h"
 #include "pico_handoff.h"
 
-static const uint32_t MAGIC = 0x53384131u;    /* "1A8S" */
+static const uint32_t MAGIC = 0x53384132u;    /* "2A8S" (1: keyboard was a yes/no) */
 
 struct Stored {
     uint32_t magic;
-    uint8_t keyboard_keep_running, fps, machine_800, pal;
+    uint8_t keyboard, fps, machine_800, pal;
     uint32_t check;
 };
 
-A8Settings a8_settings = { false, false, false, false };
+A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false };
+
+static const char *const KEYBOARD_NAMES[A8_KBD_MODES] = { "Pause + 1 key", "Auto-pause", "Keep running" };
 
 static uint32_t checksum(const Stored &s) {
-    return s.magic ^ (s.keyboard_keep_running << 1) ^ (s.fps << 3) ^ (s.machine_800 << 5) ^ (s.pal << 7) ^ 0xA5A5A5A5u;
+    return s.magic ^ (s.keyboard << 1) ^ (s.fps << 3) ^ (s.machine_800 << 5) ^ (s.pal << 7) ^ 0xA5A5A5A5u;
 }
 
 void a8_settings_load(void) {
@@ -42,12 +45,12 @@ void a8_settings_load(void) {
         Serial.println("[settings] none saved: defaults");
         return;
     }
-    a8_settings.keyboard_keep_running = s.keyboard_keep_running != 0;
+    a8_settings.keyboard = s.keyboard < A8_KBD_MODES ? s.keyboard : A8_KBD_ONE_KEY;
     a8_settings.fps = s.fps != 0;
     a8_settings.machine_800 = s.machine_800 != 0;
     a8_settings.pal = s.pal != 0;
     Serial.printf("[settings] keyboard %s, fps %s, machine %s, %s\n",
-                  a8_settings.keyboard_keep_running ? "keep running" : "auto-pause",
+                  KEYBOARD_NAMES[a8_settings.keyboard],
                   a8_settings.fps ? "on" : "off", a8_settings.machine_800 ? "400/800" : "800XL",
                   a8_settings.pal ? "PAL" : "NTSC");
 }
@@ -58,7 +61,7 @@ static void save(void) {
     memset(sector, 0xFF, 4096);
     Stored s;
     s.magic = MAGIC;
-    s.keyboard_keep_running = a8_settings.keyboard_keep_running;
+    s.keyboard = (uint8_t)a8_settings.keyboard;
     s.fps = a8_settings.fps;
     s.machine_800 = a8_settings.machine_800;
     s.pal = a8_settings.pal;
@@ -81,7 +84,7 @@ static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2
 
 static void value_text(int row, char *buf, size_t cap) {
     switch (row) {
-    case ROW_KEYBOARD: snprintf(buf, cap, "%s", a8_settings.keyboard_keep_running ? "Keep running" : "Auto-pause"); break;
+    case ROW_KEYBOARD: snprintf(buf, cap, "%s", KEYBOARD_NAMES[a8_settings.keyboard]); break;
     case ROW_FPS:      snprintf(buf, cap, "%s", a8_settings.fps ? "On" : "Off"); break;
     case ROW_VOLUME:   snprintf(buf, cap, "%d%%", pico_audio_get_volume_pct()); break;
     case ROW_MACHINE:  snprintf(buf, cap, "%s", a8_settings.machine_800 ? "400/800" : "800XL"); break;
@@ -125,7 +128,7 @@ static void draw_screen(int sel) {
 /* left / right on a row (dir -1 / +1) */
 static bool change(int row, int dir) {
     switch (row) {
-    case ROW_KEYBOARD: a8_settings.keyboard_keep_running = !a8_settings.keyboard_keep_running; return true;
+    case ROW_KEYBOARD: a8_settings.keyboard = (a8_settings.keyboard + dir + A8_KBD_MODES) % A8_KBD_MODES; return true;
     case ROW_FPS:      a8_settings.fps = !a8_settings.fps; return true;
     case ROW_MACHINE:  a8_settings.machine_800 = !a8_settings.machine_800; return true;
     case ROW_TV:       a8_settings.pal = !a8_settings.pal; return true;
