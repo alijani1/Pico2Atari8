@@ -14,7 +14,7 @@ Status: **in development — Quad Ultimate CX first.**
 - **Disk images** — `.atr` `.xfd` (read-only)
 - **Zip files** holding any of those (one game per zip). The game is
   unpacked into a reserved flash area when it starts (about a second for a
-  90 KB disk) and runs from there; see [docs/QUAD_FLASH.md](docs/QUAD_FLASH.md).
+  90 KB disk) and runs from there; see [docs/FLASH_LAYOUT.md](docs/FLASH_LAYOUT.md).
 
 The machine is an 800XL with 64 KB, NTSC, BASIC off, with atari800's
 vibrant palette. The Atari operating

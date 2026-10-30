@@ -12,7 +12,7 @@
 #define A8_UNZIP_SIZE    0x20000u    /* 128 KB */
 #endif
 #ifndef A8_SETTINGS_PHYS
-#define A8_SETTINGS_PHYS 0x31F000u   /* the 4 KB just below the unzip area */
+#define A8_SETTINGS_PHYS 0x340000u   /* Quad: 4 KB after the unzip area (docs/FLASH_LAYOUT.md) */
 #endif
 
 void a8_flash_init(void);                                  /* map window 1 (at boot) */
