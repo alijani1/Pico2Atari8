@@ -37,13 +37,29 @@ constant data (2.6 MB of the Duo 5200's 3.0 MB). The biggest:
 
 | Option for `music2` | Size | Saves | Trade-off |
 |---|---|---|---|
+| **Drop it: Brick Bash plays `music1` (simplest)** | 0 | **979 KB** | Brick Bash and Iron Dome share one 16 s track; three lines in `BricksGame.cpp`, two in `sounds.hpp` |
 | **4-bit IMA ADPCM at 16 kHz (recommended)** | 490 KB | **489 KB** | none audible: same rate, whole track; needs a small decoder in PicoMultiTrackAudio |
 | 8-bit at 8 kHz | 490 KB | 489 KB | duller sound (half the rate) |
 | A shorter loop (~30 s) at 16 kHz | ~490 KB | ~489 KB | less of the music; needs a clean repeat point |
 
 The Quad needs ~113 KB of it, the Duo 5200 ~386 KB (below).
 
+### Simplest: drop `music2`
+
+`music2` plays only in Brick Bash; `music1` is Iron Dome's music. Brick Bash
+can use `music1` instead:
+
+- `src/games/BricksGame.cpp` lines 140, 141, 302: `"music2"` -> `"music1"`
+  (the `isPlaying`, `play` and `stop` calls);
+- `include/sounds.hpp`: remove `#include "sounds/music2.h"` and
+  `PMTA_SOUND_8(music2)`.
+
+That frees all 979 KB with no new code: room for both devices with plenty to
+spare. The cost is that the two games share one track.
+
 ### Recommended: IMA ADPCM
+
+Keeps both tracks.
 
 IMA ADPCM stores each sample as a 4-bit step from the one before, so a
 track takes half the bytes of 8-bit PCM at the same 16 kHz, and it usually
