@@ -33,26 +33,35 @@ constant data (2.6 MB of the Duo 5200's 3.0 MB). The biggest:
 | `menu16s8` | 125 KB | 8 s |
 | `theend` / `jawdeath` / `victory` | 86 / 69 / 54 KB | |
 
-`music2` alone covers either device, any one of these ways:
+`music2` alone covers either device. The options:
 
-| Option for `music2` | Size | Saves |
-|---|---|---|
-| 8-bit at 8 kHz | 490 KB | 489 KB |
-| 4-bit IMA ADPCM at 16 kHz (keeps the rate; a small decoder in PicoMultiTrackAudio) | 490 KB | 489 KB |
-| A shorter loop (~30 s), as now | ~490 KB | ~489 KB |
+| Option for `music2` | Size | Saves | Trade-off |
+|---|---|---|---|
+| **4-bit IMA ADPCM at 16 kHz (recommended)** | 490 KB | **489 KB** | none audible: same rate, whole track; needs a small decoder in PicoMultiTrackAudio |
+| 8-bit at 8 kHz | 490 KB | 489 KB | duller sound (half the rate) |
+| A shorter loop (~30 s) at 16 kHz | ~490 KB | ~489 KB | less of the music; needs a clean repeat point |
 
 The Quad needs ~113 KB of it, the Duo 5200 ~386 KB (below).
 
----|---|
-| `music2` | 979 KB |
-| `music1` | 254 KB |
-| `ambiant` | 164 KB |
-| `bitmap_5200_Trackball` (5200) | 128 KB |
-| `menu16s8` | 125 KB |
-| `theend` / `jawdeath` / `victory` | 86 / 69 / 54 KB |
+### Recommended: IMA ADPCM
 
-Compressing or downsampling `music2` alone frees more than either device
-needs.
+IMA ADPCM stores each sample as a 4-bit step from the one before, so a
+track takes half the bytes of 8-bit PCM at the same 16 kHz, and it usually
+sounds as good as the 8-bit original on the small PWM speaker (it starts
+from 16-bit, so it can even sound better).
+
+- **Converting:** a script beside `scripts/downsample_sound_8bit.py` turns a
+  16-bit original (or ffmpeg: `-acodec adpcm_ima_wav`) into a 4-bit array,
+  plus a few bytes of decoder state.
+- **Playing:** PicoMultiTrackAudio gets a third sound type next to 16-bit
+  and 8-bit (`PMTA_SOUND_ADPCM`), decoded one sample at a time as it mixes:
+  a table lookup, an add and a clamp, a negligible load at 16 kHz.
+- **Looping and seeking:** decoding has to start from the beginning or from a
+  saved state; restarting a looped track (as Bricks does with `music2`) is
+  fine. Store a state every few KB if a track ever needs to start mid-way.
+- **Which tracks:** `music2` alone is enough for both devices; `music1`
+  (254 KB -> 127 KB) and `ambiant` (164 KB -> 82 KB) can follow if more
+  room is ever needed.
 
 ---
 
