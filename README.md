@@ -91,7 +91,7 @@ From Quad firmware 1.1 (CX and CX-W), Pico2Atari8 has its own slot beside
 Pico2Arcade, comes with the Quad release, and shares its ARCADE ROMS drive.
 
 1. To flash just this image: `pio run -e quad -t upload` (writes only the
-   Atari 8-bit slot at 0x260000; the Quad firmware, the arcade and the ROM
+   Atari 8-bit slot at 0x210000; the Quad firmware, the arcade and the ROM
    drive are left alone).
 2. **Mini-Games → Atari 8-bit** opens the game list.
 3. To copy games: pick **ROM Drive (USB)** at the end of the list. The

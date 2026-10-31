@@ -212,3 +212,25 @@ below the CX-W's LittleFS, the same on both variants (one image):
 
 The chain-boot window runs `0x260000 .. 0x3FFFFF`; the ROM drive is at
 window offset `0x160000`. `music2` was dropped on the Quad too.
+
+### Changed before release: a 512 KB Quad drive
+
+The Quad's ROM drive grew to 512 KB like the Duo 5200's, so every arcade
+game fits with room for Atari games. It starts lower, so both slots moved
+below the CX-W's LittleFS; LittleFS and EEPROM stay where they are:
+
+| Physical | Size | Use |
+|---|---|---|
+| `0x000000 .. 0x1EFFFF` | 1.94 MB | Quad firmware (`FIRMWARE_LIMITS` `0x1F0000`; 1.88 MB today) |
+| `0x1F0000 .. 0x20FFFF` | 128 KB | Pico2Atari8 unzip area |
+| `0x210000 .. 0x26FFFF` | 384 KB | Atari 8-bit slot (window offset to the drive `0x170000`) |
+| `0x270000 .. 0x2CFFFF` | 384 KB | arcade slot (window offset `0x110000`) |
+| `0x2D0000 .. 0x2D0FFF` | 4 KB | Pico2Atari8 settings |
+| `0x2D1000 ..` | | unused, up to LittleFS (CX-W `0x2DF000`, CX `0x347000`) |
+| `0x360000 .. 0x37EFFF` | 124 KB | unused |
+| `0x37F000 .. 0x37FFFF` | 4 KB | arcade high scores (the sector below the drive) |
+| `0x380000 .. 0x3FFFFF` | 512 KB | ARCADE ROMS drive |
+
+A Quad updated from 1.0 has no drive at `0x380000` (old arcade image
+bytes), so ROM drive mode formats it: its ROMs and arcade high scores are
+lost once.
