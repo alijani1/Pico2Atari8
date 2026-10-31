@@ -20,6 +20,7 @@
  */
 #include <Arduino.h>
 #include "a8_settings.h"
+#include "a8_version.h"
 #include "a8_display.h"
 #include "a8_flash.h"
 #include "a8_input.h"
@@ -207,6 +208,9 @@ static void draw_screen(int sel) {
     tft.setTextColor(COL_TITLE, COL_BG);
     tft.setCursor(8, 6);
     tft.print("SETTINGS");
+    tft.setTextColor(COL_HINT, COL_BG);
+    tft.setCursor(320 - 8 - tft.textWidth("v" A8_VERSION), 6);
+    tft.print("v" A8_VERSION);
     tft.drawFastHLine(0, 25, 320, COL_HINT);
     for (int r = 0; r < ROWS; r++) draw_row(r, r == sel);
     tft.setTextColor(COL_HINT, COL_BG);

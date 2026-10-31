@@ -27,6 +27,7 @@
 #include "a8_zip.h"
 #include "a8_flash.h"
 #include "a8_settings.h"
+#include "a8_version.h"
 
 extern "C" {
 #include "atari.h"
@@ -146,6 +147,7 @@ static void log_file(const char *path) {
 
 void setup() {
     Serial.begin(115200);
+    Serial.println("[a8] Pico2Atari8 " A8_VERSION);
     a8_debug_init();
     a8_flash_init();
     a8_settings_load();

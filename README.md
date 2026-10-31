@@ -4,7 +4,8 @@
 and the Atari 5200, emulated by [atari800](https://github.com/atari800/atari800) on the
 RP2350, with your original Atari joysticks.
 
-Status: **in development — Quad Ultimate CX first.**
+Version **2.0**, for the Quad Ultimate CX / CX-W and the Duo 5200 Ultimate —
+see [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md).
 
 ## What it runs
 
