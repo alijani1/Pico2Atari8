@@ -11,9 +11,12 @@
  * charges, so 12000 = no paddle. The counters are started one call and read
  * a later one, so nothing waits.
  *
- * The count is proportional to the resistance, as the Atari's pot value is,
- * so it's spread straight over 1..228 across the range seen so far (it only
- * grows outward: turn each paddle end to end once).
+ * The count is proportional to the resistance, as the Atari's pot value is.
+ * It's clipped at the source before it's mapped: the low end (the lowest
+ * count seen, plus a margin - a pot's last few percent are unreliable) and
+ * the high end at SRC_MAX, about half the turn (~8000 counts end to end):
+ * Atari games use half the paddle or less, which made them quick and
+ * sensitive. What's left is spread over the whole 1..228 the game reads.
  */
 #include "pico_paddles.h"
 
@@ -27,8 +30,9 @@
 
 static const uint8_t RC_PINS[4] = { 42, 43, 40, 41 };   /* p1 A, p1 B, p2 A, p2 B */
 static const uint32_t RC_MAX  = 12000;      /* timeout (counts, 9.6 ms): no paddle */
-static const uint32_t RC_LOW  = 200;        /* turned right, a first guess (only grows outward) */
-static const uint32_t RC_HIGH = 6000;       /* turned left, likewise (reads up to ~8000) */
+static const uint32_t RC_LOW  = 200;        /* turned right, a first guess (only grows down) */
+static const uint32_t SRC_TRIM = 100;       /* clipped off above the lowest count seen */
+static const uint32_t SRC_MAX  = 4000;      /* clipped above: about half the turn */
 static const float    RC_PIO_HZ = 2500000.0f;
 
 /* GameAdapterRGBPico src/pio_rc.cpp: count loops until the pin reads HIGH.
@@ -97,14 +101,15 @@ static void rc_start(void) {
     rc_running = true;
 }
 
-/* The last two counts (a little smoothing) as a pot value over the range
- * seen; it moves only once past three quarters of a step, so a paddle
- * left alone doesn't flicker between two values. */
+/* The last two counts (a little smoothing), clipped to the window (above),
+ * as a pot value; it moves only once past three quarters of a step, so a
+ * paddle left alone doesn't flicker between two values. */
 static void update_pot(Paddle &p) {
+    uint32_t from = p.lo + SRC_TRIM, to = p.hi;
     uint32_t c = (p.last + p.prev) / 2;
-    if (c < p.lo) c = p.lo;
-    if (c > p.hi) c = p.hi;
-    int32_t x256 = 256 + (int32_t)((uint64_t)(c - p.lo) * 227 * 256 / (p.hi - p.lo));
+    if (c < from) c = from;
+    if (c > to) c = to;
+    int32_t x256 = 256 + (int32_t)((uint64_t)(c - from) * 227 * 256 / (to - from));
     int32_t d = x256 - p.pot * 256;
     if (d > 192 || d < -192) p.pot = (int16_t)((x256 + 128) / 256);
     if (p.pot < 1) p.pot = 1;
@@ -144,7 +149,7 @@ static void rc_collect(void) {
         if (!pt.present) {
             if (++pt.seen < 30) continue;
             pt.present = true;
-            for (Paddle &p : pt.pd) { p.lo = RC_LOW; p.hi = RC_HIGH; p.pot = 0; }
+            for (Paddle &p : pt.pd) { p.lo = RC_LOW; p.hi = SRC_MAX; p.pot = 0; }
             Serial.printf("[paddles] port %d: %lu, %lu\n", n + 1,
                           (unsigned long)c[2 * n], (unsigned long)c[2 * n + 1]);
             a8_display_toast(n ? "PADDLES 2 IN" : "PADDLES 1 IN");
@@ -152,7 +157,6 @@ static void rc_collect(void) {
         for (Paddle &p : pt.pd) {
             if (p.last >= RC_MAX) continue;          /* this one's missing: keep the last */
             if (p.last < p.lo) p.lo = p.last;
-            if (p.last > p.hi) p.hi = p.last;
             if (p.prev >= RC_MAX) p.prev = p.last;
             update_pot(p);
         }

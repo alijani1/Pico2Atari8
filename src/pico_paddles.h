@@ -15,8 +15,9 @@ void paddles_init(void);
 void paddles_poll(void);
 
 bool    paddles_present(int port);           /* port 0 / 1: paddles plugged in */
-/* A paddle as an Atari pot: 1 (turned right) .. 228 (left), as the real
- * paddle's resistance; -1 if none. paddle 0 = A (pin 5, its button is left),
+/* A paddle as an Atari pot, over the whole 1 (turned right) .. 228; the
+ * paddle's own counts are clipped to about half its turn first
+ * (pico_paddles.cpp). -1 if none. paddle 0 = A (pin 5, its button is left),
  * 1 = B (pin 9, right). */
 int16_t paddles_pot(int port, int paddle);
 

@@ -12,7 +12,7 @@
  *   both:     the Joy-Con (raw, centre, range, pot) and the device buttons.
  *
  * Calibration is learnt as you go: move each stick all the way round (turn
- * each paddle end to end) once and the range fills in. MENU goes back.
+ * each paddle fully right) once and the range fills in. MENU goes back.
  */
 #include <Arduino.h>
 #include <stdarg.h>
@@ -130,8 +130,9 @@ static void draw_controller(int n, Box &box) {
 #endif
 
 #ifdef PICO_QUAD
-/* A paddle: its pot as a bar (1..228, left to right), the count and range,
- * and its button (A = the port's left line, B = right). */
+/* A paddle: its pot as a bar (moving the way the knob turns: 228 at the
+ * left, 1 at the right), the count and range, and its button (A = the
+ * port's left line, B = right). */
 static const int BAR_W = 100;
 static void draw_paddles(int n, int bar_at[2]) {
     int x0 = n * 160 + 4;
@@ -143,7 +144,7 @@ static void draw_paddles(int n, int bar_at[2]) {
     for (int a = 0; a < 2; a++) {
         int y = 96 + a * 30;
         int16_t pot = paddles_pot(n, a);
-        int bx = pot > 0 ? x0 + 1 + (pot - 1) * (BAR_W - 5) / 227 : -1;
+        int bx = pot > 0 ? x0 + 1 + (228 - pot) * (BAR_W - 5) / 227 : -1;
         if (bx != bar_at[a]) {
             tft.fillRect(x0, y, BAR_W, 8, COL_OFF);
             if (bx >= 0) tft.fillRect(bx, y, 3, 8, COL_DOT);
