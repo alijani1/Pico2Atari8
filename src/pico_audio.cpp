@@ -38,10 +38,12 @@ extern "C" void pico_audio_init(int sample_rate) {
         Serial.printf("[audio] PWMAudio on GPIO %d\n", AUDIO_PIN);
         g_audio_p = new PWMAudio(AUDIO_PIN, /*stereo=*/false);
 #endif
-        // 4 buffers × 256 words = 1024 samples. ~42ms of latency at 24kHz;
+        // 8 buffers × 128 words = 1024 samples. ~46ms of latency at 22kHz;
         // small enough that game→audio lag stays imperceptible, large enough
-        // that we survive a few missed refills.
-        g_audio.setBuffers(4, 256);
+        // that we survive a few missed refills. Small buffers: the two the
+        // DMA holds are only 256 samples, so the ring's level (the stretch,
+        // pico_audio_push_s16) is known finely.
+        g_audio.setBuffers(8, 128);
         Serial.printf("[audio] begin %d Hz\n", sample_rate);
         bool ok = g_audio.begin(sample_rate);
         Serial.printf("[audio] begin %s\n", ok ? "ok" : "FAILED");
@@ -97,16 +99,42 @@ extern "C" size_t pico_audio_push(const void *data, size_t bytes) {
     return written * 2;   // bytes actually written
 }
 
+/* The emulator is paced by this ring (it waits for room). When it runs
+ * slower than real time - a heavy stretch, like Miner 2049er's level start -
+ * the ring drains and the DMA plays its silence buffer: a jump to the middle
+ * level and back, a click, several a second. So while the ring is under half
+ * full the sound is stretched: now and then a sample is played twice, more
+ * often the emptier the ring (up to one in two), so it sounds a little
+ * slower, as the machine would, instead of breaking up; it settles at about
+ * the emulator's shortfall and stops once the ring fills again. And a DC
+ * blocker (~3.4 Hz) keeps the output centred on that silence level, so an
+ * underrun that still happens is a gap rather than a pop. */
+static const int RING_SAMPLES = 8 * 128;               /* setBuffers(8, 128), mono: a word each */
+static int32_t  g_dc_x1 = 0, g_dc_y1 = 0;              /* DC blocker: last in, last out (x256) */
+static uint32_t g_stretch_acc = 0;                     /* 16.16: due extra samples */
+
 extern "C" size_t pico_audio_push_s16(const void *data, size_t bytes) {
     if (!g_started || bytes < 2) return 0;
     const int16_t *samples = (const int16_t *)data;
     size_t nsamp = bytes / 2, written = 0;
-    while (written < nsamp && g_audio.availableForWrite() >= 2) {
-        int32_t s = (int32_t)samples[written] * g_gain / 10000;
+    int queued = RING_SAMPLES - g_audio.availableForWrite() / 4;
+    uint32_t step = queued < RING_SAMPLES / 2
+        ? (uint32_t)(RING_SAMPLES / 2 - (queued < 0 ? 0 : queued)) * (65536 / 2) / (RING_SAMPLES / 2)
+        : 0;
+    while (written < nsamp && g_audio.availableForWrite() >= 4) {
+        int32_t x = samples[written];
+        g_dc_y1 += ((x - g_dc_x1) << 8) - (g_dc_y1 >> 10);   /* y = x - x1 + (1 - 1/1024) y1 */
+        g_dc_x1 = x;
+        int32_t s = (g_dc_y1 >> 8) * g_gain / 10000;
         if (s >  32767) s =  32767;
         if (s < -32768) s = -32768;
         g_audio.write((int16_t)s);
         written++;
+        g_stretch_acc += step;
+        if (g_stretch_acc >= 65536) {
+            g_stretch_acc -= 65536;
+            if (g_audio.availableForWrite() >= 4) g_audio.write((int16_t)s);
+        }
     }
     return written * 2;
 }
