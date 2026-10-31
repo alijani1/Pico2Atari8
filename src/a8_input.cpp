@@ -12,6 +12,8 @@
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
  *   Side buttons      game list: up / down; in a game, right = RETURN
+ *   Paddles           ports 1-2 (pico_paddles.cpp): the 400/800/XL's pots
+ *                     0-3; their buttons are the ports' left / right lines
  *
  * Duo 5200 Ultimate (PICO_5200, GameAdapterRGBPico data/duo5200.json): the
  * same device buttons and Joy-Con, but the ports are two Atari 5200
@@ -38,6 +40,7 @@
 #include "a8_osk.h"
 #include "a8_settings.h"
 #include "pico_5200ctl.h"
+#include "pico_paddles.h"
 
 extern "C" {
 #include "akey.h"
@@ -122,6 +125,7 @@ void a8_input_init(void) {
 #else
     for (auto &port : PORT_PINS)
         for (int8_t p : port) pinMode(p, INPUT_PULLUP);
+    paddles_init();
 #endif
     const int buttons[] = { PIN_RED, PIN_GREEN, PIN_BLUE, PIN_YELLOW, PIN_SELECT,
                             PIN_START, PIN_MENU, PIN_CLICK, PIN_SIDE_UP, PIN_SIDE_DOWN };
@@ -188,7 +192,7 @@ static uint8_t port_dirs(int n, int edge = 0) {
 static bool port_fire(int n) { return low(PORT_PINS[n][4]); }
 static bool port_fire_a(int n) { return port_fire(n); }
 static bool port_fire_b(int n) { (void)n; return false; }
-static void ports_poll(void) {}
+static void ports_poll(void) { paddles_poll(); }
 static const int MENU_EDGE = 0;
 #endif
 
@@ -251,7 +255,10 @@ bool a8_input_frame(void) {
             in.stick[n] = port_dirs(n);
             in.trig[n] = port_fire(n);
         }
-#ifdef PICO_5200
+#ifndef PICO_5200
+        for (int n = 0; n < 2; n++)           /* paddles: A, B per port */
+            for (int a = 0; a < 2; a++) in.pot[2 * n + a] = paddles_pot(n, a);
+#else
         if (pad >= 0 && pad < 12) in.key = KEYPAD_800[pad];
         if (pad == 12) in.start = 1;
 #endif
@@ -376,7 +383,8 @@ void a8_input_joycon_diag(int raw[2], int centre[2], int lo[2], int hi[2], int16
 
 bool a8_input_button(int which) {
     static const int PINS[A8B_COUNT] = { PIN_RED, PIN_GREEN, PIN_BLUE, PIN_YELLOW,
-                                         PIN_START, PIN_SELECT, PIN_CLICK, PIN_MENU };
+                                         PIN_START, PIN_SELECT, PIN_CLICK, PIN_MENU,
+                                         PIN_SIDE_UP, PIN_SIDE_DOWN };
     return which >= 0 && which < A8B_COUNT && low(PINS[which]);
 }
 

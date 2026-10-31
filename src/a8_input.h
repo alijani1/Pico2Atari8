@@ -24,7 +24,9 @@ uint8_t a8_input_menu(void);
 /* Controller test (a8_ctltest.cpp): the Joy-Con's raw reading, its centre
  * and the range seen so far, and as a 5200 pot (A8_POT_NONE at rest); the
  * device buttons; a port's directions and fire. */
-enum { A8B_RED, A8B_GREEN, A8B_BLUE, A8B_YELLOW, A8B_START, A8B_SELECT, A8B_CLICK, A8B_MENU, A8B_COUNT };
+enum { A8B_RED, A8B_GREEN, A8B_BLUE, A8B_YELLOW, A8B_START, A8B_SELECT, A8B_CLICK, A8B_MENU,
+       A8B_SIDE_L, A8B_SIDE_R,     /* Quad only */
+       A8B_COUNT };
 void    a8_input_joycon_diag(int raw[2], int centre[2], int lo[2], int hi[2], int16_t pot[2]);
 bool    a8_input_button(int which);
 uint8_t a8_input_port_dirs(int n, bool *fire);

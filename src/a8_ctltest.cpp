@@ -5,11 +5,14 @@
  *             (the 5200 pot value it gives the game), the raw charge-time
  *             counts with the rest and range learnt so far, Fire A / B and
  *             the keys held;
- *   Quad:     the four joystick ports' directions and fire;
+ *   Quad:     the four joystick ports' directions and fire; paddles on
+ *             ports 1-2 - each one's pot value (1..228, a bar), the raw
+ *             charge-time count with the range learnt so far, its button;
+ *             the side buttons;
  *   both:     the Joy-Con (raw, centre, range, pot) and the device buttons.
  *
- * Calibration is learnt as you go: move each stick all the way round once
- * and the range fills in. MENU goes back.
+ * Calibration is learnt as you go: move each stick all the way round (turn
+ * each paddle end to end) once and the range fills in. MENU goes back.
  */
 #include <Arduino.h>
 #include <stdarg.h>
@@ -18,6 +21,7 @@
 #include "a8_input.h"
 #include "a8_platform.h"
 #include "pico_5200ctl.h"
+#include "pico_paddles.h"
 
 static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_TITLE = 0xFD20,
                       COL_HINT = TFT_DARKGREY, COL_ON = TFT_GREEN, COL_OFF = 0x4208,
@@ -77,10 +81,10 @@ static void lamp(int x, int y, const char *label, bool on) {
 }
 
 static void draw_buttons(int y) {
-    static const char *const NAMES[A8B_COUNT] = { "RED", "GREEN", "BLUE", "YELLOW", "START",
-                                                  "SELECT", "CLICK", "MENU" };
+    static const char *const NAMES[A8B_MENU + 1] = { "RED", "GREEN", "BLUE", "YELLOW", "START",
+                                                     "SELECT", "CLICK", "MENU" };
     int x = 4;
-    for (int b = 0; b < A8B_COUNT; b++) {
+    for (int b = 0; b <= A8B_MENU; b++) {
         lamp(x, y, NAMES[b], a8_input_button(b));
         x += (int)strlen(NAMES[b]) * 6 + 10;
     }
@@ -125,6 +129,35 @@ static void draw_controller(int n, Box &box) {
 }
 #endif
 
+#ifdef PICO_QUAD
+/* A paddle: its pot as a bar (1..228, left to right), the count and range,
+ * and its button (A = the port's left line, B = right). */
+static const int BAR_W = 100;
+static void draw_paddles(int n, int bar_at[2]) {
+    int x0 = n * 160 + 4;
+    bool there = paddles_present(n);
+    text_at(x0, 82, there ? COL_ON : COL_HINT, "PADDLES %d %s", n + 1, there ? "OK         " : "not plugged");
+    bool fire;
+    uint8_t d = a8_input_port_dirs(n, &fire);
+    TFT_eSPI &tft = a8_tft();
+    for (int a = 0; a < 2; a++) {
+        int y = 96 + a * 30;
+        int16_t pot = paddles_pot(n, a);
+        int bx = pot > 0 ? x0 + 1 + (pot - 1) * (BAR_W - 5) / 227 : -1;
+        if (bx != bar_at[a]) {
+            tft.fillRect(x0, y, BAR_W, 8, COL_OFF);
+            if (bx >= 0) tft.fillRect(bx, y, 3, 8, COL_DOT);
+            bar_at[a] = bx;
+        }
+        lamp(x0 + BAR_W + 6, y - 2, a ? "B" : "A", d & (a ? A8_RIGHT : A8_LEFT));
+        uint32_t c, lo, hi;
+        paddles_diag(n, a, &c, &lo, &hi);
+        text_at(x0, y + 11, COL_TEXT, "%5lu %4lu-%4lu p%3d ", (unsigned long)c,
+                (unsigned long)lo, (unsigned long)hi, pot > 0 ? pot : 0);
+    }
+}
+#endif
+
 void a8_ctltest_screen(void) {
     TFT_eSPI &tft = a8_tft();
     tft.fillScreen(COL_BG);
@@ -141,6 +174,9 @@ void a8_ctltest_screen(void) {
 #ifdef PICO_5200
     Box pads[2] = { { 4, 42, 82 }, { 164, 42, 82 } };
     for (Box &b : pads) box_frame(b);
+#endif
+#ifdef PICO_QUAD
+    int bar_at[2][2] = { { -2, -2 }, { -2, -2 } };       /* force the first draw */
 #endif
     Box joy = { 4, 170, 34 };
     text_at(4, 160, COL_HINT, "JOY-CON");
@@ -163,6 +199,11 @@ void a8_ctltest_screen(void) {
             lamp(x + 42, y + 12, "R", d & A8_RIGHT);
             lamp(x, y + 28, "FIRE", fire);
         }
+#ifdef PICO_QUAD
+        for (int n = 0; n < 2; n++) draw_paddles(n, bar_at[n]);
+        lamp(46, 198, "SIDE L", a8_input_button(A8B_SIDE_L));
+        lamp(96, 198, "SIDE R", a8_input_button(A8B_SIDE_R));
+#endif
 #endif
         draw_joycon(joy, 178);
         draw_buttons(212);

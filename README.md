@@ -58,7 +58,7 @@ and on, like the switch on a real drive: let the game load, type DRV
 | Volume | 0-100 % (shared with the Quad) |
 | Default machine | 800XL (default) / 400/800 - SELECT in the list starts the other |
 | TV system | NTSC (default) / PAL |
-| Controller test | every control live: the 5200 controllers' sticks (as the pot value the game gets, plus the raw counts and the range learnt), Fire A / B and keys; the Quad's joystick ports; the Joy-Con; the device buttons. MENU goes back |
+| Controller test | every control live: the 5200 controllers' sticks (as the pot value the game gets, plus the raw counts and the range learnt), Fire A / B and keys; the Quad's joystick ports, paddles on ports 1–2 (pot value, raw counts, range, buttons) and side buttons; the Joy-Con; the device buttons. MENU goes back |
 
 ## Atari 5200
 
@@ -102,6 +102,7 @@ Pico2Arcade, comes with the Quad release, and shares its ARCADE ROMS drive.
 |---|---|---|
 | Ports 1–4 | port 1: move / fire = play | Atari joysticks 1–4 (on an 800XL only 1–2 exist: start four-player games such as M.U.L.E. with SELECT) |
 | Joy-Con stick / click | move / play | joystick 1 / fire 1 |
+| Paddles (ports 1–2) | | the four paddles (pots 0–3), for Kaboom!, Super Breakout and the like; plugging them in shows PADDLES 1 / 2 IN. Turn each one end to end once so it learns its range |
 | Red | play | fire 1 |
 | Blue | | on-screen keyboard: press to open / close - the game pauses, fire types a key (Settings > Keyboard) |
 | Yellow | | SPACE |

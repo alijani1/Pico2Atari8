@@ -30,7 +30,8 @@ typedef struct {
     int     shift;         /* SHIFT held with it (5200: the top fire button) */
     int16_t pot[8];        /* 5200 analog sticks, x/y per port (6 left/up ..
                               114 centre .. 220 right/down); A8_POT_NONE = use
-                              the stick's directions */
+                              the stick's directions. 400/800/XL: the paddles,
+                              2 per port (1..228); A8_POT_NONE = none (228) */
 } a8_input_t;
 
 #define A8_POT_NONE (-1)

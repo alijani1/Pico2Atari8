@@ -157,12 +157,13 @@ int PLATFORM_PORT(int num)
 }
 
 /* 5200 analog sticks (input.c, A8_POT_INPUT): the Joy-Con's position, or
- * the centre - then input.c falls back to the stick's directions. Paddles
- * on the 400/800/XL aren't connected (228, as upstream without a pot). */
+ * the centre - then input.c falls back to the stick's directions. On the
+ * 400/800/XL the paddles (Quad ports 1-2), or 228 where there are none (as
+ * the real machine reads an empty port). */
 int Atari_POT(int num)
 {
 	if (Atari800_machine_type != Atari800_MACHINE_5200)
-		return 228;
+		return num >= 0 && num < 8 && a8_input.pot[num] != A8_POT_NONE ? a8_input.pot[num] : 228;
 	if (num < 0 || num > 7 || a8_input.pot[num] == A8_POT_NONE)
 		return INPUT_joy_5200_center;
 	return a8_input.pot[num];
