@@ -84,6 +84,7 @@ guessed from where its code jumps to. Rename a game `.a52` to make sure.
 | Blue | the controller keypad on screen: 0-9 `*` `#` START PAUSE RESET (as the keyboard: the game pauses, fire presses a key) |
 | MENU | hold 1 s: back to the game list |
 | 5200 controllers (Duo) | controllers 1 and 2: analog stick, Fire A = bottom, Fire B = top, keypad 0-9 `*` `#` START PAUSE RESET. The Joy-Con stands in for controller 1's stick while it's moved. In a 400/800/XL game they're joysticks (Fire A or B = fire, keypad digits = number keys, START = START) |
+| Paddles (Quad, ports 1–2) | a pair stands in for that port's 5200 controller: paddle A = the stick's x, paddle B = its y (turned right = right / down); A's button = bottom fire, B's = top fire |
 
 ## Quad Ultimate CX
 

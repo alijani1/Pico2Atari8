@@ -32,6 +32,10 @@
  *   5200 controllers  (Duo) the real thing: analog sticks, bottom (A) and
  *                     top (B) fire, keypads (START PAUSE RESET too). The
  *                     Joy-Con, once moved, stands in for controller 1's stick.
+ *   Paddles           (Quad, ports 1-2) a pair stands in for that port's
+ *                     5200 controller: paddle A = the stick's x, B = its y
+ *                     (turned right = right / down); A's button = bottom
+ *                     fire, B's = top fire.
  */
 #include <Arduino.h>
 #include "a8_input.h"
@@ -231,6 +235,18 @@ bool a8_input_frame(void) {
             in.pot[2 * n + 1] = ctl5200_pot(n, 1);
         }
         if (pad >= 0) in.key = KEYPAD_5200[pad];
+#else
+        for (int n = 0; n < 2; n++) {         /* paddles as a 5200 controller */
+            if (!paddles_present(n)) continue;
+            for (int a = 0; a < 2; a++) {
+                int16_t p = paddles_pot(n, a);   /* 1 (right) .. 228 */
+                in.pot[2 * n + a] = p > 0 ? (int16_t)(POT_MIN + (228 - p) * (POT_MAX - POT_MIN) / 227) : A8_POT_NONE;
+            }
+            /* their buttons are the left / right lines, not directions */
+            in.trig[n] = (in.stick[n] & A8_LEFT) != 0;
+            if (in.stick[n] & A8_RIGHT) in.shift = 1;
+            in.stick[n] = 0;
+        }
 #endif
         /* the Joy-Con stands in for controller 1's stick while it's
          * clearly pushed (past 15 %: a resting one may wander a little)
