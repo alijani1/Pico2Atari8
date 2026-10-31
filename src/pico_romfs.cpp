@@ -193,9 +193,43 @@ static const uint8_t *find_dir(const char *name) {
     return scan_dir(vol + rootOfs, rootEntries, n83, 0x10);
 }
 
+static const int LIST_DEPTH = 3;           /* folders below the root that are listed */
+
+/* `name83` (a file) among `count` entries at `dir` or in their folders,
+ * `depth` deep at most as the game list goes (hidden and system ones
+ * skipped). */
+static const uint8_t *search_folder(uint32_t cluster, const char *name83, int depth);
+static const uint8_t *search_entries(const uint8_t *dir, uint32_t count, const char *name83, int depth) {
+    for (uint32_t i = 0; i < count; i++) {
+        const uint8_t *e = dir + i * 32;
+        if (e[0] == 0x00) return nullptr;                 /* end of directory */
+        if (e[0] == 0xE5 || e[0] == '.') continue;         /* deleted, . and .. */
+        uint8_t attr = e[11];
+        if (attr == 0x0F || (attr & 0x08)) continue;       /* LFN piece / volume label */
+        if (attr & 0x10) {
+            if (depth >= LIST_DEPTH || (attr & 0x06)) continue;
+            const uint8_t *r = search_folder(rd16(e + 26), name83, depth + 1);
+            if (r) return r;
+        } else if (memcmp(e, name83, 11) == 0) {
+            return e;
+        }
+    }
+    return nullptr;
+}
+static const uint8_t *search_folder(uint32_t cluster, const char *name83, int depth) {
+    for (int guard = 0; cluster_ok(cluster) && guard < 4096; guard++) {
+        const uint8_t *e = search_entries(vol + cluster_ofs(cluster), clusterBytes / 32, name83, depth);
+        if (e) return e;
+        cluster = fat_next(cluster);
+        if (fat_eoc(cluster)) break;
+    }
+    return nullptr;
+}
+
 /* Directory entry for `path`: "/DIR/SUB/NAME.EXT" follows the folders
  * (8.3 names); a bare name (or "/roms/NAME.EXT") is looked for in the root,
- * then the ROMS folder, then the ATARI folder. */
+ * then the ROMS folder, then the ATARI folder, then in any folder (the OS
+ * ROM files, ATARIOSB.ROM ..., wherever they were put). */
 static const uint8_t *find_file(const char *path) {
     if (!vol) return nullptr;
     const char *name = strrchr(path, '/');
@@ -226,7 +260,7 @@ static const uint8_t *find_file(const char *path) {
         const uint8_t *d = find_dir(dn);
         if (d && (e = scan_subdir(rd16(d + 26), n83))) return e;
     }
-    return nullptr;
+    return search_entries(vol + rootOfs, rootEntries, n83, 0);
 }
 
 /* ---- listing --------------------------------------------------------- */
@@ -246,7 +280,6 @@ static void lfn_piece(const uint8_t *e, char *lfn, size_t cap) {
     }
 }
 
-static const int LIST_DEPTH = 3;           /* folders below the root that are listed */
 static bool list_folder(uint32_t cluster, const char *folder, int depth,
                         romfs_list_cb cb, void *ctx);
 

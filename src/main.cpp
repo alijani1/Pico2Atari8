@@ -86,7 +86,7 @@ static bool start_as_5200 = false;
 /* An 800XL with 64 KB (or an 800 with 48 KB for OS-B games), NTSC, BASIC
  * off (as if OPTION were held at power-on), running the chosen file.
  * AltirraOS is built in; real Atari ROM files on the drive (ATARIXL.ROM,
- * ATARIOSB.ROM - root or ATARI folder) are used instead when present: some
+ * ATARIOSB.ROM - any folder, pico_romfs.cpp) are used instead when present: some
  * early games jump into the original OS and crash on AltirraOS.
  * A 5200 game runs on a 5200 (16 KB, NTSC only): its BIOS from 5200.ROM if
  * the drive has it, else the built-in Altirra 5200 OS. (A .car names its
