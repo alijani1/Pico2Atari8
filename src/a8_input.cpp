@@ -72,7 +72,8 @@ static const int PIN_JOY_X = 44, PIN_JOY_Y = 45;
  * stick moves, the lowest and highest readings are kept, and once it has
  * gone well past the centre BOTH ways the centre becomes their midpoint
  * (one side alone would skew it). A direction counts outside a dead zone
- * of 30 % of the half-range around the centre; until both sides are known,
+ * of 30 % of the half-range around the centre (left / right: 65 % in the
+ * menus); until both sides are known,
  * a nominal half-range stands in. */
 struct JoyAxis { int pin; int first, lo, hi; };
 static const int NOMINAL_HALF = 1000;       /* of 2048: until it has moved */
@@ -94,10 +95,10 @@ static int axis_sample(JoyAxis &a) {
     return v;
 }
 
-static int8_t axis_dir(const JoyAxis &a, int v) {
+static int8_t axis_dir(const JoyAxis &a, int v, int dead_pct = 30) {
     int centre, half;
     axis_centre(a, &centre, &half);
-    int dead = half * 30 / 100;
+    int dead = half * dead_pct / 100;
     if (v < centre - dead) return -1;
     if (v > centre + dead) return 1;
     return 0;
@@ -145,11 +146,11 @@ void a8_input_init(void) {
 
 /* One Joy-Con reading: its directions, and (pot_x/pot_y given) its
  * position as 5200 pots. */
-static uint8_t joycon_read(int16_t *pot_x = nullptr, int16_t *pot_y = nullptr) {
+static uint8_t joycon_read(int16_t *pot_x = nullptr, int16_t *pot_y = nullptr, int dead_x_pct = 30) {
     int vx = axis_sample(joy_x), vy = axis_sample(joy_y);
     if (pot_x) *pot_x = axis_pot(joy_x, vx);
     if (pot_y) *pot_y = axis_pot(joy_y, vy);
-    int8_t x = axis_dir(joy_x, vx), y = axis_dir(joy_y, vy);
+    int8_t x = axis_dir(joy_x, vx, dead_x_pct), y = axis_dir(joy_y, vy);
     uint8_t d = 0;
     if (x < 0) d |= A8_LEFT;
     if (x > 0) d |= A8_RIGHT;
@@ -369,10 +370,13 @@ bool a8_input_frame(void) {
 
 /* ---- game list ------------------------------------------------------- */
 
+static const int MENU_JOY_DEAD_X = 65;     /* % of the half-range (30 in a game) */
+
 uint8_t a8_input_menu(void) {
     uint8_t b = 0;
     ports_poll();
-    uint8_t d = port_dirs(0, MENU_EDGE) | joycon_read();
+    /* left / right change values in Settings: the Joy-Con needs a firm push */
+    uint8_t d = port_dirs(0, MENU_EDGE) | joycon_read(nullptr, nullptr, MENU_JOY_DEAD_X);
     if ((d & A8_UP)   || low(PIN_SIDE_UP))   b |= A8M_UP;
     if ((d & A8_DOWN) || low(PIN_SIDE_DOWN)) b |= A8M_DOWN;
     if (d & A8_LEFT)  b |= A8M_LEFT;
