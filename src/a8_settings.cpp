@@ -10,6 +10,8 @@
  *                                                 the game list starts the
  *                                                 other one)
  *   TV system        NTSC / PAL
+ *   Paddle sens.     Very low / Low / Medium / High / Very high
+ *                                                (Quad; pico_paddles.cpp)
  *   Controller test  every control live (a8_ctltest.cpp)
  *
  * Saved in a 4 KB flash sector of our own (A8_SETTINGS_PHYS), written only
@@ -24,20 +26,22 @@
 #include "pico_audio.h"
 #include "pico_handoff.h"
 
-static const uint32_t MAGIC = 0x53384132u;    /* "2A8S" (1: keyboard was a yes/no) */
+static const uint32_t MAGIC = 0x53384133u;    /* "3A8S" (2: no paddles; 1: keyboard was a yes/no) */
 
 struct Stored {
     uint32_t magic;
-    uint8_t keyboard, fps, machine_800, pal;
+    uint8_t keyboard, fps, machine_800, pal, paddles, spare[3];
     uint32_t check;
 };
 
-A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false };
+A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false, A8_PADDLES_MEDIUM };
 
 static const char *const KEYBOARD_NAMES[A8_KBD_MODES] = { "Pause+Auto Resume", "Auto-pause", "Keep running" };
+static const char *const PADDLES_NAMES[A8_PADDLES_LEVELS] = { "Very low", "Low", "Medium", "High", "Very high" };
 
 static uint32_t checksum(const Stored &s) {
-    return s.magic ^ (s.keyboard << 1) ^ (s.fps << 3) ^ (s.machine_800 << 5) ^ (s.pal << 7) ^ 0xA5A5A5A5u;
+    return s.magic ^ (s.keyboard << 1) ^ (s.fps << 3) ^ (s.machine_800 << 5) ^ (s.pal << 7) ^
+           (s.paddles << 9) ^ 0xA5A5A5A5u;
 }
 
 void a8_settings_load(void) {
@@ -51,10 +55,11 @@ void a8_settings_load(void) {
     a8_settings.fps = s.fps != 0;
     a8_settings.machine_800 = s.machine_800 != 0;
     a8_settings.pal = s.pal != 0;
-    Serial.printf("[settings] keyboard %s, fps %s, machine %s, %s\n",
+    a8_settings.paddles = s.paddles < A8_PADDLES_LEVELS ? s.paddles : A8_PADDLES_MEDIUM;
+    Serial.printf("[settings] keyboard %s, fps %s, machine %s, %s, paddles %s\n",
                   KEYBOARD_NAMES[a8_settings.keyboard],
                   a8_settings.fps ? "on" : "off", a8_settings.machine_800 ? "400/800" : "800XL",
-                  a8_settings.pal ? "PAL" : "NTSC");
+                  a8_settings.pal ? "PAL" : "NTSC", PADDLES_NAMES[a8_settings.paddles]);
 }
 
 static void save(void) {
@@ -67,6 +72,8 @@ static void save(void) {
     s.fps = a8_settings.fps;
     s.machine_800 = a8_settings.machine_800;
     s.pal = a8_settings.pal;
+    s.paddles = (uint8_t)a8_settings.paddles;
+    memset(s.spare, 0, sizeof(s.spare));
     s.check = checksum(s);
     memcpy(sector, &s, sizeof(s));
     pico_audio_suspend();                    /* its DMA can't ride out a flash write */
@@ -77,10 +84,16 @@ static void save(void) {
 
 /* ---- the screen -------------------------------------------------------- */
 
-enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_TEST, ROW_BACK, ROWS };
+#ifdef PICO_QUAD
+enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_PADDLES, ROW_TEST, ROW_BACK, ROWS };
+static const char *const NAMES[ROWS] = { "Keyboard", "FPS display", "Volume", "Default machine",
+                                         "TV system", "Paddle sensitivity", "Controller test", "Back" };
+#else
+enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_TEST, ROW_BACK, ROWS, ROW_PADDLES = -1 };
 static const char *const NAMES[ROWS] = { "Keyboard", "FPS display", "Volume", "Default machine",
                                          "TV system", "Controller test", "Back" };
-static const int ROW_H = 24, LIST_Y = 36;
+#endif
+static const int ROW_H = 22, LIST_Y = 34;
 static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2A69,
                       COL_TITLE = 0xFD20, COL_HINT = TFT_DARKGREY, COL_VALUE = 0x07FF;
 
@@ -91,6 +104,7 @@ static void value_text(int row, char *buf, size_t cap) {
     case ROW_VOLUME:   snprintf(buf, cap, "%d%%", pico_audio_get_volume_pct()); break;
     case ROW_MACHINE:  snprintf(buf, cap, "%s", a8_settings.machine_800 ? "400/800" : "800XL"); break;
     case ROW_TV:       snprintf(buf, cap, "%s", a8_settings.pal ? "PAL" : "NTSC"); break;
+    case ROW_PADDLES:  snprintf(buf, cap, "%s", PADDLES_NAMES[a8_settings.paddles]); break;
     default:           buf[0] = 0; break;
     }
 }
@@ -134,6 +148,12 @@ static bool change(int row, int dir) {
     case ROW_FPS:      a8_settings.fps = !a8_settings.fps; return true;
     case ROW_MACHINE:  a8_settings.machine_800 = !a8_settings.machine_800; return true;
     case ROW_TV:       a8_settings.pal = !a8_settings.pal; return true;
+    case ROW_PADDLES: {                      /* stops at the ends */
+        int v = a8_settings.paddles + dir;
+        if (v < 0 || v >= A8_PADDLES_LEVELS) return false;
+        a8_settings.paddles = v;
+        return true;
+    }
     case ROW_VOLUME: {
         int v = pico_audio_get_volume_pct() + dir * 10;
         v = v < 0 ? 0 : v > 100 ? 100 : v;
