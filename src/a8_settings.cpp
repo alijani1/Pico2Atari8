@@ -15,7 +15,8 @@
  *   Controller test  every control live (a8_ctltest.cpp)
  *
  * Saved in a 4 KB flash sector of our own (A8_SETTINGS_PHYS), written only
- * when something changed.
+ * when something changed. The same sector holds, after them, the games set
+ * to use the Joy-Con as a paddle (a hash of each one's path).
  */
 #include <Arduino.h>
 #include "a8_settings.h"
@@ -39,12 +40,41 @@ A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false, A8_PADDLES_MEDIU
 static const char *const KEYBOARD_NAMES[A8_KBD_MODES] = { "Pause+Auto Resume", "Auto-pause", "Keep running" };
 static const char *const PADDLES_NAMES[A8_PADDLES_LEVELS] = { "Very low", "Low", "Medium", "High", "Very high" };
 
+/* The games whose Joy-Con is a paddle, at GAMES_AT in the sector. */
+static const uint32_t GAMES_MAGIC = 0x50594F4Au;  /* "JOYP" */
+static const int MAX_GAMES = 250, GAMES_AT = 64;
+struct StoredGames {
+    uint32_t magic, count;
+    uint32_t hash[MAX_GAMES];
+    uint32_t check;
+};
+static uint32_t game_hash[MAX_GAMES];
+static int game_count = 0;
+static uint32_t this_game = 0;            /* hash of the game being played */
+static bool games_dirty = false;
+
+static uint32_t games_check(const uint32_t *h, uint32_t n) {
+    uint32_t c = GAMES_MAGIC ^ n;
+    for (uint32_t i = 0; i < n; i++) c = (c << 5 | c >> 27) ^ h[i];
+    return c;
+}
+
 static uint32_t checksum(const Stored &s) {
     return s.magic ^ (s.keyboard << 1) ^ (s.fps << 3) ^ (s.machine_800 << 5) ^ (s.pal << 7) ^
            (s.paddles << 9) ^ 0xA5A5A5A5u;
 }
 
+static void load_games(void) {
+    const StoredGames *g = (const StoredGames *)(a8_flash_read(A8_SETTINGS_PHYS) + GAMES_AT);
+    if (g->magic != GAMES_MAGIC || g->count > (uint32_t)MAX_GAMES || g->check != games_check(g->hash, g->count))
+        return;
+    game_count = (int)g->count;
+    memcpy(game_hash, g->hash, game_count * sizeof(uint32_t));
+    Serial.printf("[settings] %d games with the Joy-Con as a paddle\n", game_count);
+}
+
 void a8_settings_load(void) {
+    load_games();
     Stored s;
     memcpy(&s, a8_flash_read(A8_SETTINGS_PHYS), sizeof(s));
     if (s.magic != MAGIC || s.check != checksum(s)) {
@@ -76,10 +106,53 @@ static void save(void) {
     memset(s.spare, 0, sizeof(s.spare));
     s.check = checksum(s);
     memcpy(sector, &s, sizeof(s));
+    StoredGames *g = (StoredGames *)(sector + GAMES_AT);
+    g->magic = GAMES_MAGIC;
+    g->count = (uint32_t)game_count;
+    memcpy(g->hash, game_hash, game_count * sizeof(uint32_t));
+    g->check = games_check(g->hash, g->count);
     pico_audio_suspend();                    /* its DMA can't ride out a flash write */
     a8_flash_write_sector(A8_SETTINGS_PHYS, sector);
     pico_audio_resume();
     Serial.println("[settings] saved");
+}
+
+/* ---- per game ------------------------------------------------------------ */
+
+void a8_settings_set_game(const char *path) {
+    uint32_t h = 2166136261u;                     /* FNV-1a, case-blind */
+    for (const char *p = path; *p; p++) h = (h ^ (uint8_t)tolower((unsigned char)*p)) * 16777619u;
+    this_game = h;
+}
+
+static int game_index(void) {
+    for (int i = 0; i < game_count; i++) if (game_hash[i] == this_game) return i;
+    return -1;
+}
+
+bool a8_settings_game_paddle(void) { return game_index() >= 0; }
+
+void a8_settings_set_game_paddle(bool on) {
+    int i = game_index();
+    if (on && i < 0) {
+        if (game_count == MAX_GAMES) {           /* full: the oldest goes */
+            memmove(game_hash, game_hash + 1, (MAX_GAMES - 1) * sizeof(uint32_t));
+            game_count--;
+        }
+        game_hash[game_count++] = this_game;
+        games_dirty = true;
+    } else if (!on && i >= 0) {
+        memmove(game_hash + i, game_hash + i + 1, (game_count - i - 1) * sizeof(uint32_t));
+        game_count--;
+        games_dirty = true;
+    }
+}
+
+/* The display must be stopped: its frame buffer is the sector buffer. */
+void a8_settings_save_game(void) {
+    if (!games_dirty) return;
+    save();
+    games_dirty = false;
 }
 
 /* ---- the screen -------------------------------------------------------- */

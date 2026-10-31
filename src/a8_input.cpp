@@ -12,6 +12,10 @@
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
  *   Side buttons      game list: up / down; in a game, right = RETURN
+ *   Yellow + click    the Joy-Con as paddle 1 / as joystick 1, remembered
+ *                     for the game: as a paddle its x is the knob (centre =
+ *                     the middle; Settings > Paddle sensitivity), Red /
+ *                     click its button. (Real paddles on port 1 come first.)
  *   Paddles           ports 1-2 (pico_paddles.cpp): the 400/800/XL's pots
  *                     0-3; their buttons are the ports' left / right lines
  *
@@ -142,6 +146,18 @@ void a8_input_init(void) {
     for (int i = 0; i < 32; i++) { sx += analogRead(PIN_JOY_X); sy += analogRead(PIN_JOY_Y); delay(1); }
     axis_init(joy_x, (int)(sx / 32));
     axis_init(joy_y, (int)(sy / 32));
+}
+
+/* The Joy-Con's x as paddle 1's pot: the centre is the paddle's middle,
+ * full left 228, full right 1 - at Medium sensitivity and below over the
+ * whole travel, High and Very high reaching the ends sooner (as a real
+ * paddle: 50 % of its turn at Medium, 40, 30). */
+static int16_t joycon_paddle(void) {
+    static const int GAIN_PCT[A8_PADDLES_LEVELS] = { 100, 100, 100, 125, 167 };
+    int v = axis_sample(joy_x), centre, half;
+    axis_centre(joy_x, &centre, &half);
+    int p = 114 - (v - centre) * 113 * GAIN_PCT[a8_settings.paddles] / 100 / half;
+    return (int16_t)(p < 1 ? 1 : p > 228 ? 228 : p);
 }
 
 /* One Joy-Con reading: its directions, and (pot_x/pot_y given) its
@@ -279,13 +295,35 @@ bool a8_input_frame(void) {
         if (pad >= 0 && pad < 12) in.key = KEYPAD_800[pad];
         if (pad == 12) in.start = 1;
 #endif
-        in.stick[0] |= joycon_read();
-        nav = in.stick[0];
-        if (low(PIN_RED) || low(PIN_CLICK)) in.trig[0] = 1;
+        /* Yellow + click: the Joy-Con as paddle 1 or joystick 1 (both
+         * buttons count for nothing else until they're let go) */
+        static bool combo = false;
+        bool yellow = low(PIN_YELLOW), click = low(PIN_CLICK);
+        if (yellow && click && !combo) {
+            bool on = !a8_settings_game_paddle();
+            a8_settings_set_game_paddle(on);
+            a8_display_toast(on ? "JOY-CON: PADDLE" : "JOY-CON: JOYSTICK");
+        }
+        if (yellow && click) combo = true;
+        else if (!yellow && !click) combo = false;
+        bool joy_paddle = a8_settings_game_paddle();
+#ifdef PICO_QUAD
+        if (paddles_present(0)) joy_paddle = false;     /* the real ones */
+#endif
+        uint8_t joy = joycon_read();
+        nav = in.stick[0] | joy;
+        bool fire = !combo && (low(PIN_RED) || click);
+        if (joy_paddle && !a8_osk_is_open()) {
+            in.pot[0] = joycon_paddle();
+            if (fire) in.stick[0] |= A8_LEFT;           /* paddle 1's button */
+        } else {
+            in.stick[0] |= joy;
+            if (fire) in.trig[0] = 1;
+        }
         in.start  |= low(PIN_START);
         in.select = low(PIN_SELECT);
         in.option = low(PIN_GREEN);
-        if (low(PIN_YELLOW)) in.key = AKEY_SPACE;
+        if (yellow && !combo) in.key = AKEY_SPACE;
 
         /* Right side button: RETURN. */
         if (low(PIN_SIDE_DOWN)) in.key = AKEY_RETURN;

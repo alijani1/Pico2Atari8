@@ -159,6 +159,7 @@ void setup() {
 
     const char *path = a8_menu_pick();
     strncpy(game_file, path, sizeof(game_file) - 1);
+    a8_settings_set_game(path);        /* its own settings (the zip's path for a zip) */
     /* the default machine, or the other one if picked with SELECT; a
      * 400/800 game by its name always on the 800 */
     start_as_800 = (a8_settings.machine_800 != a8_menu_picked_alt()) || a8_menu_picked_osb();
@@ -219,6 +220,7 @@ void loop() {
         /* MENU held: back to the game list */
         pico_audio_amp_off();
         a8_display_stop();
+        a8_settings_save_game();       /* Joy-Con mode changed: after the display stops */
         handoff_volume_write(pico_audio_get_volume_pct());
         handoff_relaunch_arcade();
     }

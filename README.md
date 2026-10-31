@@ -104,6 +104,7 @@ Pico2Arcade, comes with the Quad release, and shares its ARCADE ROMS drive.
 |---|---|---|
 | Ports 1–4 | port 1: move / fire = play | Atari joysticks 1–4 (on an 800XL only 1–2 exist: start four-player games such as M.U.L.E. with SELECT) |
 | Joy-Con stick / click | move / play | joystick 1 / fire 1 |
+| Yellow + click | | the Joy-Con as **paddle 1** instead of joystick 1, remembered for that game (press again to switch back): its left / right is the knob (Settings > Paddle sensitivity), Red / click the paddle's button. Real paddles on port 1 take over |
 | Paddles (ports 1–2) | | the four paddles (pots 0–3), for Kaboom!, Super Breakout and the like; plugging them in shows PADDLES 1 / 2 IN. Turn each one fully right once so it learns its end; 1–228 spans about half the turn, as on a real Atari (Settings > Paddle sensitivity) |
 | Red | play | fire 1 |
 | Blue | | on-screen keyboard: press to open / close - the game pauses, fire types a key (Settings > Keyboard) |

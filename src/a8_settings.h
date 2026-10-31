@@ -29,4 +29,11 @@ extern A8Settings a8_settings;
 void a8_settings_load(void);      /* from flash (defaults if none): at boot */
 void a8_settings_screen(void);    /* the Settings screen; saves on the way out if changed */
 
+/* Per game (by its path in the game list): the Joy-Con as paddle 1 instead
+ * of joystick 1 (400/800/XL games; Yellow + click switches, a8_input.cpp). */
+void a8_settings_set_game(const char *path);   /* the game being started */
+bool a8_settings_game_paddle(void);
+void a8_settings_set_game_paddle(bool on);     /* kept in RAM until ... */
+void a8_settings_save_game(void);              /* ... the game ends (if it changed) */
+
 #endif
