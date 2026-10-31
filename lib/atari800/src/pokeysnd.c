@@ -399,6 +399,40 @@ void POKEYSND_Update(UWORD addr, UBYTE val, UBYTE chip, UBYTE gain)
 	POKEYSND_Update_ptr(addr, val, chip, gain);
 }
 
+#ifdef A8_SKIP_HIGH_TONES
+/* Pico2Atari8: time only moves on through channel events, so with every
+   channel parked (silent, volume only, or a tone too high to hear) the
+   sample counter keeps growing, and the first channel started after that
+   works it off an event at a time: thousands of events in one sample after
+   a few parked frames (Clowns and Balloons: ~5400), far more after a long
+   silence. Move every counter on together instead, as if it had run. */
+static void catch_up(void)
+{
+#ifdef WORDS_BIGENDIAN
+	UBYTE *samp_cnt_w_ptr = (UBYTE *) (&Samp_n_cnt[0]) + 3;
+#else
+	UBYTE *samp_cnt_w_ptr = (UBYTE *) (&Samp_n_cnt[0]) + 1;
+#endif
+	ULONG samp = READ_U32(samp_cnt_w_ptr), lim = (Samp_n_max >> 8) + 1, d;
+	int i;
+	if (samp <= lim)
+		return;
+	d = samp - lim;
+	for (i = 0; i < 4 * Num_pokeys; i++)    /* skip no channel's event */
+		if (Div_n_cnt[i] < d)
+			d = Div_n_cnt[i];
+	if (d == 0)
+		return;
+	for (i = 0; i < 4 * Num_pokeys; i++)
+		Div_n_cnt[i] -= d;
+	WRITE_U32(samp_cnt_w_ptr, samp - d);
+	P4 = (P4 + d) % POKEY_POLY4_SIZE;
+	P5 = (P5 + d) % POKEY_POLY5_SIZE;
+	P9 = (P9 + d) % POKEY_POLY9_SIZE;
+	P17 = (P17 + d) % POKEY_POLY17_SIZE;
+}
+#endif
+
 static void Update_pokey_sound_rf(UWORD addr, UBYTE val, UBYTE chip,
 				  UBYTE gain)
 {
@@ -406,6 +440,10 @@ static void Update_pokey_sound_rf(UWORD addr, UBYTE val, UBYTE chip,
 	UBYTE chan;
 	UBYTE chan_mask;
 	UBYTE chip_offs;
+
+#ifdef A8_SKIP_HIGH_TONES
+	catch_up();
+#endif
 
 	/* calculate the chip_offs for the channel arrays */
 	chip_offs = chip << 2;
@@ -550,6 +588,27 @@ static void Update_pokey_sound_rf(UWORD addr, UBYTE val, UBYTE chip,
 	/* if channel is volume only, set current output */
 	for (chan = POKEY_CHAN1; chan <= POKEY_CHAN4; chan++) {
 		if (chan_mask & (1 << chan)) {
+#ifdef A8_SKIP_HIGH_TONES
+			/* Pico2Atari8: a pure tone faster than the sample rate (games
+			   park silent channels at AUDF 0: a ~32 kHz tone) is held at
+			   its average, half its volume, instead of every edge being
+			   emulated - thousands of events a frame (Clowns and Balloons:
+			   four such channels, ~4300 a frame, more than the Pico has
+			   time for). Noise stays emulated: high noise is still heard. */
+			pokeysnd_AUDV[chan + chip_offs] = (POKEY_AUDC[chan + chip_offs] & POKEY_VOLUME_MASK) * gain;
+			if ((POKEY_AUDC[chan + chip_offs] & (POKEY_NOTPOLY5 | POKEY_PURETONE | POKEY_VOL_ONLY))
+					== (POKEY_NOTPOLY5 | POKEY_PURETONE)
+				&& Div_n_max[chan + chip_offs] < (Samp_n_max >> 8)
+				&& ((chan == POKEY_CHAN3 && !(POKEY_AUDCTL[chip] & POKEY_CH1_FILTER)) ||
+					(chan == POKEY_CHAN4 && !(POKEY_AUDCTL[chip] & POKEY_CH2_FILTER)) ||
+					chan == POKEY_CHAN1 || chan == POKEY_CHAN2)) {
+				pokeysnd_AUDV[chan + chip_offs] /= 2;
+				Outvol[chan + chip_offs] = 1;
+				Div_n_max[chan + chip_offs] = 0x7fffffffL;
+				Div_n_cnt[chan + chip_offs] = 0x7fffffffL;
+				continue;
+			}
+#endif
 			/* I've disabled any frequencies that exceed the sampling
 			   frequency.  There isn't much point in processing frequencies
 			   that the hardware can't reproduce.  I've also disabled
