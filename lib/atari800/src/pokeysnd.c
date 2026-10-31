@@ -184,6 +184,15 @@ void (*POKEYSND_GenerateSync)(unsigned int num_ticks) = null_generate_sync;
 
 static double ticks_per_sample;
 static double samp_pos;
+#ifdef A8_FIXED_SYNC
+/* Pico2Atari8: the same two in 16.16 fixed point. Generate_sync_rf runs on
+   every POKEY write, and the RP2350 has no double-precision FPU: modf and
+   friends in software, ~1240 times a frame when a game plays a sound by
+   writing POKEY fast (Miner 2049er's level start), took the Pico past its
+   frame time. */
+static SLONG ticks_per_sample_fx;
+static SLONG samp_pos_fx;
+#endif
 static int speaker;
 static int const CONSOLE_VOL = 32;
 
@@ -330,6 +339,10 @@ static void init_syncsound(void)
 	unsigned int ticks_per_frame = Atari800_tv_mode*114;
 	ticks_per_sample = (double)ticks_per_frame / samples_per_frame;
 	samp_pos = 0.0;
+#ifdef A8_FIXED_SYNC
+	ticks_per_sample_fx = (SLONG)(ticks_per_sample * 65536.0 + 0.5);
+	samp_pos_fx = 0;
+#endif
 	POKEYSND_GenerateSync = Generate_sync_rf;
 	speaker = 0;
 }
@@ -1123,6 +1136,20 @@ static void Generate_sync_rf(unsigned int num_ticks)
 	UBYTE *buffer_end = POKEYSND_process_buffer + POKEYSND_process_buffer_length;
 
 	for (;;) {
+#ifdef A8_FIXED_SYNC
+		/* samp_pos_fx stays above -ticks_per_sample, so this is >= 0 */
+		SLONG new_pos_fx = samp_pos_fx + ticks_per_sample_fx;
+		ticks = (unsigned int)(new_pos_fx >> 16);
+		if (ticks > num_ticks) {
+			samp_pos_fx -= (SLONG)num_ticks << 16;   /* num_ticks < ticks: small */
+			break;
+		}
+		if (buffer >= buffer_end)
+			break;
+
+		samp_pos_fx = new_pos_fx & 0xffff;
+		num_ticks -= ticks;
+#else
 		double int_part;
 		new_samp_pos = samp_pos + ticks_per_sample;
 		new_samp_pos = modf(new_samp_pos, &int_part);
@@ -1136,6 +1163,7 @@ static void Generate_sync_rf(unsigned int num_ticks)
 
 		samp_pos = new_samp_pos;
 		num_ticks -= ticks;
+#endif
 
 		if (POKEYSND_snd_flags & POKEYSND_BIT16) {
 			pokeysnd_process_16(buffer, POKEYSND_num_pokeys);

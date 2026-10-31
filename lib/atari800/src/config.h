@@ -20,6 +20,7 @@
 #define PAGED_ATTRIB 1              /* 256 page handlers instead of a 64 KB attribute table */
 #define EMUOS_ALTIRRA 1             /* built-in AltirraOS / Altirra BASIC / 5200 OS (roms/) */
 #define A8_POT_INPUT 1              /* 5200 analog sticks: Atari_POT() in a8_platform.c (input.c patch) */
+#define A8_FIXED_SYNC 1             /* sound timing per POKEY write in fixed point, not double (pokeysnd.c patch) */
 #define A8_SKIP_HIGH_TONES 1        /* pure tones above the sample rate held at their average; no catch-up burst after silence (pokeysnd.c patch) */
 
 /* --- C library ---------------------------------------------------------- */
