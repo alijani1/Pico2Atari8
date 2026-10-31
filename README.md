@@ -1,8 +1,10 @@
 # Pico2Atari8
 
-**Atari 8-bit computer games on iCode devices** — the Atari 400/800/XL/XE
-and the Atari 5200, emulated by [atari800](https://github.com/atari800/atari800) on the
-RP2350, with your original Atari joysticks.
+**Atari 8-bit computer games on the Raspberry Pi Pico 2 / RP2350**, such as
+[iCode devices](https://www.icode.com) — the Atari 400/800/XL/XE and the Atari 5200,
+emulated by [atari800](https://github.com/atari800/atari800) with
+[AltirraOS](https://www.virtualdub.org/altirra.html) built in, played with your
+original Atari joysticks and paddles.
 
 Version **2.0**, for the Quad Ultimate CX / CX-W and the Duo 5200 Ultimate —
 see [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md).
