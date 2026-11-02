@@ -2,8 +2,9 @@
 
 **Atari 8-bit computer games on the Raspberry Pi Pico 2 / RP2350**, such as
 [iCode devices](https://www.icode.com) — the Atari 400/800/XL/XE and the Atari 5200,
-emulated by [atari800](https://github.com/atari800/atari800) with
-[AltirraOS](https://www.virtualdub.org/altirra.html) built in, played with your
+emulated by [atari800](https://github.com/atari800/atari800) (the atari800
+development team) with [AltirraOS](https://www.virtualdub.org/altirra.html)
+(Avery Lee) built in, played with your
 original Atari joysticks and paddles.
 
 Version **2.0**, for the Quad Ultimate CX / CX-W and the Duo 5200 Ultimate —
@@ -140,7 +141,7 @@ pio run -e quad
 
 ## Licences
 
-Pico2Atari8 is GPL-3.0 (see `LICENSE`). The atari800 core is
-GPL-2.0-or-later (`lib/atari800/COPYING`). AltirraOS and Altirra BASIC
+Pico2Atari8 is GPL-3.0 (see `LICENSE`). The atari800 core, by the atari800
+development team, is GPL-2.0-or-later (`lib/atari800/COPYING`). AltirraOS and Altirra BASIC
 (`lib/atari800/src/roms/`) are © Avery Lee, freely redistributable under
 the notice in each file.
