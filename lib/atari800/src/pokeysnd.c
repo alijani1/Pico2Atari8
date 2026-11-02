@@ -85,15 +85,6 @@ static UBYTE pokeysnd_AUDV[4 * POKEY_MAXPOKEYS];	/* Channel volume - derived */
 static UBYTE Outbit[4 * POKEY_MAXPOKEYS];		/* current state of the output (high or low) */
 
 static UBYTE Outvol[4 * POKEY_MAXPOKEYS];		/* last output volume for each channel */
-#ifdef A8_SKIP_HIGH_TONES
-/* Pico2Atari8: parked-channel state - see park_advance() */
-static ULONG a8_tick;
-static UBYTE park_on[4 * POKEY_MAXPOKEYS];      /* channel parked (held at its average) */
-static UBYTE park_out[4 * POKEY_MAXPOKEYS];     /* its flip-flop at park_t0 */
-static ULONG park_t0[4 * POKEY_MAXPOKEYS];      /* a8_tick of that state */
-static ULONG park_next[4 * POKEY_MAXPOKEYS];    /* ticks from park_t0 to its next toggle */
-static ULONG park_per[4 * POKEY_MAXPOKEYS];     /* its real divider period */
-#endif
 
 /* Initialize the bit patterns for the polynomials. */
 
@@ -386,9 +377,6 @@ static int pokeysnd_init_rf(ULONG freq17, int playback_freq,
 		Div_n_cnt[chan] = 0;
 		Div_n_max[chan] = 0x7fffffffL;
 		pokeysnd_AUDV[chan] = 0;
-#ifdef A8_SKIP_HIGH_TONES
-		park_on[chan] = 0;
-#endif
 	}
 
 	/* set the number of pokey chips currently emulated */
@@ -425,41 +413,6 @@ void POKEYSND_Update(UWORD addr, UBYTE val, UBYTE chip, UBYTE gain)
 }
 
 #ifdef A8_SKIP_HIGH_TONES
-/* Pico2Atari8: a parked channel (see the AUDF 0 skip in Update_pokey_sound_rf)
-   isn't stepped, but its flip-flop must come back in the state the real chip
-   would have it in (phaeron, AtariAge: the flip-flop matters). a8_tick counts
-   engine time - every channel event's step plus catch_up()'s jumps - and each
-   parked channel keeps its period, the time to its next toggle and its
-   flip-flop as of park_t0; park_advance() brings that up to now by counting
-   the toggles (odd = flipped). "Now" is the last processed sample, which is
-   where register writes take effect in this engine. */
-
-static ULONG park_now(void)
-{
-#ifdef WORDS_BIGENDIAN
-	UBYTE *samp_cnt_w_ptr = (UBYTE *) (&Samp_n_cnt[0]) + 3;
-#else
-	UBYTE *samp_cnt_w_ptr = (UBYTE *) (&Samp_n_cnt[0]) + 1;
-#endif
-	SLONG back = (SLONG) READ_U32(samp_cnt_w_ptr) - (SLONG) (Samp_n_max >> 8);
-	return a8_tick + (back > 0 ? (ULONG) back : 0);
-}
-
-static void park_advance(int i, ULONG now)
-{
-	ULONG el = now - park_t0[i];
-	if (park_per[i] == 0)
-		park_per[i] = 1;
-	if (el >= park_next[i]) {
-		ULONG past = el - park_next[i];
-		park_out[i] ^= (UBYTE) ((1 + past / park_per[i]) & 1);
-		park_next[i] = park_per[i] - past % park_per[i];
-	}
-	else
-		park_next[i] -= el;
-	park_t0[i] = now;
-}
-
 /* Pico2Atari8: time only moves on through channel events, so with every
    channel parked (silent, volume only, or a tone too high to hear) the
    sample counter keeps growing, and the first channel started after that
@@ -486,7 +439,6 @@ static void catch_up(void)
 	for (i = 0; i < 4 * Num_pokeys; i++)
 		Div_n_cnt[i] -= d;
 	WRITE_U32(samp_cnt_w_ptr, samp - d);
-	a8_tick += d;
 	P4 = (P4 + d) % POKEY_POLY4_SIZE;
 	P5 = (P5 + d) % POKEY_POLY5_SIZE;
 	P9 = (P9 + d) % POKEY_POLY9_SIZE;
@@ -656,48 +608,22 @@ static void Update_pokey_sound_rf(UWORD addr, UBYTE val, UBYTE chip,
 			   emulated - thousands of events a frame (Clowns and Balloons:
 			   four such channels, ~4300 a frame, more than the Pico has
 			   time for). Noise stays emulated: high noise is still heard. */
-			/* Channels 3/4 clocking a filter, and channels 1/2 being filtered,
-			   are never parked: the filter latches their flip-flop. */
-			int ci = chan + chip_offs;
-			/* Div_n_max holds the real period unless the channel is parked
-			   and this write didn't change its frequency (then park_per). */
-			ULONG per = (park_on[ci] && Div_n_max[ci] == 0x7fffffffL) ? park_per[ci] : Div_n_max[ci];
-			pokeysnd_AUDV[ci] = (POKEY_AUDC[ci] & POKEY_VOLUME_MASK) * gain;
-			if ((POKEY_AUDC[ci] & (POKEY_NOTPOLY5 | POKEY_PURETONE | POKEY_VOL_ONLY))
+			pokeysnd_AUDV[chan + chip_offs] = (POKEY_AUDC[chan + chip_offs] & POKEY_VOLUME_MASK) * gain;
+			if ((POKEY_AUDC[chan + chip_offs] & (POKEY_NOTPOLY5 | POKEY_PURETONE | POKEY_VOL_ONLY))
 					== (POKEY_NOTPOLY5 | POKEY_PURETONE)
-				&& per < (Samp_n_max >> 8)
+				&& Div_n_max[chan + chip_offs] < (Samp_n_max >> 8)
+				/* never in a high-pass filter pair: channels 3/4 clock the
+				   filter and channels 1/2 are latched by it, so both need
+				   their real flip-flop */
 				&& ((chan == POKEY_CHAN3 && !(POKEY_AUDCTL[chip] & POKEY_CH1_FILTER)) ||
 					(chan == POKEY_CHAN4 && !(POKEY_AUDCTL[chip] & POKEY_CH2_FILTER)) ||
 					(chan == POKEY_CHAN1 && !(POKEY_AUDCTL[chip] & POKEY_CH1_FILTER)) ||
 					(chan == POKEY_CHAN2 && !(POKEY_AUDCTL[chip] & POKEY_CH2_FILTER)))) {
-				ULONG now = park_now();
-				if (!park_on[ci]) {             /* park: remember the real state */
-					park_on[ci] = 1;
-					park_out[ci] = Outvol[ci];
-					park_t0[ci] = now;
-					park_next[ci] = Div_n_cnt[ci];
-					park_per[ci] = per;
-				}
-				else {                          /* still parked: catch its flip-flop up */
-					park_advance(ci, now);
-					if (per != park_per[ci]) {  /* new period: a shorter one cuts the count short */
-						if (park_next[ci] > per)
-							park_next[ci] = per;
-						park_per[ci] = per;
-					}
-				}
-				pokeysnd_AUDV[ci] /= 2;
-				Outvol[ci] = 1;
-				Div_n_max[ci] = 0x7fffffffL;
-				Div_n_cnt[ci] = 0x7fffffffL;
+				pokeysnd_AUDV[chan + chip_offs] /= 2;
+				Outvol[chan + chip_offs] = 1;
+				Div_n_max[chan + chip_offs] = 0x7fffffffL;
+				Div_n_cnt[chan + chip_offs] = 0x7fffffffL;
 				continue;
-			}
-			if (park_on[ci]) {                  /* unpark: resume where the chip would be */
-				park_advance(ci, park_now());
-				park_on[ci] = 0;
-				Outvol[ci] = park_out[ci];
-				Div_n_max[ci] = per;
-				Div_n_cnt[ci] = park_next[ci] < per ? park_next[ci] : per;
 			}
 #endif
 			/* I've disabled any frequencies that exceed the sampling
@@ -924,9 +850,6 @@ static void pokeysnd_process_8(void *sndbuffer, int sndn)
 			P5 = (P5 + event_min) % POKEY_POLY5_SIZE;
 			P9 = (P9 + event_min) % POKEY_POLY9_SIZE;
 			P17 = (P17 + event_min) % POKEY_POLY17_SIZE;
-#ifdef A8_SKIP_HIGH_TONES
-			a8_tick += event_min;
-#endif
 
 			/* adjust channel counter */
 			Div_n_cnt[next_event] += Div_n_max[next_event];
