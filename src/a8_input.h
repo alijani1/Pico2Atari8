@@ -31,5 +31,8 @@ void    a8_input_joycon_diag(int raw[2], int centre[2], int lo[2], int hi[2], in
 bool    a8_input_button(int which);
 uint8_t a8_input_port_dirs(int n, bool *fire);
 int     a8_input_num_ports(void);
+/* The Duo Ultimate's 5-way (A8_UP ... directions; *press = its press);
+ * 0 / false elsewhere. */
+uint8_t a8_input_five_way(bool *press);
 
 #endif

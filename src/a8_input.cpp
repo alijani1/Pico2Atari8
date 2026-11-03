@@ -448,6 +448,8 @@ bool a8_input_frame(void) {
         if (menu_seen_up && menu_since && millis() - menu_since < 1000) {
             a8_settings_next_scale();
             a8_display_toast(a8_scale_names[a8_settings.scale]);
+            Serial.printf("[input] MENU tap (%lu ms): scale %s\n",
+                          (unsigned long)(millis() - menu_since), a8_scale_names[a8_settings.scale]);
         }
 #endif
         menu_seen_up = true; menu_since = 0; return false;
@@ -455,7 +457,9 @@ bool a8_input_frame(void) {
     if (!menu_seen_up) return false;
     uint32_t now = millis();
     if (!menu_since) menu_since = now | 1;
-    return now - menu_since >= 1000;
+    if (now - menu_since < 1000) return false;
+    Serial.printf("[input] MENU held %lu ms: leaving the game\n", (unsigned long)(now - menu_since));
+    return true;
 }
 
 /* ---- game list ------------------------------------------------------- */
@@ -507,3 +511,8 @@ uint8_t a8_input_port_dirs(int n, bool *fire) {
 }
 
 int a8_input_num_ports(void) { return NUM_PORTS; }
+
+uint8_t a8_input_five_way(bool *press) {
+    *press = PIN_RETURN != PIN_SIDE_DOWN && low(PIN_RETURN);
+    return five_way();
+}

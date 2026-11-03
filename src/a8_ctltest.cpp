@@ -9,7 +9,9 @@
  *             ports 1-2 - each one's pot value (1..228, a bar), the raw
  *             charge-time count with the range learnt so far, its button;
  *             the side buttons;
- *   both:     the Joy-Con (raw, centre, range, pot) and the device buttons.
+ *   both:     the Joy-Con (raw, centre, range, pot) and the device buttons;
+ *   Duo Ultimate (160x80): the two ports, their paddles' pot values, the
+ *             5-way and the device buttons, in one compact screen.
  *
  * Calibration is learnt as you go: move each stick all the way round (turn
  * each paddle fully right) once and the range fills in. MENU goes back.
@@ -159,6 +161,67 @@ static void draw_paddles(int n, int bar_at[2]) {
 }
 #endif
 
+#ifdef PICO_TINY_SCREEN
+/* A small lamp: 9 px tall, lit while held. */
+static void tiny_lamp(int x, int y, const char *label, bool on) {
+    TFT_eSPI &tft = a8_tft();
+    int w = (int)strlen(label) * 6 + 2;
+    tft.fillRect(x, y, w, 9, on ? COL_ON : COL_OFF);
+    tft.setTextFont(1);
+    tft.setTextColor(on ? TFT_BLACK : COL_TEXT, on ? COL_ON : COL_OFF);
+    tft.setCursor(x + 1, y + 1);
+    tft.print(label);
+}
+
+/* 160x80: ports, paddles, 5-way, buttons - a row each. MENU goes back. */
+void a8_ctltest_screen(void) {
+    TFT_eSPI &tft = a8_tft();
+    tft.fillScreen(COL_BG);
+    tft.setTextFont(1);
+    tft.setTextWrap(false);
+    tft.setTextColor(COL_TITLE, COL_BG);
+    tft.setCursor(2, 0);
+    tft.print("CONTROLLER TEST");
+    tft.setTextColor(COL_HINT, COL_BG);
+    tft.setCursor(160 - 2 - 6 * 9, 0);
+    tft.print("MENU:back");
+    tft.drawFastHLine(0, 8, 160, COL_HINT);
+    while (a8_input_button(A8B_MENU)) delay(10);       /* a press still held: not ours */
+    for (;;) {
+        for (int n = 0; n < 2; n++) {                   /* ports 1-2 */
+            bool fire;
+            uint8_t d = a8_input_port_dirs(n, &fire);
+            int y = 11 + n * 11;
+            text_at(2, y + 1, COL_TEXT, "P%d", n + 1);
+            tiny_lamp(16, y, "U", d & A8_UP);
+            tiny_lamp(26, y, "D", d & A8_DOWN);
+            tiny_lamp(36, y, "L", d & A8_LEFT);
+            tiny_lamp(46, y, "R", d & A8_RIGHT);
+            tiny_lamp(56, y, "F", fire);
+            /* its paddles: pot values (1 = turned right .. 228), "--" unplugged */
+            int16_t a = paddles_pot(n, 0), b = paddles_pot(n, 1);
+            if (paddles_present(n)) text_at(72, y + 1, COL_ON, "pad %3d %3d ", a > 0 ? a : 0, b > 0 ? b : 0);
+            else                    text_at(72, y + 1, COL_HINT, "pad  --  -- ");
+        }
+        bool press;
+        uint8_t w = a8_input_five_way(&press);
+        text_at(2, 34, COL_TEXT, "5W");
+        tiny_lamp(16, 33, "U", w & A8_UP);
+        tiny_lamp(26, 33, "D", w & A8_DOWN);
+        tiny_lamp(36, 33, "L", w & A8_LEFT);
+        tiny_lamp(46, 33, "R", w & A8_RIGHT);
+        tiny_lamp(56, 33, "P", press);
+        static const char *const NAMES[] = { "RED", "GRN", "BLU", "YEL", "BLK", "WHT", "MNU" };
+        static const int WHICH[] = { A8B_RED, A8B_GREEN, A8B_BLUE, A8B_YELLOW, A8B_START, A8B_SELECT, A8B_MENU };
+        for (int i = 0; i < 7; i++)
+            tiny_lamp(2 + (i % 4) * 26, 46 + (i / 4) * 11, NAMES[i], a8_input_button(WHICH[i]));
+        text_at(2, 70, COL_HINT, "Turn paddles fully right.");
+        if (a8_input_button(A8B_MENU)) break;
+        delay(16);
+    }
+    while (a8_input_button(A8B_MENU)) delay(10);
+}
+#else
 void a8_ctltest_screen(void) {
     TFT_eSPI &tft = a8_tft();
     tft.fillScreen(COL_BG);
@@ -213,3 +276,4 @@ void a8_ctltest_screen(void) {
     }
     while (a8_input_button(A8B_MENU)) delay(10);
 }
+#endif

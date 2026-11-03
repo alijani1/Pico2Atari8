@@ -270,15 +270,11 @@ const char *a8_menu_pick(void) {
     qsort(games, game_count, sizeof(Game), by_name);
     found = game_count;
     Serial.printf("[menu] %d games\n", found);
-#ifdef PICO_TINY_SCREEN
-    const int settings_row = -1;         /* the Settings screen is laid out for 320x240 */
-#else
     const int settings_row = game_count;
     Game &settings = games[game_count++];
     settings.path[0] = 0;
     settings.kind[0] = 0;
     strcpy(settings.name, "Settings");
-#endif
     const int drive_row = game_count;
     Game &drive = games[game_count++];
     drive.path[0] = 0;

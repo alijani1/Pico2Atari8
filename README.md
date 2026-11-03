@@ -162,8 +162,14 @@ while the next is shrunk. The PC harness renders the same thing:
 | Blue | on-screen keyboard |
 | MENU | tap: next Scale mode; hold 1 s: back to the game list |
 
-Not done yet: Settings, the controller test and the on-screen keyboard are
-still laid out for 320x240 (Settings is left out of the list for now).
+The menus are laid out for the panel (6x8 font, 10 px rows): **Settings**
+scrolls and starts with a **Scale** row (the same choice as the MENU tap),
+then Keyboard, FPS display, Volume, Machine, TV system, Paddles
+(sensitivity), Controller test. The **controller test** shows both ports
+with their paddles' pot values, the 5-way and every button. The
+**on-screen keyboard** (Blue) is drawn after the shrink at the panel's own
+size - 16 x 11 px keys over the bottom of the picture - so it reads the
+same in every Scale mode, Crop included.
 
 ## Layout
 

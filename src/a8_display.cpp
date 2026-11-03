@@ -52,7 +52,6 @@ static const int BAND = 16;                             /* lines per DMA push */
 static uint8_t  frame8[SCR_W * SCR_H] __attribute__((aligned(4)));   /* snapshot for core 1 */
 #ifdef PICO_TINY_SCREEN
 static uint16_t tiny565[2][A8_TINY_W * BAND];           /* ping-pong bands of the shrunk frame */
-static uint16_t *tiny_out;                              /* the band the overlays go into */
 #else
 static uint16_t band565[2][SCR_W * BAND];               /* ping-pong DMA buffers */
 #endif
@@ -216,27 +215,76 @@ static void __not_in_flash_func(draw_fps)(void) {
 }
 
 #ifdef PICO_TINY_SCREEN
-/* The same glyphs at single size, into the shrunk frame: white on black. */
-static void __not_in_flash_func(tiny_text)(int x0, int y0, const char *t) {
-    int n = (int)strlen(t), w = n * 6 + 1;
-    for (int y = y0; y < y0 + 9 && y < A8_TINY_H; y++)
-        for (int x = x0; x < x0 + w && x < A8_TINY_W; x++) tiny_out[y * A8_TINY_W + x] = 0;
-    for (int i = 0; i < n; i++) {
+/* Drawing on the shrunk frame, one band at a time: everything is clipped
+ * to the band's rows (tb_y0 .. tb_y0 + tb_rows - 1), so each overlay is
+ * drawn into whichever bands it crosses. Pixels in panel order. */
+static uint16_t *tb;
+static int tb_y0, tb_rows;
+
+static void __not_in_flash_func(tiny_fill)(int x, int y, int w, int h, uint16_t c) {
+    int y0 = y > tb_y0 ? y : tb_y0, y1 = y + h < tb_y0 + tb_rows ? y + h : tb_y0 + tb_rows;
+    int x0 = x > 0 ? x : 0, x1 = x + w < A8_TINY_W ? x + w : A8_TINY_W;
+    for (int yy = y0; yy < y1; yy++)
+        for (int xx = x0; xx < x1; xx++) tb[(yy - tb_y0) * A8_TINY_W + xx] = c;
+}
+
+/* 5x7 text, `adv` px a character (6, or 5 to squeeze 3 letters into a key). */
+static void __not_in_flash_func(tiny_text)(int x0, int y0, const char *t, uint16_t fg, int adv = 6) {
+    for (int i = 0; t[i]; i++) {
         const uint8_t *g = t[i] == 'E' ? GLYPH_E : t[i] == 'S' ? GLYPH_S : glyph(t[i]);
         if (!g) continue;
-        for (int r = 0; r < 7; r++)
-            for (int c = 0; c < 5; c++)
-                if (g[r] & (0x10 >> c)) tiny_out[(y0 + 1 + r) * A8_TINY_W + x0 + 1 + i * 6 + c] = 0xFFFF;
+        for (int r = 0; r < 7; r++) {
+            int y = y0 + r - tb_y0;
+            if (y < 0 || y >= tb_rows) continue;
+            for (int c = 0; c < 5; c++) {
+                int x = x0 + i * adv + c;
+                if ((g[r] & (0x10 >> c)) && x >= 0 && x < A8_TINY_W) tb[y * A8_TINY_W + x] = fg;
+            }
+        }
+    }
+}
+
+/* A label on black (toast, FPS). */
+static void __not_in_flash_func(tiny_label)(int x0, int y0, const char *t) {
+    tiny_fill(x0, y0, (int)strlen(t) * 6 + 1, 9, 0);
+    tiny_text(x0 + 1, y0 + 1, t, 0xFFFF);
+}
+
+/* The on-screen keyboard at the panel's own size, over the bottom of the
+ * picture whatever the Scale mode: 10 grid columns of 16 px, rows 11 px. */
+static const int TOSK_CELL_W = A8_TINY_W / A8_OSK_COLS, TOSK_CELL_H = 11;
+
+static void __not_in_flash_func(tiny_osk)(void) {
+    const int rows = a8_osk_rows(), osk_y = A8_TINY_H - rows * TOSK_CELL_H;
+    tiny_fill(0, osk_y - 1, A8_TINY_W, A8_TINY_H - osk_y + 1, pal565[OSK_FRAME]);
+    int cr, ci;
+    a8_osk_cursor(&cr, &ci);
+    for (int r = 0; r < rows; r++) {
+        int y0 = osk_y + r * TOSK_CELL_H;
+        if (y0 + TOSK_CELL_H <= tb_y0 || y0 >= tb_y0 + tb_rows) continue;   /* not in this band */
+        int n, col = 0;
+        const A8Key *keys = a8_osk_row(r, &n);
+        for (int i = 0; i < n; i++) {
+            int x0 = col * TOSK_CELL_W, w = keys[i].span * TOSK_CELL_W - 1;
+            tiny_fill(x0, y0, w, TOSK_CELL_H - 1, pal565[(r == cr && i == ci) ? OSK_CURSOR : OSK_KEY]);
+            const char *t = keys[i].label;
+            int len = (int)strlen(t), adv = len * 6 - 1 <= w - 2 ? 6 : 5;
+            int tw = len * adv - (adv - 5);
+            tiny_text(x0 + (w - tw + 1) / 2, y0 + 2, t, pal565[OSK_TEXT], adv);
+            col += keys[i].span;
+        }
     }
 }
 
 static void __not_in_flash_func(tiny_overlays)(void) {
-    if (toast_until && (int32_t)(toast_until - millis()) > 0) tiny_text(0, 0, toast_text);
+    if (a8_osk_is_open()) tiny_osk();
+    if (tb_y0 > 0) return;                          /* the labels are in the top band */
+    if (toast_until && (int32_t)(toast_until - millis()) > 0) tiny_label(0, 0, toast_text);
     if (fps_on) {
         int e = fps_emu > 99 ? 99 : fps_emu, s = fps_scr > 99 ? 99 : fps_scr;
         char txt[8] = { 'E', (char)('0' + e / 10), (char)('0' + e % 10), ' ',
                         'S', (char)('0' + s / 10), (char)('0' + s % 10), 0 };
-        tiny_text(A8_TINY_W - 7 * 6 - 1, 0, txt);
+        tiny_label(A8_TINY_W - 7 * 6 - 1, 0, txt);
     }
 }
 #endif
@@ -331,14 +379,14 @@ static uint32_t __not_in_flash_func(hash_row)(const uint8_t *row) {
 /* The 160x80 panel: shrink the snapshot and send all of it. */
 static void __not_in_flash_func(push_frame)(void) {
     uint32_t t0 = time_us_32();
-    if (a8_osk_is_open()) draw_osk();
-    const int mode = a8_settings.scale;
+    const int mode = a8_settings.scale;     /* the keyboard is drawn after the shrink */
     tft.startWrite();
     tft.setAddrWindow(0, 0, A8_TINY_W, A8_TINY_H);
     for (int y = 0, b = 0; y < A8_TINY_H; y += BAND, b ^= 1) {
         int rows = A8_TINY_H - y < BAND ? A8_TINY_H - y : BAND;
         a8_scale_rows(frame8, tiny565[b], mode, 1, y, y + rows);
-        if (y == 0) { tiny_out = tiny565[b]; tiny_overlays(); }   /* overlays: rows 0-8 */
+        tb = tiny565[b]; tb_y0 = y; tb_rows = rows;
+        tiny_overlays();
         tft.dmaWait();                   /* the previous band is out */
         tft.pushPixelsDMA(tiny565[b], A8_TINY_W * rows);
     }

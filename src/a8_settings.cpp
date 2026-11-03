@@ -166,18 +166,34 @@ void a8_settings_save_game(void) {
 
 /* ---- the screen -------------------------------------------------------- */
 
-#ifdef PICO_QUAD
-enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_PADDLES, ROW_TEST, ROW_BACK, ROWS };
-static const char *const NAMES[ROWS] = { "Keyboard", "FPS display", "Volume", "Default machine",
-                                         "TV system", "Paddle sensitivity", "Controller test", "Back" };
+/* The rows, in the order shown; which there are depends on the device. */
+enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_PADDLES, ROW_SCALE, ROW_TEST, ROW_BACK };
+#if defined(PICO_TINY_SCREEN)
+static const int ROW_LIST[] = { ROW_SCALE, ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV,
+                                ROW_PADDLES, ROW_TEST, ROW_BACK };
+#elif defined(PICO_QUAD)
+static const int ROW_LIST[] = { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_PADDLES,
+                                ROW_TEST, ROW_BACK };
 #else
-enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_TEST, ROW_BACK, ROWS, ROW_PADDLES = -1 };
-static const char *const NAMES[ROWS] = { "Keyboard", "FPS display", "Volume", "Default machine",
-                                         "TV system", "Controller test", "Back" };
+static const int ROW_LIST[] = { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_TEST, ROW_BACK };
 #endif
-static const int ROW_H = 22, LIST_Y = 34;
+static const int ROWS = sizeof(ROW_LIST) / sizeof(ROW_LIST[0]);
+#ifdef PICO_TINY_SCREEN
+/* 160x80: the 6x8 font, 10 px rows, 7 at a time (the list scrolls), names
+ * short enough to leave room for the value (26 characters a row). */
+static const char *const NAMES[] = { "Keyboard", "FPS display", "Volume", "Machine", "TV system",
+                                     "Paddles", "Scale", "Controller test", "Back" };
+static const int ROW_H = 10, LIST_Y = 10, SHOWN = 7, PANEL_W = 160, FONT = 1, TEXT_X = 2;
+#else
+static const char *const NAMES[] = { "Keyboard", "FPS display", "Volume", "Default machine", "TV system",
+                                     "Paddle sensitivity", "Scale", "Controller test", "Back" };
+static const int ROW_H = 22, LIST_Y = 34, SHOWN = ROWS, PANEL_W = 320, FONT = 2, TEXT_X = 16;
+#endif
+static int first_shown = 0;              /* the list's top row (scrolls on the 160x80 panel) */
 static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2A69,
                       COL_TITLE = 0xFD20, COL_HINT = TFT_DARKGREY, COL_VALUE = 0x07FF;
+
+static const char *const SCALE_NAMES[A8_SCALE_MODES] = { "Smooth", "Sharp", "Drop", "Crop" };
 
 static void value_text(int row, char *buf, size_t cap) {
     switch (row) {
@@ -187,24 +203,28 @@ static void value_text(int row, char *buf, size_t cap) {
     case ROW_MACHINE:  snprintf(buf, cap, "%s", a8_settings.machine_800 ? "400/800" : "800XL"); break;
     case ROW_TV:       snprintf(buf, cap, "%s", a8_settings.pal ? "PAL" : "NTSC"); break;
     case ROW_PADDLES:  snprintf(buf, cap, "%s", PADDLES_NAMES[a8_settings.paddles]); break;
+    case ROW_SCALE:    snprintf(buf, cap, "%s", SCALE_NAMES[a8_settings.scale]); break;
     default:           buf[0] = 0; break;
     }
 }
 
-static void draw_row(int row, bool sel) {
+/* list position i (an index into ROW_LIST) */
+static void draw_row(int i, bool sel) {
+    if (i < first_shown || i >= first_shown + SHOWN) return;
     TFT_eSPI &tft = a8_tft();
-    int y = LIST_Y + row * ROW_H;
+    const int row = ROW_LIST[i];
+    int y = LIST_Y + (i - first_shown) * ROW_H;
     uint16_t bg = sel ? COL_SEL_BG : COL_BG;
-    tft.fillRect(0, y, 320, ROW_H, bg);
-    tft.setTextFont(2);
+    tft.fillRect(0, y, PANEL_W, ROW_H, bg);
+    tft.setTextFont(FONT);
     tft.setTextColor(COL_TEXT, bg);
-    tft.setCursor(16, y + 5);
+    tft.setCursor(TEXT_X, y + (FONT == 1 ? 1 : 5));
     tft.print(NAMES[row]);
     char v[24];
     value_text(row, v, sizeof(v));
     if (v[0]) {
         tft.setTextColor(sel ? COL_TEXT : COL_VALUE, bg);
-        tft.setCursor(320 - 16 - tft.textWidth(v), y + 5);
+        tft.setCursor(PANEL_W - TEXT_X - tft.textWidth(v), y + (FONT == 1 ? 1 : 5));
         tft.print(v);
     }
 }
@@ -212,18 +232,35 @@ static void draw_row(int row, bool sel) {
 static void draw_screen(int sel) {
     TFT_eSPI &tft = a8_tft();
     tft.fillScreen(COL_BG);
-    tft.setTextFont(2);
+    tft.setTextFont(FONT);
+    tft.setTextWrap(false);
     tft.setTextColor(COL_TITLE, COL_BG);
+#ifdef PICO_TINY_SCREEN
+    tft.setCursor(TEXT_X, 0);
+    tft.print("SETTINGS");
+    tft.setTextColor(COL_HINT, COL_BG);
+    tft.setCursor(PANEL_W - TEXT_X - tft.textWidth("v" A8_VERSION), 0);
+    tft.print("v" A8_VERSION);
+    tft.drawFastHLine(0, 8, PANEL_W, COL_HINT);
+    for (int i = 0; i < ROWS; i++) draw_row(i, i == sel);
+    /* more above / below: a mark at the right edge */
+    if (first_shown > 0) tft.fillTriangle(156, LIST_Y + 1, 153, LIST_Y + 4, 159, LIST_Y + 4, COL_HINT);
+    if (first_shown + SHOWN < ROWS) {
+        int yb = LIST_Y + SHOWN * ROW_H - 2;
+        tft.fillTriangle(156, yb, 153, yb - 3, 159, yb - 3, COL_HINT);
+    }
+#else
     tft.setCursor(8, 6);
     tft.print("SETTINGS");
     tft.setTextColor(COL_HINT, COL_BG);
     tft.setCursor(320 - 8 - tft.textWidth("v" A8_VERSION), 6);
     tft.print("v" A8_VERSION);
     tft.drawFastHLine(0, 25, 320, COL_HINT);
-    for (int r = 0; r < ROWS; r++) draw_row(r, r == sel);
+    for (int i = 0; i < ROWS; i++) draw_row(i, i == sel);
     tft.setTextColor(COL_HINT, COL_BG);
     tft.setCursor(8, 222);
     tft.print("LEFT / RIGHT: change    MENU: back");
+#endif
 }
 
 /* left / right on a row (dir -1 / +1) */
@@ -233,6 +270,7 @@ static bool change(int row, int dir) {
     case ROW_FPS:      a8_settings.fps = !a8_settings.fps; return true;
     case ROW_MACHINE:  a8_settings.machine_800 = !a8_settings.machine_800; return true;
     case ROW_TV:       a8_settings.pal = !a8_settings.pal; return true;
+    case ROW_SCALE:    a8_settings.scale = (a8_settings.scale + dir + A8_SCALE_MODES) % A8_SCALE_MODES; return true;
     case ROW_PADDLES: {                      /* stops at the ends */
         int v = a8_settings.paddles + dir;
         if (v < 0 || v >= A8_PADDLES_LEVELS) return false;
@@ -253,6 +291,7 @@ static bool change(int row, int dir) {
 void a8_settings_screen(void) {
     int sel = 0;
     bool dirty = false;
+    first_shown = 0;
     draw_screen(sel);
     for (uint32_t t0 = millis(); a8_input_menu() && millis() - t0 < 1000; ) delay(10);
     uint8_t prev = 0xFF;
@@ -273,10 +312,17 @@ void a8_settings_screen(void) {
         int old = sel;
         if (pressed & A8M_UP)   sel = sel > 0 ? sel - 1 : ROWS - 1;
         if (pressed & A8M_DOWN) sel = sel < ROWS - 1 ? sel + 1 : 0;
-        if (sel != old) { draw_row(old, false); draw_row(sel, true); }
+        if (sel != old) {
+            int top = first_shown;
+            if (sel < first_shown) first_shown = sel;
+            if (sel >= first_shown + SHOWN) first_shown = sel - SHOWN + 1;
+            if (first_shown != top) draw_screen(sel);
+            else { draw_row(old, false); draw_row(sel, true); }
+        }
+        const int row = ROW_LIST[sel];
         if (pressed & (A8M_LEFT | A8M_RIGHT | A8M_OK)) {
-            if (sel == ROW_BACK) { if (pressed & A8M_OK) break; }
-            else if (sel == ROW_TEST) {
+            if (row == ROW_BACK) { if (pressed & A8M_OK) break; }
+            else if (row == ROW_TEST) {
                 if (pressed & A8M_OK) {
                     while (a8_input_menu() & A8M_OK) delay(10);
                     a8_ctltest_screen();
@@ -286,7 +332,7 @@ void a8_settings_screen(void) {
                 }
             } else {
                 int dir = (pressed & A8M_LEFT) ? -1 : 1;
-                if (change(sel, dir)) dirty = true;
+                if (change(row, dir)) dirty = true;
                 draw_row(sel, true);
             }
         }
