@@ -234,3 +234,22 @@ below the CX-W's LittleFS; LittleFS and EEPROM stay where they are:
 A Quad updated from 1.0 has no drive at `0x380000` (old arcade image
 bytes), so ROM drive mode formats it: its ROMs and arcade high scores are
 lost once.
+
+## Duo Ultimate (MODEL_DUO, from Duo 2.3)
+
+The Duo has a 16 MB flash chip; its firmware (about 2.9 MB) starts at 0 and
+its LittleFS (256 KB) + EEPROM sit at the very top, so the game areas go in
+one block above the firmware (`FIRMWARE_LIMITS` `0x800000`):
+
+| Physical | Size | Use |
+|---|---|---|
+| `0x000000 .. 0x7FFFFF` | 8 MB | Duo firmware (2.9 MB today) |
+| `0x800000 .. 0x81FFFF` | 128 KB | Pico2Atari8 unzip area |
+| `0x820000 .. 0x87FFFF` | 384 KB | Atari 8-bit slot (`duo` env; window offset to the drive `0xE0000`) |
+| `0x880000 .. 0x8DFFFF` | 384 KB | arcade slot (Pico2Arcade `duo`; window offset `0x80000`) |
+| `0x8E0000 .. 0x8E0FFF` | 4 KB | Pico2Atari8 settings |
+| `0x8FF000 .. 0x8FFFFF` | 4 KB | arcade high scores (the sector below the drive) |
+| `0x900000 .. 0x9FFFFF` | 1 MB | ARCADE ROMS drive |
+
+Both images use the 160x80 panel code of the `duo_tiny` test builds,
+hosted: the Duo passes volume and the drive location, and they return to it.

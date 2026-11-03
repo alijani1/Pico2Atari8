@@ -24,8 +24,8 @@
 /* Chain-booted by an iCode host firmware (GameAdapterRGBPico include/arcade.hpp):
  * the host passes volume/orientation and the ROM drive location, and gets
  * them back on exit. */
-#if defined(PICO_QUAD) || defined(PICO_5200)
-#  define PICO_HOSTED 1
+#if defined(PICO_QUAD) || defined(PICO_5200) || (defined(PICO_DUO) && !defined(PICO_STANDALONE))
+#  define PICO_HOSTED 1   /* (PICO_DUO without PICO_STANDALONE: the Duo firmware 2.3+) */
 #endif
 #if defined(PICO_HOSTED) || defined(PICO_STANDALONE)
 #  define PICO_BOARD_TABLE 1
