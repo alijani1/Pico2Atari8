@@ -2,6 +2,8 @@
 #ifndef A8_SETTINGS_H
 #define A8_SETTINGS_H
 
+#include "a8_scale.h"                /* A8_SCALE_*: Scale on the 160x80 panel */
+
 /* On-screen keyboard modes */
 enum { A8_KBD_ONE_KEY = 0,        /* paused; the first key typed is sent and closes it */
        A8_KBD_AUTO_PAUSE,         /* paused; each key runs the game briefly; Blue closes */
@@ -22,6 +24,7 @@ struct A8Settings {
     bool machine_800;             /* default machine: false = 800XL, true = 400/800 */
     bool pal;                     /* TV system: false = NTSC */
     int  paddles;                 /* A8_PADDLES_*: paddle sensitivity (Quad) */
+    int  scale;                   /* A8_SCALE_*: how the picture is shrunk (160x80 panel) */
 };
 
 extern A8Settings a8_settings;
@@ -35,5 +38,6 @@ void a8_settings_set_game(const char *path);   /* the game being started */
 bool a8_settings_game_paddle(void);
 void a8_settings_set_game_paddle(bool on);     /* kept in RAM until ... */
 void a8_settings_save_game(void);              /* ... the game ends (if it changed) */
+void a8_settings_next_scale(void);             /* Scale: the next mode (saved as above) */
 
 #endif

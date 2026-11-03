@@ -125,6 +125,33 @@ static void emu_start(void) {
 
 static volatile bool g_gave_up = false;
 
+/* A message in the middle of the panel: a line and a grey second line
+ * (320x240: font 2 in a box; 160x80: the 6x8 font). */
+static void show_message(const char *line1, const char *line2, bool box) {
+    TFT_eSPI &tft = a8_tft();
+#ifdef PICO_TINY_SCREEN
+    (void)box;
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextFont(1);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(2, 28); tft.print(line1);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    if (line2) { tft.setCursor(2, 42); tft.print(line2); }
+#else
+    if (box) {
+        tft.fillRect(20, 90, 280, 60, TFT_BLACK);
+        tft.drawRect(20, 90, 280, 60, TFT_RED);
+    } else {
+        tft.fillScreen(TFT_BLACK);
+    }
+    tft.setTextFont(2);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(box ? 32 : 40, 100); tft.print(line1);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    if (line2) { tft.setCursor(box ? 32 : 40, 122); tft.print(line2); }
+#endif
+}
+
 
 static void emu_frame(void) {
     if (g_frames == 0) a8_stage = "first frame";
@@ -171,20 +198,12 @@ void setup() {
      * starts: flash writes stop interrupts) and run it from there. */
     const char *dot = strrchr(path, '.');
     if (dot && strcasecmp(dot, ".zip") == 0) {
-        TFT_eSPI &tft = a8_tft();
-        tft.fillScreen(TFT_BLACK);
-        tft.setTextFont(2);
-        tft.setTextColor(TFT_WHITE, TFT_BLACK);
-        tft.setCursor(110, 110);
-        tft.print("Unpacking...");
+        show_message("Unpacking...", nullptr, false);
         char inner[64];
         if (!a8_unzip(path, inner, sizeof(inner))) {
-            tft.fillScreen(TFT_BLACK);
-            tft.setCursor(40, 100); tft.print("Can't unpack this zip.");
-            tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-            tft.setCursor(40, 122); tft.print("Press MENU for the game list.");
-            while (digitalRead(18) == LOW) delay(10);
-            while (digitalRead(18) == HIGH) delay(10);
+            show_message("Can't unpack this zip.", "MENU: the game list", false);
+            while (a8_input_menu() & A8M_BACK) delay(10);
+            while (!(a8_input_menu() & A8M_BACK)) delay(10);
             handoff_relaunch_arcade();
         }
         snprintf(game_file, sizeof(game_file), "%s%s", A8_UNZIP_PREFIX, inner);
@@ -232,14 +251,7 @@ void loop() {
         if (!shown) {
             shown = true;
             a8_display_stop();
-            TFT_eSPI &tft = a8_tft();
-            tft.fillRect(20, 90, 280, 60, TFT_BLACK);
-            tft.drawRect(20, 90, 280, 60, TFT_RED);
-            tft.setTextFont(2);
-            tft.setTextColor(TFT_WHITE, TFT_BLACK);
-            tft.setCursor(32, 100); tft.print("This game crashed the Atari.");
-            tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-            tft.setCursor(32, 122); tft.print("Hold MENU for the game list.");
+            show_message("This game crashed.", "Hold MENU for the list.", true);
         }
         delay(20);
         return;

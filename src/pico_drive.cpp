@@ -200,7 +200,7 @@ extern "C" void pico_drive_run(void) {
     const char *driveName = "ARCADE ROMS";
     static const char LABEL[11] = {'A','R','C','A','D','E',' ','R','O','M','S'};
     if (!is_formatted()) {
-#ifdef PICO_STANDALONE
+#if defined(PICO_STANDALONE) && !defined(PICO_DUO)
         static const char INI83[11] = {'A','R','C','A','D','E',' ',' ','I','N','I'};
         format_drive(LABEL, INI83, board_default_ini());
 #else
@@ -221,6 +221,20 @@ extern "C" void pico_drive_run(void) {
 
     TFT_eSPI &tft = a8_tft();
     tft.fillScreen(TFT_BLACK);
+#ifdef PICO_TINY_SCREEN
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.setCursor(2, 2);   tft.print("ROM Drive (USB)");
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(2, 16);  tft.print("Copy Atari games onto");
+    tft.setCursor(2, 26);  tft.printf("the %s drive.", driveName);
+    tft.setCursor(2, 40);  tft.print(".xex .car .rom .atr .zip");
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setCursor(2, 56);  tft.print("Eject, then MENU or");
+    tft.setCursor(2, 66);  tft.print("START (Black) to play.");
+    if (0)
+#endif
+    {
     tft.setTextSize(2);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
     tft.setCursor(10, 20);
@@ -237,6 +251,7 @@ extern "C" void pico_drive_run(void) {
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setCursor(10, y += 24); tft.print("Eject the drive, then press");
     tft.setCursor(10, y += 12); tft.print("MENU or START to play.");
+    }
 
     delay(300);
     while (pin_low(g_pins.menu) || pin_low(g_pins.start)) delay(10);   /* released from entry */
@@ -250,9 +265,15 @@ extern "C" void pico_drive_run(void) {
 
     flush_cache();
     tft.fillScreen(TFT_BLACK);
+#ifdef PICO_TINY_SCREEN
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(2, 36);
+#else
     tft.setTextSize(2);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setCursor(10, 100);
+#endif
     tft.print("Restarting...");
     delay(300);
     handoff_relaunch_arcade();

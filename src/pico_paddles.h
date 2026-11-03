@@ -1,13 +1,14 @@
 /* pico_paddles.h - Atari paddles on the Quad Ultimate CX's ports 1 and 2
  * (GameAdapterRGBPico data/quad.json: pins 5 / 9 on GPIO 42 / 43 and 40 / 41,
  * src/pio_rc.cpp). The paddles' buttons are the ports' left / right lines,
- * read with the joystick. PICO_QUAD only. */
+ * read with the joystick. PICO_QUAD, and the Duo Ultimate (PICO_DUO: port 1
+ * on GPIO 40 / 41, port 2 on 42 / 43, data/duoultimate.json). */
 #ifndef PICO_PADDLES_H
 #define PICO_PADDLES_H
 
 #include <stdint.h>
 
-#ifdef PICO_QUAD
+#if defined(PICO_QUAD) || defined(PICO_DUO)
 
 void paddles_init(void);
 /* Call often (once a frame or more): collects the last pot reading once it's

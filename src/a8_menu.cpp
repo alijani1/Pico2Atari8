@@ -154,12 +154,30 @@ static int by_name(const void *a, const void *b) {
 
 /* ---- drawing --------------------------------------------------------- */
 
-static const int ROW_H = 18, LIST_Y = 30, ROWS = 10;
+#ifdef PICO_TINY_SCREEN
+/* 160x80 panel: the 6x8 font, 10 px rows, a one-line hint. */
+static const int ROW_H = 10, LIST_Y = 11, ROWS = 6, PANEL_W = 160, FONT = 1, TEXT_X = 2;
+#else
+static const int ROW_H = 18, LIST_Y = 30, ROWS = 10, PANEL_W = 320, FONT = 2, TEXT_X = 12;
+#endif
 static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2A69,
                       COL_TITLE = 0xFD20, COL_HINT = TFT_DARKGREY;
 
 static void draw_frame(void) {
     TFT_eSPI &tft = a8_tft();
+#ifdef PICO_TINY_SCREEN
+    tft.fillScreen(COL_BG);
+    tft.setTextFont(FONT);
+    tft.setTextWrap(false);
+    tft.setTextColor(COL_TITLE, COL_BG);
+    tft.setCursor(TEXT_X, 1);
+    tft.print("ATARI 8-BIT");
+    tft.drawFastHLine(0, 9, PANEL_W, COL_HINT);
+    tft.setTextColor(COL_HINT, COL_BG);
+    tft.setCursor(TEXT_X, 72);
+    tft.print(a8_settings.machine_800 ? "Red:play White:800XL" : "Red:play White:400/800");
+    return;
+#endif
     tft.fillScreen(COL_BG);
     tft.setTextFont(2);
     tft.setTextColor(COL_TITLE, COL_BG);
@@ -176,24 +194,42 @@ static void draw_row(int idx, int top, bool sel) {
     TFT_eSPI &tft = a8_tft();
     int y = LIST_Y + (idx - top) * ROW_H;
     uint16_t bg = sel ? COL_SEL_BG : COL_BG;
-    tft.fillRect(0, y, 320, ROW_H, bg);
+    tft.fillRect(0, y, PANEL_W, ROW_H, bg);
     if (idx >= game_count) return;
-    tft.setTextFont(2);
+    tft.setTextFont(FONT);
     tft.setTextColor(COL_TEXT, bg);
-    tft.setCursor(12, y + 1);
+    tft.setCursor(TEXT_X, y + 1);
     if (idx >= found) tft.setTextColor(sel ? COL_TEXT : 0x07FF, bg);   /* Settings, drive */
+#ifdef PICO_TINY_SCREEN
+    /* as much of the name as fits beside the kind (6 px a character) */
+    char name[32];
+    int fit = (PANEL_W - TEXT_X - (games[idx].kind[0] ? 6 * 4 + 4 : 0)) / 6;
+    snprintf(name, sizeof(name), "%.*s", fit < 31 ? fit : 31, games[idx].name);
+    tft.print(name);
+#else
     tft.print(games[idx].name);
+#endif
     if (idx < found && games[idx].kind[0]) {
         tft.setTextColor(sel ? COL_TEXT : COL_HINT, bg);
-        tft.setCursor(320 - 8 - tft.textWidth(games[idx].kind), y + 1);
+        tft.setCursor(PANEL_W - (FONT == 1 ? 2 : 8) - tft.textWidth(games[idx].kind), y + 1);
         tft.print(games[idx].kind);
     }
 }
 
 static void draw_counter(int sel) {
     TFT_eSPI &tft = a8_tft();
-    tft.setTextFont(2);
+    tft.setTextFont(FONT);
     tft.setTextColor(COL_HINT, COL_BG);
+#ifdef PICO_TINY_SCREEN
+    tft.fillRect(100, 0, 60, 9, COL_BG);
+    if (sel < found) {
+        char c[12];
+        snprintf(c, sizeof(c), "%d/%d", sel + 1, found);
+        tft.setCursor(PANEL_W - 2 - tft.textWidth(c), 1);
+        tft.print(c);
+    }
+    return;
+#endif
     tft.fillRect(240, 6, 80, 16, COL_BG);
     tft.setCursor(250, 6);
     if (sel < found) tft.printf("%d / %d", sel + 1, found);
@@ -206,6 +242,15 @@ static void draw_list(int top, int sel) {
 
 static void draw_empty(void) {
     TFT_eSPI &tft = a8_tft();
+#ifdef PICO_TINY_SCREEN
+    tft.setTextFont(FONT);
+    tft.setTextColor(COL_TEXT, COL_BG);
+    tft.setCursor(TEXT_X, LIST_Y + 2 * ROW_H); tft.print("No Atari games found.");
+    tft.setTextColor(COL_HINT, COL_BG);
+    tft.setCursor(TEXT_X, LIST_Y + 3 * ROW_H); tft.print("Pick ROM Drive (USB)");
+    tft.setCursor(TEXT_X, LIST_Y + 4 * ROW_H); tft.print("and copy games over.");
+    return;
+#endif
     tft.setTextFont(2);
     tft.setTextColor(COL_TEXT, COL_BG);
     int y = LIST_Y + 2 * ROW_H + 24;
@@ -225,10 +270,16 @@ const char *a8_menu_pick(void) {
     qsort(games, game_count, sizeof(Game), by_name);
     found = game_count;
     Serial.printf("[menu] %d games\n", found);
+#ifdef PICO_TINY_SCREEN
+    const int settings_row = -1;         /* the Settings screen is laid out for 320x240 */
+#else
+    const int settings_row = game_count;
     Game &settings = games[game_count++];
     settings.path[0] = 0;
     settings.kind[0] = 0;
     strcpy(settings.name, "Settings");
+#endif
+    const int drive_row = game_count;
     Game &drive = games[game_count++];
     drive.path[0] = 0;
     drive.kind[0] = 0;
@@ -295,7 +346,7 @@ const char *a8_menu_pick(void) {
             if (pressed & (A8M_OK | A8M_ALT)) {
                 bool as_800 = (pressed & A8M_ALT) != 0;
                 while (a8_input_menu() & (A8M_OK | A8M_ALT)) delay(10);
-                if (sel == found) {                         /* Settings */
+                if (sel == settings_row) {                  /* Settings */
                     a8_settings_screen();
                     draw_frame();
                     draw_list(top, sel);
@@ -303,7 +354,7 @@ const char *a8_menu_pick(void) {
                     prev = 0xFF;
                     continue;
                 }
-                if (sel == found + 1) pico_drive_request();  /* reboots into drive mode */
+                if (sel == drive_row) pico_drive_request();  /* reboots into drive mode */
                 picked_alt = as_800;
                 picked_osb = games[sel].osb;
                 Serial.printf("[menu] run %s (%s)%s\n", games[sel].path, games[sel].name,

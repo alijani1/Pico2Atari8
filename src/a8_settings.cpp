@@ -36,7 +36,7 @@ struct Stored {
     uint32_t check;
 };
 
-A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false, A8_PADDLES_MEDIUM };
+A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false, A8_PADDLES_MEDIUM, A8_SCALE_SMOOTH };
 
 static const char *const KEYBOARD_NAMES[A8_KBD_MODES] = { "Pause+Auto Resume", "Auto-pause", "Keep running" };
 static const char *const PADDLES_NAMES[A8_PADDLES_LEVELS] = { "Very low", "Low", "Medium", "High", "Very high" };
@@ -62,7 +62,7 @@ static uint32_t games_check(const uint32_t *h, uint32_t n) {
 
 static uint32_t checksum(const Stored &s) {
     return s.magic ^ (s.keyboard << 1) ^ (s.fps << 3) ^ (s.machine_800 << 5) ^ (s.pal << 7) ^
-           (s.paddles << 9) ^ 0xA5A5A5A5u;
+           (s.paddles << 9) ^ (s.spare[0] << 12) ^ 0xA5A5A5A5u;   /* spare[0]: scale (0 before) */
 }
 
 static void load_games(void) {
@@ -87,6 +87,7 @@ void a8_settings_load(void) {
     a8_settings.machine_800 = s.machine_800 != 0;
     a8_settings.pal = s.pal != 0;
     a8_settings.paddles = s.paddles < A8_PADDLES_LEVELS ? s.paddles : A8_PADDLES_MEDIUM;
+    a8_settings.scale = s.spare[0] < A8_SCALE_MODES ? s.spare[0] : A8_SCALE_SMOOTH;
     Serial.printf("[settings] keyboard %s, fps %s, machine %s, %s, paddles %s\n",
                   KEYBOARD_NAMES[a8_settings.keyboard],
                   a8_settings.fps ? "on" : "off", a8_settings.machine_800 ? "400/800" : "800XL",
@@ -105,6 +106,7 @@ static void save(void) {
     s.pal = a8_settings.pal;
     s.paddles = (uint8_t)a8_settings.paddles;
     memset(s.spare, 0, sizeof(s.spare));
+    s.spare[0] = (uint8_t)a8_settings.scale;
     s.check = checksum(s);
     memcpy(sector, &s, sizeof(s));
     StoredGames *g = (StoredGames *)(sector + GAMES_AT);
@@ -147,6 +149,12 @@ void a8_settings_set_game_paddle(bool on) {
         game_count--;
         games_dirty = true;
     }
+}
+
+/* Scale (160x80 panel): the next mode, at once; saved when the game ends. */
+void a8_settings_next_scale(void) {
+    a8_settings.scale = (a8_settings.scale + 1) % A8_SCALE_MODES;
+    games_dirty = true;
 }
 
 /* The display must be stopped: its frame buffer is the sector buffer. */

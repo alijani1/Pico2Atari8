@@ -127,6 +127,44 @@ PlatformIO, the same toolchain as Pico2Arcade:
 pio run -e quad
 ```
 
+| Env | Device |
+|---|---|
+| `quad` | Quad Ultimate CX / CX-W, chain-booted from its Atari 8-bit slot |
+| `duo5200` | Duo 5200 Ultimate, chain-booted from its Atari 8-bit slot |
+| `duo_tiny` | Duo Ultimate (160x80 ST7735 panel) - **test build**, standalone: flashes at offset 0 and **replaces** the Duo firmware (reflash the Duo UF2 afterwards). Shares the 1 MB ROM drive at 0x200000 with Pico2Arcade's `duo_tiny` |
+
+## Duo Ultimate (160x80 test build)
+
+The picture is shrunk to the 160x80 panel ([src/a8_scale.c](src/a8_scale.c)):
+across 320 → 160 (exactly 2:1: most Atari graphics are 160 colour clocks
+wide), down lines 8–223 → 80 rows (2.7:1; the 192-line playfield plus the
+lines some games use above and below it, such as Star Raiders' panel). A
+**MENU tap** in a game picks the next Scale mode, shown top-left and kept:
+
+| Scale | How |
+|---|---|
+| Smooth (default) | each row averages the lines it covers, by how much |
+| Sharp | each row averages the two lines nearest its middle |
+| Drop | the line at each row's middle, the left pixel of each pair: sharpest and fastest, but one-line details can vanish |
+| Crop | lines 36–195 at exactly 2:1: no blur, but the lines above and below (often the score) are cut |
+
+Core 1 shrinks the frame 16 rows at a time, each band going out by DMA
+while the next is shrunk. The PC harness renders the same thing:
+`TINY=prefix` writes the last frame in every mode.
+
+| Control | In a game |
+|---|---|
+| Ports 1–2 | Atari joysticks 1–2; paddles |
+| 5-way | also joystick 1 (press: RETURN) |
+| Red | fire |
+| Black / White | START / SELECT |
+| Green / Yellow | OPTION / SPACE |
+| Blue | on-screen keyboard |
+| MENU | tap: next Scale mode; hold 1 s: back to the game list |
+
+Not done yet: Settings, the controller test and the on-screen keyboard are
+still laid out for 320x240 (Settings is left out of the list for now).
+
 ## Layout
 
 | Path | What |

@@ -27,7 +27,19 @@
  *                     as directions; Fire A or Fire B = fire; keypad 0-9 =
  *                     the number keys, START = START
  *
- * A 5200 game (either device; a8_is_5200) has its own controls:
+ * Duo Ultimate (PICO_DUO, GameAdapterRGBPico data/duoultimate.json; the
+ * 160x80 test build): two DB9 ports and the device's own controls, no
+ * Joy-Con:
+ *
+ *   Ports 1-2 (DB9)   Atari joysticks 1-2; paddles (pico_paddles.cpp)
+ *   5-way stick       also joystick 1; its press = RETURN
+ *   Red               fire 1
+ *   Black / White     START / SELECT
+ *   Green / Yellow    OPTION / SPACE;  Blue  on-screen keyboard
+ *   MENU              tap in a game: the next Scale mode; hold 1 s: back
+ *                     to the game list
+ *
+ * A 5200 game (any device; a8_is_5200) has its own controls:
  *
  *   Joy-Con stick     controller 1's analog stick (POKEY pots 0/1)
  *   Red / click       bottom fire;  Green  top fire
@@ -57,6 +69,13 @@ extern "C" {
 #ifdef PICO_5200
 static const int NUM_PORTS = 2;
 static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
+#elif defined(PICO_DUO)
+static const int NUM_PORTS = 2;
+static const int8_t PORT_PINS[2][5] = {     /* up down left right fire */
+    { 16, 17, 18, 19, 13 },
+    { 26, 27, 34, 35, 36 },
+};
+static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
 #else
 static const int NUM_PORTS = 4;
 static const int8_t PORT_PINS[4][5] = {     /* up down left right fire */
@@ -67,9 +86,19 @@ static const int8_t PORT_PINS[4][5] = {     /* up down left right fire */
 };
 static const int PIN_SIDE_UP = 3, PIN_SIDE_DOWN = 2;
 #endif
+#ifdef PICO_DUO
+static const int PIN_RED = 20, PIN_GREEN = 9, PIN_BLUE = 10, PIN_YELLOW = 21;
+static const int PIN_SELECT = 24, PIN_START = 22, PIN_MENU = 23, PIN_CLICK = -1;   /* White, Black */
+static const int PIN_JOY_X = -1, PIN_JOY_Y = -1;                     /* no Joy-Con */
+static const int8_t PIN_5WAY[4] = { 25, 8, 12, 6 };                  /* up down left right */
+static const int PIN_RETURN = 7;                                     /* the 5-way's press */
+#else
 static const int PIN_RED = 14, PIN_GREEN = 15, PIN_BLUE = 16, PIN_YELLOW = 17;
 static const int PIN_SELECT = 19, PIN_START = 20, PIN_MENU = 18, PIN_CLICK = 21;
 static const int PIN_JOY_X = 44, PIN_JOY_Y = 45;
+static const int8_t PIN_5WAY[4] = { -1, -1, -1, -1 };
+static const int PIN_RETURN = PIN_SIDE_DOWN;                         /* the right side button */
+#endif
 
 /* ---- Joy-Con ---------------------------------------------------------
  * The centre is assumed at the first reading (averaged at start-up); as the
@@ -93,6 +122,7 @@ static void axis_centre(const JoyAxis &a, int *centre, int *half) {
 }
 
 static int axis_sample(JoyAxis &a) {
+    if (a.pin < 0) return a.first;           /* none: always at rest */
     int v = analogRead(a.pin);
     if (v < a.lo) a.lo = v;
     if (v > a.hi) a.hi = v;
@@ -127,6 +157,16 @@ static int16_t axis_pot(const JoyAxis &a, int v) {
 
 static inline bool low(int p) { return p >= 0 && digitalRead(p) == LOW; }
 
+/* The Duo's 5-way as joystick directions (none elsewhere). */
+static uint8_t five_way(void) {
+    uint8_t d = 0;
+    if (low(PIN_5WAY[0])) d |= A8_UP;
+    if (low(PIN_5WAY[1])) d |= A8_DOWN;
+    if (low(PIN_5WAY[2])) d |= A8_LEFT;
+    if (low(PIN_5WAY[3])) d |= A8_RIGHT;
+    return d;
+}
+
 
 void a8_input_init(void) {
 #ifdef PICO_5200
@@ -137,8 +177,10 @@ void a8_input_init(void) {
     paddles_init();
 #endif
     const int buttons[] = { PIN_RED, PIN_GREEN, PIN_BLUE, PIN_YELLOW, PIN_SELECT,
-                            PIN_START, PIN_MENU, PIN_CLICK, PIN_SIDE_UP, PIN_SIDE_DOWN };
+                            PIN_START, PIN_MENU, PIN_CLICK, PIN_SIDE_UP, PIN_SIDE_DOWN,
+                            PIN_5WAY[0], PIN_5WAY[1], PIN_5WAY[2], PIN_5WAY[3], PIN_RETURN };
     for (int p : buttons) if (p >= 0) pinMode(p, INPUT_PULLUP);
+    if (PIN_JOY_X < 0) { axis_init(joy_x, 2048); axis_init(joy_y, 2048); return; }
     /* Joy-Con: a first guess at the centre; it keeps learning (axis_sample) */
     analogReadResolution(12);
     delay(20);                               /* let the ADC settle */
@@ -268,6 +310,7 @@ bool a8_input_frame(void) {
         /* the Joy-Con stands in for controller 1's stick while it's
          * clearly pushed (past 15 %: a resting one may wander a little)
          * and controller 1's own stick is at rest (or unplugged) */
+        in.stick[0] |= five_way();
         int16_t jx, jy;
         nav = in.stick[0] | joycon_read(&jx, &jy);
         bool pushed = (jx != A8_POT_NONE && (jx < 114 - 16 || jx > 114 + 16)) ||
@@ -310,7 +353,7 @@ bool a8_input_frame(void) {
 #ifdef PICO_QUAD
         if (paddles_present(0)) joy_paddle = false;     /* the real ones */
 #endif
-        uint8_t joy = joycon_read();
+        uint8_t joy = joycon_read() | five_way();
         nav = in.stick[0] | joy;
         bool fire = !combo && (low(PIN_RED) || click);
         if (joy_paddle && !a8_osk_is_open()) {
@@ -325,8 +368,8 @@ bool a8_input_frame(void) {
         in.option = low(PIN_GREEN);
         if (yellow && !combo) in.key = AKEY_SPACE;
 
-        /* Right side button: RETURN. */
-        if (low(PIN_SIDE_DOWN)) in.key = AKEY_RETURN;
+        /* Right side button (Duo: the 5-way's press): RETURN. */
+        if (low(PIN_RETURN)) in.key = AKEY_RETURN;
     }
 
     /* Blue: the on-screen keyboard, open / close on each press. (It used to
@@ -397,9 +440,18 @@ bool a8_input_frame(void) {
 
 
     /* MENU held 1 s: leave the game. A press already down when the game
-     * started (from the menu) counts only after it has been released. */
+     * started (from the menu) counts only after it has been released.
+     * 160x80 panel: a shorter press (a tap) picks the next Scale mode. */
     bool m = low(PIN_MENU);
-    if (!m) { menu_seen_up = true; menu_since = 0; return false; }
+    if (!m) {
+#ifdef PICO_TINY_SCREEN
+        if (menu_seen_up && menu_since && millis() - menu_since < 1000) {
+            a8_settings_next_scale();
+            a8_display_toast(a8_scale_names[a8_settings.scale]);
+        }
+#endif
+        menu_seen_up = true; menu_since = 0; return false;
+    }
     if (!menu_seen_up) return false;
     uint32_t now = millis();
     if (!menu_since) menu_since = now | 1;
@@ -414,12 +466,13 @@ uint8_t a8_input_menu(void) {
     uint8_t b = 0;
     ports_poll();
     /* left / right change values in Settings: the Joy-Con needs a firm push */
-    uint8_t d = port_dirs(0, MENU_EDGE) | joycon_read(nullptr, nullptr, MENU_JOY_DEAD_X);
+    uint8_t d = port_dirs(0, MENU_EDGE) | joycon_read(nullptr, nullptr, MENU_JOY_DEAD_X) | five_way();
     if ((d & A8_UP)   || low(PIN_SIDE_UP))   b |= A8M_UP;
     if ((d & A8_DOWN) || low(PIN_SIDE_DOWN)) b |= A8M_DOWN;
     if (d & A8_LEFT)  b |= A8M_LEFT;
     if (d & A8_RIGHT) b |= A8M_RIGHT;
-    if (port_fire(0) || low(PIN_RED) || low(PIN_CLICK) || low(PIN_START)) b |= A8M_OK;
+    if (port_fire(0) || low(PIN_RED) || low(PIN_CLICK) || low(PIN_START) ||
+        (PIN_RETURN != PIN_SIDE_DOWN && low(PIN_RETURN))) b |= A8M_OK;    /* Duo: the 5-way's press */
     if (low(PIN_MENU)) b |= A8M_BACK;
     if (low(PIN_SELECT)) b |= A8M_ALT;
     return b;

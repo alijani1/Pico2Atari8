@@ -22,7 +22,7 @@
  */
 #include "pico_paddles.h"
 
-#ifdef PICO_QUAD
+#if defined(PICO_QUAD) || defined(PICO_DUO)
 
 #include <Arduino.h>
 #include "hardware/pio.h"
@@ -31,7 +31,11 @@
 #include "a8_display.h"
 #include "a8_settings.h"
 
+#ifdef PICO_DUO
+static const uint8_t RC_PINS[4] = { 40, 41, 42, 43 };   /* p1 A, p1 B, p2 A, p2 B */
+#else
 static const uint8_t RC_PINS[4] = { 42, 43, 40, 41 };   /* p1 A, p1 B, p2 A, p2 B */
+#endif
 static const uint32_t RC_MAX  = 12000;      /* timeout (counts, 9.6 ms): no paddle */
 static const uint32_t RC_LOW  = 200;        /* turned right, a first guess (only grows down) */
 static const uint32_t SRC_TRIM = 100;       /* clipped off above the lowest count seen */

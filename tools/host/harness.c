@@ -17,6 +17,8 @@
  *            TOP_AT=n    hold the top fire button from frame n for 10 frames
  *            KEY_AT=n    hold keypad 5 from frame n for 10 frames
  *            PCM=file    write the sound out (raw 16-bit mono)
+ *            TINY=prefix the last frame on the Duo's 160x80 panel, each
+ *                        Scale mode: prefix_smooth.ppm ... (a8_scale.c)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +35,7 @@
 #include "platform.h"
 #include "a8_platform.h"
 #include "akey.h"
+#include "a8_scale.h"
 
 /* ---- heap accounting (what the Pico would need) ------------------------ */
 
@@ -153,6 +156,38 @@ static void save_ppm(const char *path) {
     printf("saved %s\n", path);
 }
 
+/* TINY=prefix: the last frame as the Duo Ultimate's 160x80 panel shows it
+ * (a8_scale.c), once per Scale mode: prefix_smooth.ppm, ... */
+static void save_tiny(const char *prefix) {
+    static uint8_t snap[A8_SCALE_SRC_W * A8_SCALE_SRC_H];
+    static uint16_t pal[256], out[A8_TINY_W * A8_TINY_H];
+    const uint8_t *s = (const uint8_t *)Screen_atari;
+    for (int y = 0; y < A8_SCALE_SRC_H; y++)                 /* as a8_display_frame */
+        memcpy(snap + y * A8_SCALE_SRC_W, s + y * Screen_WIDTH + 32, A8_SCALE_SRC_W);
+    for (int i = 0; i < 256; i++) {                          /* as a8_display_palette */
+        int rgb = Colours_table[i];
+        pal[i] = (uint16_t)(((rgb >> 8) & 0xF800) | ((rgb >> 5) & 0x07E0) | ((rgb >> 3) & 0x001F));
+    }
+    a8_scale_palette(pal);
+    for (int m = 0; m < A8_SCALE_MODES; m++) {
+        a8_scale_frame(snap, out, m, 0);
+        char path[512], name[16];
+        int k = 0;
+        for (const char *c = a8_scale_names[m]; *c; c++) name[k++] = (char)(*c | 0x20);
+        name[k] = 0;
+        snprintf(path, sizeof(path), "%s_%s.ppm", prefix, name);
+        FILE *f = fopen(path, "wb");
+        if (!f) continue;
+        fprintf(f, "P6\n%d %d\n255\n", A8_TINY_W, A8_TINY_H);
+        for (int i = 0; i < A8_TINY_W * A8_TINY_H; i++) {
+            uint16_t v = out[i];
+            fputc(((v >> 11) & 31) * 255 / 31, f); fputc(((v >> 5) & 63) * 255 / 63, f); fputc((v & 31) * 255 / 31, f);
+        }
+        fclose(f);
+        printf("saved %s\n", path);
+    }
+}
+
 /* atari800 exit()s when the 6502 hits a crash opcode (it would open its
  * monitor); report where. */
 static void at_exit(void) {
@@ -224,5 +259,6 @@ int main(int argc, char **argv) {
     printf("deepest stack: %zu bytes below main (x86-64)\n", stack_max);
     printf("done: %ld frames, heap now %zu KB, peak %zu KB\n", frames, heap_now / 1024, heap_peak / 1024);
     save_ppm(out);
+    if (getenv("TINY")) save_tiny(getenv("TINY"));
     return 0;
 }

@@ -20,6 +20,13 @@
  * FPS overlay: "E60 S58" (emulator / screen frames a second) is drawn into
  * the snapshot's top-right corner before hashing, so it travels with the
  * picture. On / off: Settings > FPS display (a8_display_set_fps).
+ *
+ * 160x80 panel (PICO_TINY_SCREEN, the Duo Ultimate): core 1 shrinks the
+ * same snapshot to 160x80 (a8_scale.c; Scale mode from the settings) 16
+ * rows at a time, each band going out by DMA while the next is shrunk (as
+ * Pico2Arcade). The whole frame is sent - 25 KB, ~2 ms at 100 MHz - so no
+ * row hashing. The FPS and message overlays are drawn after the shrink, at
+ * single size, into the first band.
  */
 #include <Arduino.h>
 #include <TFT_eSPI.h>
@@ -28,6 +35,8 @@
 #include "a8_display.h"
 #include "a8_platform.h"
 #include "a8_osk.h"
+#include "a8_scale.h"
+#include "a8_settings.h"
 
 extern "C" {
 #include "screen.h"
@@ -41,7 +50,12 @@ static const int SRC_X = (Screen_WIDTH - SCR_W) / 2;    /* 32: middle 320 column
 static const int BAND = 16;                             /* lines per DMA push */
 
 static uint8_t  frame8[SCR_W * SCR_H] __attribute__((aligned(4)));   /* snapshot for core 1 */
+#ifdef PICO_TINY_SCREEN
+static uint16_t tiny565[2][A8_TINY_W * BAND];           /* ping-pong bands of the shrunk frame */
+static uint16_t *tiny_out;                              /* the band the overlays go into */
+#else
 static uint16_t band565[2][SCR_W * BAND];               /* ping-pong DMA buffers */
+#endif
 static uint16_t pal565[256];                            /* byte-swapped for the panel */
 static volatile bool frame_ready = false;               /* core 0 -> core 1 */
 static volatile bool running = false;                   /* core 1 owns the panel */
@@ -201,6 +215,32 @@ static void __not_in_flash_func(draw_fps)(void) {
     }
 }
 
+#ifdef PICO_TINY_SCREEN
+/* The same glyphs at single size, into the shrunk frame: white on black. */
+static void __not_in_flash_func(tiny_text)(int x0, int y0, const char *t) {
+    int n = (int)strlen(t), w = n * 6 + 1;
+    for (int y = y0; y < y0 + 9 && y < A8_TINY_H; y++)
+        for (int x = x0; x < x0 + w && x < A8_TINY_W; x++) tiny_out[y * A8_TINY_W + x] = 0;
+    for (int i = 0; i < n; i++) {
+        const uint8_t *g = t[i] == 'E' ? GLYPH_E : t[i] == 'S' ? GLYPH_S : glyph(t[i]);
+        if (!g) continue;
+        for (int r = 0; r < 7; r++)
+            for (int c = 0; c < 5; c++)
+                if (g[r] & (0x10 >> c)) tiny_out[(y0 + 1 + r) * A8_TINY_W + x0 + 1 + i * 6 + c] = 0xFFFF;
+    }
+}
+
+static void __not_in_flash_func(tiny_overlays)(void) {
+    if (toast_until && (int32_t)(toast_until - millis()) > 0) tiny_text(0, 0, toast_text);
+    if (fps_on) {
+        int e = fps_emu > 99 ? 99 : fps_emu, s = fps_scr > 99 ? 99 : fps_scr;
+        char txt[8] = { 'E', (char)('0' + e / 10), (char)('0' + e % 10), ' ',
+                        'S', (char)('0' + s / 10), (char)('0' + s % 10), 0 };
+        tiny_text(A8_TINY_W - 7 * 6 - 1, 0, txt);
+    }
+}
+#endif
+
 void a8_display_set_fps(bool on) { fps_on = on; }
 
 /* Core 1, once a second: the rates for the overlay. */
@@ -227,7 +267,11 @@ void a8_display_init(void) {
     uint32_t sys_hz = clock_get_hz(clk_sys);
     clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS, sys_hz, sys_hz);
     tft.init();
+#ifdef PICO_TINY_SCREEN
+    tft.setRotation(1);                  /* landscape 160 x 80, as the Duo firmware */
+#else
     tft.setRotation(3);                  /* landscape 320 x 240, as the arcade */
+#endif
     tft.setSwapBytes(false);
     tft.fillScreen(TFT_BLACK);
     if (!tft.initDMA()) Serial.println("[display] initDMA failed");
@@ -236,11 +280,14 @@ void a8_display_init(void) {
 }
 
 void a8_display_palette(void) {
+    static uint16_t plain[256];          /* not byte-swapped: for the shrink */
     for (int i = 0; i < 256; i++) {
         int rgb = Colours_table[i];
         uint16_t c = (uint16_t)(((rgb >> 8) & 0xF800) | ((rgb >> 5) & 0x07E0) | ((rgb >> 3) & 0x001F));
         pal565[i] = (uint16_t)((c >> 8) | (c << 8));
+        plain[i] = c;
     }
+    a8_scale_palette(plain);
 }
 
 void a8_display_start(void) {
@@ -280,6 +327,29 @@ static uint32_t __not_in_flash_func(hash_row)(const uint8_t *row) {
     return h;
 }
 
+#ifdef PICO_TINY_SCREEN
+/* The 160x80 panel: shrink the snapshot and send all of it. */
+static void __not_in_flash_func(push_frame)(void) {
+    uint32_t t0 = time_us_32();
+    if (a8_osk_is_open()) draw_osk();
+    const int mode = a8_settings.scale;
+    tft.startWrite();
+    tft.setAddrWindow(0, 0, A8_TINY_W, A8_TINY_H);
+    for (int y = 0, b = 0; y < A8_TINY_H; y += BAND, b ^= 1) {
+        int rows = A8_TINY_H - y < BAND ? A8_TINY_H - y : BAND;
+        a8_scale_rows(frame8, tiny565[b], mode, 1, y, y + rows);
+        if (y == 0) { tiny_out = tiny565[b]; tiny_overlays(); }   /* overlays: rows 0-8 */
+        tft.dmaWait();                   /* the previous band is out */
+        tft.pushPixelsDMA(tiny565[b], A8_TINY_W * rows);
+    }
+    tft.dmaWait();
+    tft.endWrite();
+    push_us_sum += time_us_32() - t0;
+    rows_sum += A8_TINY_H;
+    push_count++;
+    frames_shown++;
+}
+#else
 /* Send rows y0 .. y0+n-1 (one address window, ping-pong bands). */
 static int band_buf = 0;
 static void __not_in_flash_func(push_rows)(int y0, int n) {
@@ -326,6 +396,7 @@ static void __not_in_flash_func(push_frame)(void) {
     push_count++;
     frames_shown++;
 }
+#endif
 
 void a8_display_core1_loop(void) {
     if (running) fps_tick();

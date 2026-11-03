@@ -7,6 +7,9 @@
  * PICO_STANDALONE plain Pico 2 dev board: defaults below, overridden by
  *                 ARCADE.INI in the root of the ROM drive (written with the
  *                 defaults, commented, when the drive is first formatted).
+ * PICO_DUO        (with PICO_STANDALONE) Duo Ultimate run standalone, the
+ *                 160x80 ST7735 panel test (PICO_TINY_SCREEN): built-in
+ *                 Duo profile, no ARCADE.INI.
  * (PicoCartReader keeps its fixed PCA9539 expander wiring — not table-driven.)
  *
  * All buttons/directions are active LOW with the internal pull-up (switch to

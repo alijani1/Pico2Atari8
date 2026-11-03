@@ -8,7 +8,7 @@ CORE=../../lib/atari800/src
 F="-O1 -g -w -std=gnu99 -ffunction-sections -fdata-sections -fno-pie -I$CORE -I../../src $EXTRA_CFLAGS"
 mkdir -p obj
 rm -f obj/*.o
-for f in harness.c ../../src/a8_platform.c ../../src/a8_stubs.c $CORE/*.c $CORE/roms/*.c; do
+for f in harness.c ../../src/a8_platform.c ../../src/a8_stubs.c ../../src/a8_scale.c $CORE/*.c $CORE/roms/*.c; do
     gcc $F -c "$f" -o obj/$(basename "$f" .c).o
 done
 gcc obj/*.o -o a8_harness -lm -no-pie -Wl,--gc-sections \

@@ -45,6 +45,24 @@ board_pins_t g_pins = {
     /* backlight          */ 23,
     /* stick_x stick_y    */ 40, 41,
 };
+#elif defined(PICO_DUO)
+/* Duo Ultimate (GameAdapterRGBPico data/duoultimate.json), the 160x80 test
+ * build, standalone: only the audio, amp and backlight pins are used from
+ * here (a8_input.cpp reads the controls itself): PWM audio 37 + amp enable 0,
+ * backlight LEDA on GPIO 5 (as Pico2Arcade's duo_tiny). The rest mirrors
+ * Pico2Arcade's Duo profile for the ROM drive's MENU / START. */
+board_pins_t g_pins = {
+    /* up down left right */ 25, 8, 12, 6,
+    /* fire fire2 fire3 fire4 */ 20, 21, 13, 7,
+    /* fireb fireb2 fireb3 */ 9, 10, -1,
+    /* start coin menu    */ 22, 24, 23,   /* Black = START, White = SELECT */
+    /* nav_up nav_down    */ -1, -1,
+    /* joy_x joy_y        */ -1, -1,
+    /* joy_click          */ -1,
+    /* audio amp          */ 37, 0,
+    /* backlight          */ 5,
+    /* stick_x stick_y    */ -1, -1,
+};
 #else
 /* Plain Pico 2 defaults (also the contents of the default ARCADE.INI). Chosen
  * clear of the display (SPI0: SCLK 6, MOSI 7, CS 5, DC 8, RST 9). */
@@ -160,7 +178,7 @@ static void parse_ini(const char *text, size_t len) {
 #endif
 
 extern "C" void board_pins_load(void) {
-#ifdef PICO_STANDALONE
+#if defined(PICO_STANDALONE) && !defined(PICO_DUO)   /* the Duo keeps its built-in profile */
     uint8_t *ini = nullptr;
     size_t n = 0;
     if (romfs_slurp("/ARCADE.INI", &ini, &n)) {
