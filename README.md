@@ -171,6 +171,29 @@ with their paddles' pot values, the 5-way and every button. The
 size - 16 x 11 px keys over the bottom of the picture - so it reads the
 same in every Scale mode, Crop included.
 
+The Duo's DB9 pins 7 and 8 are switched, not wired: at start-up they are put
+in Atari mode as GameAdapterRGBPico does (pin 7 = +5 V for the paddles,
+pin 8 = ground for the joysticks; `a8_input_init`).
+
+**Done and tested on the Duo:** the picture in all four Scale modes at
+60 fps, the game list, Settings, the controller test, the on-screen
+keyboard, joysticks and paddles on both ports.
+
+**Not done yet:**
+
+- **Not part of the Duo firmware.** This is a standalone test build that
+  replaces the Duo firmware; the Duo Ultimate has no Atari 8-bit slot to
+  chain-boot it from, so there is no handoff (volume, return to the Duo's
+  menu) as on the Quad and Duo 5200. MENU in the game list just restarts it.
+- **Landscape only.** No portrait mode.
+- **No analog stick**, so no paddle stand-in: the Quad's Joy-Con paddle mode
+  (Yellow + click) has nothing to use here. The 5-way could act as a
+  digital paddle (a knob turned at a steady speed).
+- **Small text is hard to read** at 2.7:1 (40-column text, scores): Crop
+  helps when what matters is in lines 36-195.
+- **5200 games** have no 5200 controller to use: paddles stand in for its
+  stick (as on the Quad), the keypad is on Blue.
+
 ## Layout
 
 | Path | What |
