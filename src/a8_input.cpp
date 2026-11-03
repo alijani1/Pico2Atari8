@@ -169,6 +169,18 @@ static uint8_t five_way(void) {
 
 
 void a8_input_init(void) {
+#ifdef PICO_DUO
+    /* The Duo's DB9 pins 7 and 8 are switched (GameAdapterRGBPico main.cpp,
+     * docs/PIN7_PIN8_CONTROL_DESIGN.md); put them in Atari mode, pin 7 =
+     * +5 V (the paddles' supply) and pin 8 = ground (the joysticks' common).
+     * Order matters: the ground switch (GPIO29) opens before the +5 V FETs
+     * (GPIO11 low) turn on, and pin 8's +5 V side (GPIO31) is off before
+     * its ground side (GPIO30) closes - either pair on at once is a short. */
+    digitalWrite(29, LOW);  pinMode(29, OUTPUT); digitalWrite(29, LOW);
+    digitalWrite(11, LOW);  pinMode(11, OUTPUT); digitalWrite(11, LOW);
+    digitalWrite(31, LOW);  pinMode(31, OUTPUT); digitalWrite(31, LOW);
+    pinMode(30, OUTPUT);    digitalWrite(30, HIGH);
+#endif
 #ifdef PICO_5200
     ctl5200_init();
 #else
