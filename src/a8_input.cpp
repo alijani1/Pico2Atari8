@@ -261,8 +261,8 @@ static const int MENU_EDGE = 0;
 
 /* ---- in a game ------------------------------------------------------- */
 
-static uint32_t menu_since = 0;
-static bool menu_seen_up = false;
+static uint32_t menu_since = 0;           /* when MENU went down (if menu_down) */
+static bool menu_down = false, menu_seen_up = false;
 
 static bool osk_running = false;
 
@@ -445,18 +445,21 @@ bool a8_input_frame(void) {
     bool m = low(PIN_MENU);
     if (!m) {
 #ifdef PICO_TINY_SCREEN
-        if (menu_seen_up && menu_since && millis() - menu_since < 1000) {
+        if (menu_seen_up && menu_down && millis() - menu_since < 1000) {
             a8_settings_next_scale();
             a8_display_toast(a8_scale_names[a8_settings.scale]);
             Serial.printf("[input] MENU tap (%lu ms): scale %s\n",
                           (unsigned long)(millis() - menu_since), a8_scale_names[a8_settings.scale]);
         }
 #endif
-        menu_seen_up = true; menu_since = 0; return false;
+        menu_seen_up = true; menu_down = false; return false;
     }
     if (!menu_seen_up) return false;
     uint32_t now = millis();
-    if (!menu_since) menu_since = now | 1;
+    /* (menu_since used to be `now | 1`, non-zero as the "down" mark: on an
+     * even millisecond that is 1 ms ahead, now - menu_since wrapped to
+     * 4294967295 and a tap left the game) */
+    if (!menu_down) { menu_down = true; menu_since = now; }
     if (now - menu_since < 1000) return false;
     Serial.printf("[input] MENU held %lu ms: leaving the game\n", (unsigned long)(now - menu_since));
     return true;
