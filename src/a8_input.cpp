@@ -32,7 +32,8 @@
  * Joy-Con:
  *
  *   Ports 1-2 (DB9)   Atari joysticks 1-2; paddles (pico_paddles.cpp)
- *   5-way stick       also joystick 1; its press = RETURN
+ *   5-way stick       also joystick 1; its press = fire 1 (as the Quad's
+ *                     Joy-Con click; RETURN is on the on-screen keyboard)
  *   Red               fire 1
  *   Black / White     START / SELECT
  *   Green / Yellow    OPTION / SPACE;  Blue  on-screen keyboard
@@ -334,6 +335,9 @@ bool a8_input_frame(void) {
             in.pot[1] = jy != A8_POT_NONE ? jy : 114;
         }
         if (low(PIN_RED) || low(PIN_CLICK)) in.trig[0] = 1;
+#ifdef PICO_DUO
+        if (low(PIN_RETURN)) in.trig[0] = 1;              /* the 5-way's press: bottom fire too */
+#endif
         if (low(PIN_GREEN)) in.shift = 1;                 /* top fire */
         if (low(PIN_YELLOW)) in.key = AKEY_5200_ASTERISK;
         if (low(PIN_SELECT)) in.key = AKEY_5200_PAUSE;
@@ -380,8 +384,14 @@ bool a8_input_frame(void) {
         in.option = low(PIN_GREEN);
         if (yellow && !combo) in.key = AKEY_SPACE;
 
-        /* Right side button (Duo: the 5-way's press): RETURN. */
+        /* Right side button (Duo: the 5-way's press): RETURN. On the Duo the
+         * press is fire 1 instead — a press on a stick is expected to fire
+         * (it was RETURN, which pauses many games); RETURN is on the keyboard. */
+#ifdef PICO_DUO
+        if (low(PIN_RETURN)) in.trig[0] = 1;
+#else
         if (low(PIN_RETURN)) in.key = AKEY_RETURN;
+#endif
     }
 
     /* Blue: the on-screen keyboard, open / close on each press. (It used to

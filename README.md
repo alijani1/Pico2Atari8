@@ -155,7 +155,7 @@ while the next is shrunk. The PC harness renders the same thing:
 | Control | In a game |
 |---|---|
 | Ports 1–2 | Atari joysticks 1–2; paddles |
-| 5-way | also joystick 1 (press: RETURN) |
+| 5-way | also joystick 1 (press: fire; RETURN is on the on-screen keyboard) |
 | Red | fire |
 | Black / White | START / SELECT |
 | Green / Yellow | OPTION / SPACE |
