@@ -66,6 +66,28 @@ and on, like the switch on a real drive: let the game load, type DRV
 | Paddle sensitivity | (Quad) how much of a paddle's turn spans the game's whole range: Very low = all of it, Low 75 %, Medium 50 % (default, about what Atari games expect), High 40 %, Very high 30 % |
 | Controller test | every control live: the 5200 controllers' sticks (as the pot value the game gets, plus the raw counts and the range learnt), Fire A / B and keys; the Quad's joystick ports, paddles on ports 1–2 (pot value, raw counts, range, buttons) and side buttons; the Joy-Con; the device buttons. MENU goes back |
 
+## Game Settings
+
+Each game can have its own button setup. Open **Game Settings** from the
+game list (highlight the game, press **Green**) or during a game (**Blue**
+for the on-screen keyboard, then the **gear** key, which replaced DRV; the
+game waits). Changes are remembered for that game (up to 300 games).
+
+| Row | Choices |
+|---|---|
+| Red, Green, Yellow | left / right: Fire, OPTION, SELECT, START, SPACE, RETURN, ESC, None; FIRE: pick any key from a keyboard. A 5200 game: Bottom fire, Top fire, `*`, `#`, START, PAUSE, RESET, None, or any keypad key |
+| Thumbstick click (Duo: 5-way press) | as above |
+| Left / Right side button (Quad) | as above |
+| Thumbstick | Joystick / Paddle (400/800/XL games; Yellow + click in a game switches it too) |
+| Disk drive 1 | On / Off, during a game (was the keyboard's DRV key) |
+| Reset to defaults | the buttons and the thumbstick back to the table below |
+
+Blue, START, SELECT, MENU and the sticks always stay as they are. Values
+that differ from the defaults show in orange. A game that isn't on its
+defaults shows **PADDLE MODE** or **CUSTOM KEYS** for a moment when it
+starts. Red and the click always type on the on-screen keyboard, whatever
+they're mapped to.
+
 ## Atari 5200
 
 A 5200 game starts on an emulated 5200 (16 KB, NTSC) on either device. Its
@@ -109,14 +131,14 @@ Pico2Arcade, comes with the Quad release, and shares its ARCADE ROMS drive.
 |---|---|---|
 | Ports 1–4 | port 1: move / fire = play | Atari joysticks 1–4 (on an 800XL only 1–2 exist: start four-player games such as M.U.L.E. with SELECT) |
 | Joy-Con stick / click | move / play | joystick 1 / fire 1 |
-| Yellow + click | | the Joy-Con as **paddle 1** instead of joystick 1, remembered for that game (press again to switch back): its left / right is the knob (Settings > Paddle sensitivity), Red / click the paddle's button. Real paddles on port 1 take over |
+| Yellow + click | | the Joy-Con as **paddle 1** instead of joystick 1, remembered for that game (press again to switch back; also Game Settings > Thumbstick): its left / right is the knob (Settings > Paddle sensitivity), Red / click the paddle's button. Real paddles on port 1 take over |
 | Paddles (ports 1–2) | | the four paddles (pots 0–3), for Kaboom!, Super Breakout and the like; plugging them in shows PADDLES 1 / 2 IN. Turn each one fully right once so it learns its end; 1–228 spans about half the turn, as on a real Atari (Settings > Paddle sensitivity) |
 | Red | play | fire 1 |
-| Blue | | on-screen keyboard: press to open / close - the game pauses, fire types a key (Settings > Keyboard) |
-| Yellow | | SPACE |
-| Green | | OPTION |
+| Blue | | on-screen keyboard: press to open / close - the game pauses, fire types a key (Settings > Keyboard); its gear key opens Game Settings |
+| Yellow | | SPACE (Game Settings can change it) |
+| Green | this game's Game Settings | OPTION (Game Settings can change it) |
 | START / SELECT | START = play; SELECT = play on the other machine (400/800: four joysticks, OS-B) | START / SELECT |
-| Side buttons | up / down | right: RETURN |
+| Side buttons | up / down | right: RETURN, left: nothing (Game Settings can change both) |
 | MENU | back to the Quad | hold 1 s: back to the game list |
 
 ## Building

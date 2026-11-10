@@ -431,6 +431,12 @@ int a8_toggle_drive1(void)
 	return FALSE;
 }
 
+/* Disk drive 1 answers (not switched off by a8_toggle_drive1). */
+int a8_drive1_is_on(void)
+{
+	return SIO_drive_status[0] != SIO_OFF;
+}
+
 /* Raw cartridge images (.rom/.bin) carry no type: pick the commonest one
  * for the size (KB). The .car format names the type and never gets here. */
 int a8_guess_cart_type(int kb)

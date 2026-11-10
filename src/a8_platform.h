@@ -52,6 +52,7 @@ int  a8_car_is_5200(const uint8_t *header);
 void a8_frame(void);                 /* keyboard, emulate one frame, show it */
 void a8_silent_frame(void);          /* paused: a frame's time of silence */
 int  a8_toggle_drive1(void);         /* drive 1 off / back on; true = now on */
+int  a8_drive1_is_on(void);          /* drive 1 answers (Game Settings) */
 /* Set by a8_frame when the 6502 hit a crash opcode. a8_handle_crash then
  * restarts the game (path) on an 800 if it was on the XL: true if it did,
  * false if it was on the 800 already. */

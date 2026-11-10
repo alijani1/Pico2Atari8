@@ -9,7 +9,8 @@
  * "ROM Drive (USB)",
  * which reboots into USB drive mode to copy games over (pico_drive.cpp).
  * Up/down scroll, fire / START picks (an 800XL), SELECT picks as a
- * 400/800 (four joysticks, OS-B), MENU goes back to the Quad.
+ * 400/800 (four joysticks, OS-B), MENU goes back to the Quad. Green on a
+ * game opens its Game Settings (a8_gamecfg.cpp).
  */
 #include <Arduino.h>
 #include <strings.h>
@@ -20,6 +21,7 @@
 #include "pico_handoff.h"
 #include "pico_drive.h"
 #include "a8_settings.h"
+#include "a8_gamecfg.h"
 #include "a8_unzip_core.h"
 #include "a8_platform.h"
 
@@ -186,8 +188,8 @@ static void draw_frame(void) {
     tft.drawFastHLine(0, 25, 320, COL_HINT);
     tft.setTextColor(COL_HINT, COL_BG);
     tft.setCursor(8, 222);
-    tft.print(a8_settings.machine_800 ? "FIRE: play   SELECT: as 800XL   MENU: back"
-                                      : "FIRE: play   SELECT: as 400/800   MENU: back");
+    tft.print(a8_settings.machine_800 ? "FIRE: play   SELECT: 800XL   GREEN: settings"
+                                      : "FIRE: play   SELECT: 400/800   GREEN: settings");
 }
 
 static void draw_row(int idx, int top, bool sel) {
@@ -289,7 +291,7 @@ const char *a8_menu_pick(void) {
     /* Wait for everything to be released (the press that started us). */
     for (uint32_t t0 = millis(); a8_input_menu() && millis() - t0 < 1000; ) delay(10);
 
-    uint8_t prev = A8M_OK | A8M_BACK | A8M_ALT;   /* a button still down isn't a new press */
+    uint8_t prev = A8M_OK | A8M_BACK | A8M_ALT | A8M_GREEN;   /* a button still down isn't a new press */
     uint32_t held_since = 0, last_repeat = 0;
     /* A self-centring stick overshoots when let go: UP released can read as
      * a short DOWN. A new press of the opposite direction within this long
@@ -338,6 +340,17 @@ const char *a8_menu_pick(void) {
                 draw_row(old_sel, top, false);
                 draw_row(sel, top, true);
                 draw_counter(sel);
+            }
+            if ((pressed & A8M_GREEN) && sel != settings_row && sel != drive_row) {
+                /* Green: this game's Game Settings (saved now: no game runs) */
+                while (a8_input_menu() & A8M_GREEN) delay(10);
+                a8_settings_set_game(games[sel].path);
+                a8_gamecfg_screen(games[sel].name, strcmp(games[sel].kind, "5200") == 0, false);
+                a8_settings_save_game();
+                draw_frame();
+                draw_list(top, sel);
+                prev = 0xFF;
+                continue;
             }
             if (pressed & (A8M_OK | A8M_ALT)) {
                 bool as_800 = (pressed & A8M_ALT) != 0;

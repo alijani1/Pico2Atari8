@@ -27,6 +27,7 @@
 #include "a8_zip.h"
 #include "a8_flash.h"
 #include "a8_settings.h"
+#include "a8_gamecfg.h"
 #include "a8_version.h"
 
 extern "C" {
@@ -236,12 +237,34 @@ void setup() {
     g_emulating = true;
 }
 
+/* The game's name for Game Settings: its file name without the folder or
+ * the extension. */
+static const char *game_title(void) {
+    static char t[48];
+    const char *b = strrchr(game_file, '/');
+    b = b ? b + 1 : game_file;
+    strncpy(t, b, sizeof(t) - 1);
+    t[sizeof(t) - 1] = 0;
+    char *dot = strrchr(t, '.');
+    if (dot && dot != t) *dot = 0;
+    return t;
+}
+
 void loop() {
+    static bool first = true;
+    if (first) {
+        first = false;
+        /* not on its defaults: say so (the toast has 11 characters) */
+        if (!a8_is_5200() && a8_settings_game_paddle() && a8_input_has_joycon())
+            a8_display_toast("PADDLE MODE");
+        else if (a8_settings_game_buttons_custom(a8_is_5200()))
+            a8_display_toast("CUSTOM KEYS");
+    }
     if (a8_input_frame()) {
         /* MENU held: back to the game list */
         pico_audio_amp_off();
         a8_display_stop();
-        a8_settings_save_game();       /* Joy-Con mode changed: after the display stops */
+        a8_settings_save_game();       /* Joy-Con mode / Game Settings changed: after the display stops */
         handoff_volume_write(pico_audio_get_volume_pct());
         handoff_relaunch_arcade();
     }
@@ -254,6 +277,18 @@ void loop() {
             show_message("This game crashed.", "Hold MENU for the list.", true);
         }
         delay(20);
+        return;
+    }
+    if (a8_input_take_game_settings()) {
+        /* the keyboard's gear key: Game Settings over the paused game;
+         * saved when the game ends (the display's buffer is the sector's) */
+        pico_audio_amp_off();
+        a8_display_stop();
+        pico_audio_suspend();
+        a8_gamecfg_screen(game_title(), a8_is_5200(), true);
+        pico_audio_resume();
+        a8_display_start();
+        pico_audio_amp_on();
         return;
     }
     if (a8_input_osk_paused()) {

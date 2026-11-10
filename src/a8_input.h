@@ -13,6 +13,7 @@
 #define A8M_OK    0x10
 #define A8M_BACK  0x20
 #define A8M_ALT   0x40     /* SELECT: start the game as a 400/800 */
+#define A8M_GREEN 0x80     /* Green: the game's Game Settings (a8_gamecfg.cpp) */
 
 void    a8_input_init(void);
 /* Fill a8_input for the next frame. True = MENU held: leave the game. */
@@ -20,6 +21,12 @@ bool    a8_input_frame(void);
 /* The on-screen keyboard is open and no key is being typed: hold the game. */
 bool    a8_input_osk_paused(void);
 uint8_t a8_input_menu(void);
+
+/* The on-screen keyboard's gear key was picked: open Game Settings (once). */
+bool    a8_input_take_game_settings(void);
+/* Game Settings: this device has the button (A8_GB_*) / a Joy-Con. */
+bool    a8_input_has_slot(int slot);
+bool    a8_input_has_joycon(void);
 
 /* Controller test (a8_ctltest.cpp): the Joy-Con's raw reading, its centre
  * and the range seen so far, and as a 5200 pot (A8_POT_NONE at rest); the

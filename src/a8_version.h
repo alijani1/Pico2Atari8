@@ -3,6 +3,6 @@
 #ifndef A8_VERSION_H
 #define A8_VERSION_H
 
-#define A8_VERSION "2.0"
+#define A8_VERSION "2.1"
 
 #endif

@@ -38,6 +38,28 @@ void a8_settings_set_game(const char *path);   /* the game being started */
 bool a8_settings_game_paddle(void);
 void a8_settings_set_game_paddle(bool on);     /* kept in RAM until ... */
 void a8_settings_save_game(void);              /* ... the game ends (if it changed) */
+
+/* Game Settings (a8_gamecfg.cpp), per game like the Joy-Con mode: what
+ * each device button does. Blue, START, SELECT, MENU and the sticks stay
+ * fixed. The "click" slot is the Joy-Con's click, or the Duo's 5-way press;
+ * the side buttons are the Quad's. */
+enum { A8_GB_RED, A8_GB_GREEN, A8_GB_YELLOW, A8_GB_CLICK, A8_GB_SIDE_L, A8_GB_SIDE_R,
+       A8_GB_COUNT };
+/* A button's action: an AKEY_* key with no SHIFT / CTRL (0x00 - 0x3F; on a
+ * 5200 the keypad's AKEY_5200_*), or one of these. */
+#define A8_ACT_NONE     0xF0
+#define A8_ACT_FIRE     0xF1      /* joystick 1's fire (paddle 1's button in paddle mode;
+                                     a 5200's bottom fire) */
+#define A8_ACT_TOP_FIRE 0xF2      /* a 5200's top fire */
+#define A8_ACT_START    0xF3      /* 400/800/XL console keys */
+#define A8_ACT_SELECT   0xF4
+#define A8_ACT_OPTION   0xF5
+#define A8_ACT_DEFAULT  0xFF      /* stored: the button's default */
+uint8_t a8_settings_game_action(int slot, bool is5200);     /* never A8_ACT_DEFAULT */
+uint8_t a8_settings_default_action(int slot, bool is5200);
+void    a8_settings_set_game_action(int slot, bool is5200, uint8_t act);
+bool    a8_settings_game_buttons_custom(bool is5200);       /* any button not on its default */
+void    a8_settings_game_reset(void);                       /* buttons and Joy-Con back to defaults */
 void a8_settings_next_scale(void);             /* Scale: the next mode (saved as above) */
 
 #endif

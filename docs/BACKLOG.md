@@ -2,7 +2,12 @@
 
 Ideas parked for later, newest first.
 
-## Joy-Con paddle mode: make it discoverable (parked 2026-11-10)
+## Joy-Con paddle mode: make it discoverable (parked 2026-11-10) - DONE in 2.1
+
+Done by Game Settings (src/a8_gamecfg.cpp): the Thumbstick row (Joystick /
+Paddle) and the PADDLE MODE toast at game start. Still open: point 1, the
+Quad manual (GameAdapterRGBPico) - done together with the Game Settings
+section there.
 
 The Joy-Con already switches between joystick 1 and paddle 1 at any time in an
 800 game: **Yellow + thumbstick click** (src/a8_input.cpp, commit 9562383). The

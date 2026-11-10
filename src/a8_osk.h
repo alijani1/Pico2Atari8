@@ -5,6 +5,7 @@
 #define A8_OSK_ROWS 5           /* at most (the 5200 keypad has 4) */
 #define A8_OSK_COLS 10          /* grid columns; a key spans 1 or more */
 #define A8_OSK_DRIVE (-100)     /* the DRV "key": disk drive 1 off / on */
+#define A8_OSK_GAME  (-101)     /* the gear "key": Game Settings (DRV is there now) */
 
 struct A8Key {
     const char *label;
@@ -19,6 +20,10 @@ void a8_osk_move(int dx, int dy);     /* -1 / 0 / +1, wraps round */
 int  a8_osk_key(void);                /* AKEY_* under the cursor */
 int  a8_osk_rows(void);               /* rows of the layout open now */
 const A8Key *a8_osk_row(int r, int *count);
+/* A layout whether open or not (Game Settings' key picker): the
+ * keyboard, or the 5200 keypad. */
+int  a8_osk_layout_rows(bool keypad);
+const A8Key *a8_osk_layout_row(bool keypad, int r, int *count);
 void a8_osk_cursor(int *row, int *idx);
 
 #endif

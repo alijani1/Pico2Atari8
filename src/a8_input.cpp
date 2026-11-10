@@ -101,6 +101,17 @@ static const int8_t PIN_5WAY[4] = { -1, -1, -1, -1 };
 static const int PIN_RETURN = PIN_SIDE_DOWN;                         /* the right side button */
 #endif
 
+/* Game Settings' buttons (A8_GB_*, a8_settings.h): what each one does is
+ * per game (a8_settings_game_action). The "click" slot is the Duo's 5-way
+ * press (no Joy-Con there); the right side button is the Quad's RETURN. */
+#ifdef PICO_DUO
+static const int PIN_SLOT_CLICK = PIN_RETURN;
+#else
+static const int PIN_SLOT_CLICK = PIN_CLICK;
+#endif
+static const int SLOT_PINS[A8_GB_COUNT] = { PIN_RED, PIN_GREEN, PIN_YELLOW, PIN_SLOT_CLICK,
+                                            PIN_SIDE_UP, PIN_SIDE_DOWN };
+
 /* ---- Joy-Con ---------------------------------------------------------
  * The centre is assumed at the first reading (averaged at start-up); as the
  * stick moves, the lowest and highest readings are kept, and once it has
@@ -278,6 +289,41 @@ static uint32_t menu_since = 0;           /* when MENU went down (if menu_down) 
 static bool menu_down = false, menu_seen_up = false;
 
 static bool osk_running = false;
+static bool game_cfg_wanted = false;      /* the keyboard's gear key: Game Settings */
+
+/* The device buttons held now, through the game's Game Settings. Yellow and
+ * the click count for nothing while they're the Joy-Con switch (skip_yc). */
+struct Mapped { bool fire, top, start, select, option; int key; };
+static Mapped mapped_buttons(bool is5200, bool skip_yc) {
+    Mapped m = { false, false, false, false, false, -1 };
+    for (int slot = 0; slot < A8_GB_COUNT; slot++) {
+        if (!low(SLOT_PINS[slot])) continue;
+        if (skip_yc && (slot == A8_GB_YELLOW || slot == A8_GB_CLICK)) continue;
+        uint8_t a = a8_settings_game_action(slot, is5200);
+        switch (a) {
+        case A8_ACT_NONE:     break;
+        case A8_ACT_FIRE:     m.fire = true; break;
+        case A8_ACT_TOP_FIRE: m.top = true; break;
+        case A8_ACT_START:    m.start = true; break;
+        case A8_ACT_SELECT:   m.select = true; break;
+        case A8_ACT_OPTION:   m.option = true; break;
+        default:              if (a < 0x40) m.key = a; break;   /* an AKEY_* key */
+        }
+    }
+    return m;
+}
+
+bool a8_input_take_game_settings(void) {
+    bool w = game_cfg_wanted;
+    game_cfg_wanted = false;
+    return w;
+}
+
+bool a8_input_has_slot(int slot) {
+    return slot >= 0 && slot < A8_GB_COUNT && SLOT_PINS[slot] >= 0;
+}
+
+bool a8_input_has_joycon(void) { return PIN_JOY_X >= 0; }
 
 bool a8_input_osk_paused(void) {
     return a8_osk_is_open() && !osk_running && a8_settings.keyboard != A8_KBD_KEEP_RUNNING;
@@ -334,12 +380,12 @@ bool a8_input_frame(void) {
             in.pot[0] = jx != A8_POT_NONE ? jx : 114;
             in.pot[1] = jy != A8_POT_NONE ? jy : 114;
         }
-        if (low(PIN_RED) || low(PIN_CLICK)) in.trig[0] = 1;
-#ifdef PICO_DUO
-        if (low(PIN_RETURN)) in.trig[0] = 1;              /* the 5-way's press: bottom fire too */
-#endif
-        if (low(PIN_GREEN)) in.shift = 1;                 /* top fire */
-        if (low(PIN_YELLOW)) in.key = AKEY_5200_ASTERISK;
+        /* Red / click (Duo: the 5-way's press): bottom fire; Green: top
+         * fire; Yellow: * - unless the game's Game Settings say otherwise */
+        Mapped m = mapped_buttons(true, false);
+        if (m.fire) in.trig[0] = 1;
+        if (m.top) in.shift = 1;
+        if (m.key >= 0) in.key = m.key;
         if (low(PIN_SELECT)) in.key = AKEY_5200_PAUSE;
         if (low(PIN_START))  in.key = AKEY_5200_START;
     } else {
@@ -361,7 +407,7 @@ bool a8_input_frame(void) {
         if (yellow && click && !combo) {
             bool on = !a8_settings_game_paddle();
             a8_settings_set_game_paddle(on);
-            a8_display_toast(on ? "JOY-CON: PADDLE" : "JOY-CON: JOYSTICK");
+            a8_display_toast(on ? "PADDLE" : "JOYSTICK");   /* (11 characters at most) */
         }
         if (yellow && click) combo = true;
         else if (!yellow && !click) combo = false;
@@ -371,7 +417,11 @@ bool a8_input_frame(void) {
 #endif
         uint8_t joy = joycon_read() | five_way();
         nav = in.stick[0] | joy;
-        bool fire = !combo && (low(PIN_RED) || click);
+        /* Red / click: fire; Green: OPTION; Yellow: SPACE; right side
+         * button: RETURN (Duo: the 5-way's press is fire) - unless the
+         * game's Game Settings say otherwise */
+        Mapped m = mapped_buttons(false, combo);
+        bool fire = m.fire;
         if (joy_paddle && !a8_osk_is_open()) {
             in.pot[0] = joycon_paddle();
             if (fire) in.stick[0] |= A8_LEFT;           /* paddle 1's button */
@@ -379,19 +429,15 @@ bool a8_input_frame(void) {
             in.stick[0] |= joy;
             if (fire) in.trig[0] = 1;
         }
-        in.start  |= low(PIN_START);
-        in.select = low(PIN_SELECT);
-        in.option = low(PIN_GREEN);
-        if (yellow && !combo) in.key = AKEY_SPACE;
+        in.start  |= low(PIN_START) || m.start;
+        in.select = low(PIN_SELECT) || m.select;
+        in.option = m.option;
+        if (m.key >= 0) in.key = m.key;
 
         /* Right side button (Duo: the 5-way's press): RETURN. On the Duo the
          * press is fire 1 instead — a press on a stick is expected to fire
          * (it was RETURN, which pauses many games); RETURN is on the keyboard. */
-#ifdef PICO_DUO
-        if (low(PIN_RETURN)) in.trig[0] = 1;
-#else
-        if (low(PIN_RETURN)) in.key = AKEY_RETURN;
-#endif
+        /* (Both are now the defaults of Game Settings' slots, mapped above.) */
     }
 
     /* Blue: the on-screen keyboard, open / close on each press. (It used to
@@ -409,6 +455,9 @@ bool a8_input_frame(void) {
     /* The keyboard takes joystick 1 and its fire: the stick moves the
      * cursor (auto-repeat), fire types the key (held while fire is). */
     if (a8_osk_is_open()) {
+        /* Red and the click type a key whatever the game maps them to
+         * (Game Settings), so a remapped Red can't lock the keyboard */
+        if (low(PIN_RED) || low(PIN_CLICK) || low(PIN_SLOT_CLICK)) in.trig[0] = 1;
         static uint8_t dirs_was = 0;
         static uint32_t repeat_at = 0;
         uint8_t dirs = nav;
@@ -428,12 +477,18 @@ bool a8_input_frame(void) {
         bool fire_edge = in.trig[0] && !fire_was;
         fire_was = in.trig[0];
         if (fire_edge && a8_osk_key() == A8_OSK_DRIVE) {    /* DRV: not an Atari key */
+            /* (no longer on the keyboard: Game Settings' Disk drive 1) */
             bool on = a8_toggle_drive1();
             a8_display_toast(on ? "DRIVE ON" : "DRIVE OFF");
             in.trig[0] = 0;
             if (a8_settings.keyboard == A8_KBD_ONE_KEY) a8_osk_close();
         }
-        if (key < 0 && in.trig[0] && a8_osk_key() != A8_OSK_DRIVE) {   /* a new key */
+        if (fire_edge && a8_osk_key() == A8_OSK_GAME) {     /* the gear: Game Settings */
+            game_cfg_wanted = true;                         /* main.cpp opens it */
+            in.trig[0] = 0;
+            a8_osk_close();
+        }
+        if (key < 0 && in.trig[0] && a8_osk_key() >= 0) {  /* a new key (not DRV / the gear) */
             key = a8_osk_key();
             down_left = KEY_DOWN_FRAMES;
             up_left = KEY_UP_FRAMES;
@@ -504,6 +559,7 @@ uint8_t a8_input_menu(void) {
         (PIN_RETURN != PIN_SIDE_DOWN && low(PIN_RETURN))) b |= A8M_OK;    /* Duo: the 5-way's press */
     if (low(PIN_MENU)) b |= A8M_BACK;
     if (low(PIN_SELECT)) b |= A8M_ALT;
+    if (low(PIN_GREEN)) b |= A8M_GREEN;
     return b;
 }
 

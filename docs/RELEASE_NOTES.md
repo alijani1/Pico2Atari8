@@ -1,5 +1,25 @@
 # Pico2Atari8 release notes
 
+## 2.1 (in progress)
+
+**Game Settings: each game remembers its own buttons**
+- **A Game Settings screen for every game.** Open it from the game list
+  (highlight a game and press **Green**) or during a game (**Blue**, then
+  the new **gear** key on the on-screen keyboard; the game waits).
+- **Map Red, Green, Yellow, the thumbstick click and the Quad's left and
+  right side buttons** to Fire, OPTION, SELECT, START, SPACE, RETURN, ESC,
+  None, or any key on the keyboard. In a 5200 game: bottom fire, top fire
+  or any keypad key. The Duo Ultimate maps its 5-way press instead of the
+  click. Blue, START, SELECT, MENU and the sticks stay fixed.
+- **Thumbstick: Joystick / Paddle** is now a setting you can see, per game.
+  Yellow + click still switches it during play.
+- **Disk drive 1 On / Off** moved here from the keyboard's DRV key.
+- A game that isn't on its defaults shows **PADDLE MODE** or **CUSTOM KEYS**
+  for a moment when it starts. Up to 300 games are remembered; games set to
+  use the thumbstick as a paddle in 2.0 keep that setting.
+- The Yellow + click message now reads **PADDLE** / **JOYSTICK** (it was cut
+  short before).
+
 ## 2.0 (31 October 2026)
 
 The first numbered release: Atari 400/800/XL and 5200 emulation (atari800)
