@@ -276,7 +276,10 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
   between the Fruit Jam's codec and the display's speakers
   (`A8_SOUND_HDMI=1`: HDMI from start-up when nothing is saved). The
   HDMI signal always carries sound (silent while the Fruit Jam plays it),
-  so switching doesn't restart the picture - a display lost it over that. 44100 Hz, exactly
+  so switching doesn't restart the picture - a display lost it over that.
+- **Menu music** (`A8_MENU_MUSIC`, on in the env): the Game Adapter's menu
+  tune loops in the game list, Settings and Game Settings, through the
+  game's own sound path - Volume and Sound output are heard as they change. 44100 Hz, exactly
   twice the emulator's rate (each sample sent twice, the first the mean
   with the one before). Core 1 encodes the HDMI audio packets from a RAM
   ring that paces the emulator as the I2S one does; only one output plays

@@ -367,6 +367,56 @@ extern "C" int pico_audio_get_sound_output(void) {
     return g_output_mode;
 }
 
+#ifdef A8_MENU_MUSIC
+/* The menus' music: the Game Adapter's menu tune (GameAdapterRGBPico's
+ * include/sounds/menu16s8.h - 16 kHz signed 8-bit mono, a 7.8 s loop, 122
+ * KB of flash), through the game's own path - so Volume and Sound output
+ * are heard as they change. Fed from the menus' input polling
+ * (a8_input_menu, every 10 ms or so) as far as the ring has room; 16000 Hz
+ * to the output's rate by linear interpolation, at half scale (background,
+ * as the Adapter plays it quieter than its volume setting). */
+#include "sounds/menu16s8.h"
+static bool     g_music = false;
+static uint32_t g_music_idx = 0, g_music_frac = 0;     /* where in menu16s8: sample, 1/65536 */
+static const uint32_t MUSIC_LEN = sizeof(menu16s8);
+
+/* From setup: on (the sound's rate) before the game list, off (0) once a
+ * game is picked. */
+extern "C" void pico_audio_menu_music(int sample_rate) {
+    if (sample_rate) {
+        if (!g_started) pico_audio_init(sample_rate);
+        g_music_idx = g_music_frac = 0;
+        g_music = true;
+        pico_audio_amp_on();
+    } else if (g_music) {
+        g_music = false;
+        pico_audio_amp_off();            /* the game unmutes when it runs */
+    }
+}
+
+extern "C" void pico_audio_menu_music_poll(void) {
+    if (!g_music) return;
+    pico_audio_poll();                   /* the headphone jack, as in a game */
+    const uint32_t step = (uint32_t)((16000ull << 16) / (uint32_t)g_sample_rate);   /* < 65536 */
+    int16_t buf[128];
+    for (int chunk = 0; chunk < 8; chunk++) {
+        uint32_t idx = g_music_idx, frac = g_music_frac;
+        for (int i = 0; i < 128; i++) {
+            int a = menu16s8[idx], b = menu16s8[idx + 1 < MUSIC_LEN ? idx + 1 : 0];
+            buf[i] = (int16_t)((a * 65536 + (b - a) * (int)frac) >> 9);   /* 8-bit << 7: half scale */
+            frac += step;
+            if (frac >= 65536) { frac -= 65536; if (++idx >= MUSIC_LEN) idx = 0; }
+        }
+        size_t n = pico_audio_push_s16(buf, sizeof(buf)) / 2;
+        for (size_t i = 0; i < n; i++) {     /* past what was taken (the rest: next time) */
+            g_music_frac += step;
+            if (g_music_frac >= 65536) { g_music_frac -= 65536; if (++g_music_idx >= MUSIC_LEN) g_music_idx = 0; }
+        }
+        if (n < 128) break;
+    }
+}
+#endif
+
 /* The serial monitor's sound keys (a8_input.cpp passes on the keys it
  * doesn't use): + / - volume, A H S B output (auto, headphones, speaker,
  * both), I the report now. */

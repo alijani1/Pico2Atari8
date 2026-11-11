@@ -729,6 +729,9 @@ static const int MENU_JOY_DEAD_X = 65;     /* % of the half-range (30 in a game)
  * serial monitor's keys. */
 uint8_t a8_input_menu(void) {
     serial_poll();
+#ifdef A8_MENU_MUSIC
+    pico_audio_menu_music_poll();          /* (every menu screen polls this: the music's feed) */
+#endif
     uint8_t b = 0;
     static bool m_down = false;
     static uint32_t m_since = 0, up_until = 0;

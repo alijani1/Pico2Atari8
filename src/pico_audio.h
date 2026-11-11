@@ -66,6 +66,13 @@ void    pico_audio_key(int c);
  * (A8_HDMI_AUDIO). Any time, before pico_audio_init too. */
 void    pico_audio_set_sound_output(int o);
 int     pico_audio_get_sound_output(void);
+#ifdef A8_MENU_MUSIC
+/* The menus' music: on (the sound's rate: starts the sound) before the
+ * game list, off (0) once a game is picked; poll: from the menus' input
+ * polling (a8_input_menu). */
+void    pico_audio_menu_music(int sample_rate);
+void    pico_audio_menu_music_poll(void);
+#endif
 #ifdef A8_HDMI_AUDIO
 /* Sound over HDMI instead of the codec (serial key O toggles). */
 void    pico_audio_set_hdmi(int on);
