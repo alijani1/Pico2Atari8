@@ -32,6 +32,14 @@ uint32_t a8_display_hdmi_audio_gaps(void);
 #endif
 /* Step to the next HDMI video mode (serial monitor key V). */
 void a8_display_next_hdmi_mode(void);
+/* Settings > Screen mode: the modes (0 .. modes - 1), their short names,
+ * the build's default, the one running; set: before a8_display_init the
+ * one it starts in, after it a switch (waits; false if it didn't start). */
+int  a8_display_hdmi_modes(void);
+int  a8_display_hdmi_mode_default(void);
+int  a8_display_hdmi_mode(void);
+const char *a8_display_hdmi_mode_name(int m);
+bool a8_display_set_hdmi_mode(int m);
 #endif
 
 #endif

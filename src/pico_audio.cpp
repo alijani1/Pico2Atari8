@@ -339,6 +339,29 @@ extern "C" void pico_audio_set_output(int mode) {
     Serial.printf("[audio] output: %s (%s)\n", output_name(o), g_output_mode ? "fixed" : "auto");
 }
 
+/* Settings > Sound output (a8_settings.cpp): 0 - 3 the codec's outputs as
+ * pico_audio_set_output, 4 HDMI. Before pico_audio_init (the menu, no
+ * sound yet) it is kept for it - HDMI's is the display's (it starts with
+ * or without sound). */
+extern "C" void pico_audio_set_sound_output(int o) {
+#ifdef A8_HDMI_AUDIO
+    if (o < 0 || o > 4) o = 0;
+#else
+    if (o < 0 || o > 3) o = 0;
+#endif
+    if (o < 4 && o != g_output_mode) pico_audio_set_output(o);
+#ifdef A8_HDMI_AUDIO
+    if (g_started) pico_audio_set_hdmi(o == 4);
+    else a8_display_set_hdmi_audio(o == 4);
+#endif
+}
+extern "C" int pico_audio_get_sound_output(void) {
+#ifdef A8_HDMI_AUDIO
+    if (g_started ? g_hdmi : a8_display_hdmi_audio()) return 4;
+#endif
+    return g_output_mode;
+}
+
 /* The serial monitor's sound keys (a8_input.cpp passes on the keys it
  * doesn't use): + / - volume, A H S B output (auto, headphones, speaker,
  * both), I the report now. */

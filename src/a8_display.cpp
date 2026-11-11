@@ -694,15 +694,18 @@ static const uint8_t HDMI_BLACK = 0x00;                 /* Atari palette: black 
  * height, black side bands); A8_HDMI_MODE picks another at build time, and
  * the serial monitor's V key steps through them.
  * TODO: a Settings row for it (kept in the settings sector), for displays
- * that take none of the default. */
-struct HdmiMode { uint16_t w, h; const char *name; };
+ * that take none of the default.
+ * (Done: Settings > Screen mode, a8_settings.cpp - tried for 10 s before
+ * it is kept; button 3 held at power-on goes back to the default.) */
+/* (name: also the Settings > Screen mode value, so short; note: the log's) */
+struct HdmiMode { uint16_t w, h; const char *name, *note; };
 static const HdmiMode HDMI_MODES[] = {
-    { 320, 240, "640x480 @ 60 Hz" },
-    { 360, 200, "720x400 @ 70 Hz (as Doom)" },
-    { 360, 240, "720x480 @ 60 Hz (480p)" },
-    { 360, 288, "720x576 @ 50 Hz (576p)" },
-    { 400, 300, "800x600 @ 60 Hz" },
-    { 400, 240, "800x480 @ 60 Hz" },
+    { 320, 240, "640x480 60 Hz", "" },
+    { 360, 200, "720x400 70 Hz", " (as Doom)" },
+    { 360, 240, "720x480 60 Hz", " (480p)" },
+    { 360, 288, "720x576 50 Hz", " (576p)" },
+    { 400, 300, "800x600 60 Hz", "" },
+    { 400, 240, "800x480 60 Hz", "" },
 };
 static const int HDMI_NMODES = sizeof(HDMI_MODES) / sizeof(HDMI_MODES[0]);
 #ifndef A8_HDMI_MODE
@@ -807,7 +810,9 @@ void a8_display_init(void) {
     }
     canvas.set_screen_size(SCR_W, SCR_H);    /* fillScreen(): all of it (A8Canvas) */
 #ifdef A8_HDMI_AUDIO
-    if (!A8_SOUND_HDMI) dma_channel_claim(HDMI_AUDIO_DMA);   /* kept for HDMI sound (see there) */
+    /* (Settings > Sound output = HDMI, or A8_SOUND_HDMI: HDMI starts with
+     * sound and takes the channel itself) */
+    if (!hdmi_audio_wanted) dma_channel_claim(HDMI_AUDIO_DMA);   /* kept for HDMI sound (see there) */
 #endif
     canvas.fillSprite(TFT_BLACK);
     for (int y = 0; y < SCR_H; y++) hdmi_src_row[y] = (uint8_t)(24 + y * 192 / SCR_H);
@@ -992,16 +997,34 @@ static void hdmi_compose(void) {
  * it). False if the mode had no room for it. */
 bool a8_display_set_hdmi_audio(bool on) {
     hdmi_audio_wanted = on;
+    if (!hdmi_started && !hdmi_wanted) return true;    /* before a8_display_init: it starts so */
     for (uint32_t t0 = millis(); hdmi_audio_on != on && millis() - t0 < 1000; ) delay(1);
     return hdmi_audio_on == on;
 }
-bool a8_display_hdmi_audio(void) { return hdmi_audio_on; }
+bool a8_display_hdmi_audio(void) { return hdmi_started ? hdmi_audio_on : hdmi_audio_wanted; }   /* (before start: as it will) */
 uint32_t a8_display_hdmi_audio_gaps(void) { return hstx_di_queue_silence_count; }
 #endif
 
 /* The serial monitor's V key: the next video mode (core 1 switches). */
 void a8_display_next_hdmi_mode(void) {
     hdmi_vmode_wanted = (hdmi_vmode + 1) % HDMI_NMODES;
+}
+
+/* Settings > Screen mode (a8_settings.cpp). */
+int a8_display_hdmi_modes(void) { return HDMI_NMODES; }
+int a8_display_hdmi_mode_default(void) { return A8_HDMI_MODE; }
+int a8_display_hdmi_mode(void) { return hdmi_vmode; }
+const char *a8_display_hdmi_mode_name(int m) {
+    return m >= 0 && m < HDMI_NMODES ? HDMI_MODES[m].name : "?";
+}
+/* Before a8_display_init: the mode it starts in. After: switch (core 1
+ * restarts the output) and wait for it; false if it didn't start. */
+bool a8_display_set_hdmi_mode(int m) {
+    if (m < 0 || m >= HDMI_NMODES) return false;
+    if (!hdmi_started && !hdmi_wanted) { hdmi_vmode = hdmi_vmode_wanted = m; return true; }
+    hdmi_vmode_wanted = m;
+    for (uint32_t t0 = millis(); hdmi_vmode != m && millis() - t0 < 2000; ) delay(1);
+    return hdmi_vmode == m && hdmi_ok;
 }
 
 /* At start: how the output is set up - the mode, HSTX's control register,
@@ -1059,8 +1082,8 @@ void a8_display_core1_loop(void) {
         }
         hdmi_vmode = hdmi_vmode_wanted;
         hdmi_started = true;
-        Serial.printf("[display] HDMI mode %d of %d: %s, %s (%d x %d)%s%c", hdmi_vmode + 1, HDMI_NMODES,
-                      m.name, hdmi_ok ? "running" : "FAILED", out_words * 2, out_lines,
+        Serial.printf("[display] HDMI mode %d of %d: %s%s, %s (%d x %d)%s%c", hdmi_vmode + 1, HDMI_NMODES,
+                      m.name, m.note, hdmi_ok ? "running" : "FAILED", out_words * 2, out_lines,
 #ifdef A8_HDMI_AUDIO
                       hdmi_audio_on ? ", sound 44100 Hz" : ", no sound",
 #else

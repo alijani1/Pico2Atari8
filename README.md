@@ -65,6 +65,8 @@ and on, like the switch on a real drive: let the game load, type DRV
 | TV system | NTSC (default) / PAL |
 | Paddle sensitivity | (Quad) how much of a paddle's turn spans the game's whole range: Very low = all of it, Low 75 %, Medium 50 % (default, about what Atari games expect), High 40 %, Very high 30 % |
 | Scale | the picture. 320x240 (Quad, Duo 5200): Normal (1:1) / TV (240 wide, centred: Atari pixels as wide as on a TV, softened) / TV sharp (the same, unblended) / Pixel (160 wide: one screen pixel per Atari pixel; hi-res text loses detail) / Stretch (the 192-line playfield over all 240 lines; the default). 160x80 (Duo): Smooth / Sharp / Drop / Crop. Per game: Game Settings > Scale; in play: a button mapped to Next scale (wraps) |
+| Sound output | (Fruit Jam) Auto (headphones while plugged in, else the speaker; default) / Headphones / Speaker / Both / HDMI (the display's speakers) |
+| Screen mode | (Fruit Jam) the HDMI mode: 640x480 60 Hz, 720x400 70 Hz, 720x480 60 Hz, 720x576 50 Hz, 800x600 60 Hz, 800x480 60 Hz (default). Left / right only picks one (shown in orange: not in use yet); FIRE tries it and asks for 10 s - FIRE again keeps it, otherwise it goes back by itself (nothing to do on a display that shows nothing). Button 3 held at power-on goes back to the default |
 | Controller test | every control live: the 5200 controllers' sticks (as the pot value the game gets, plus the raw counts and the range learnt), Fire A / B and keys; the Quad's joystick ports, paddles on ports 1–2 (pot value, raw counts, range, buttons) and side buttons; the Joy-Con; the device buttons. MENU goes back |
 
 ## Game Settings
@@ -76,6 +78,8 @@ DRV; the game waits). Changes are remembered for that game (up to 300 games).
 
 | Row | Choices |
 |---|---|
+| Volume (all games) | Settings > Volume, here too so a game needn't be left to change it (at the top of the list; not per game) |
+| Sound (all games) | (Fruit Jam) Settings > Sound output, the same way |
 | Red, Green, Yellow, Blue | left / right: Fire, OPTION, SELECT, START, SPACE, RETURN, ESC, Keyboard, Next scale (160x80 panel), Stick 2 Up / Down / Left / Right, None; FIRE: pick any key from a keyboard. A 5200 game: Bottom fire, Top fire, `*`, `#`, START, PAUSE, RESET, Keyboard, Stick 2 ..., None, or any keypad key. Blue is Keyboard by default. Stick 2: joystick 2's directions (a 5200: controller 2's stick at its edges) - four buttons as Robotron's firing stick |
 | Thumbstick click (Duo: 5-way press) | as above |
 | Left / Right side button (Quad) | as above |
@@ -85,7 +89,7 @@ DRV; the game waits). Changes are remembered for that game (up to 300 games).
 | Scale | Default / the screen's modes (Settings > Scale: Normal, TV, TV sharp, Pixel, Stretch on 320x240; Smooth, Sharp, Drop, Crop on 160x80): this game's picture Scale; Default = Settings > Scale. A button mapped to Next scale steps through them in play, and wraps |
 | Machine | Default / 800XL / 400/800 (400/800/XL games): the machine this game starts on; Default = Settings > Default machine. SELECT in the list still starts the other one |
 | Disk drive 1 | On / Off after load (disk games and zips): for the few disk games that won't start while a drive answers - the drive switches off by itself 1.5 s after the game stops reading the disk (DRIVE OFF shows). Changed during a game, it applies at once. Replaces the keyboard's DRV key |
-| Reset to defaults | the buttons and the thumbstick back to the table below |
+| Reset to defaults | the buttons and the thumbstick back to the table below (not Volume / Sound: those are for every game) |
 
 START, SELECT, MENU (tap: keyboard, hold: the game list) and the sticks always stay as they are. Values
 that differ from the defaults show in orange. A game that isn't on its
@@ -249,8 +253,12 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
   - The 320x240 picture is doubled to 640x480 in the middle, black bands at
     the sides. Displays differ in the modes they take: the first one tried
     showed nothing at 640x480 @ 60 Hz (the usual mode) but 720x400 @ 70 Hz,
-    720x576 @ 50 Hz and 800x480 @ 60 Hz. `A8_HDMI_MODE` picks another at
-    build time; the serial monitor's `V` steps through them live.
+    720x576 @ 50 Hz and 800x480 @ 60 Hz. Settings > Screen mode picks one
+    (tried for 10 s before it's kept; button 3 held at power-on: back to
+    the default), `A8_HDMI_MODE` the default at build time, and the serial
+    monitor's `V` steps through them live (not saved).
+  - 800x600 uses the VESA timing (front porch 40): the driver's 44 showed
+    thin black vertical bars on one display.
   - The emulator (59.92 Hz, paced by the sound) isn't locked to the HDMI
     frame, so a tear line may drift through the picture (a TODO if it shows).
 - **Sound:** arduino-pico's `I2S` at the emulator's 22050 Hz (16-bit
@@ -263,9 +271,10 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
 - **Output:** headphones while some are plugged in, else the speaker
   (`A8_TLV_OUTPUT` in platformio.ini fixes it: 1 headphones, 2 speaker,
   3 both).
-- **Sound over HDMI** (`A8_HDMI_AUDIO`, on in the env): serial key `O`
-  switches the sound between the Fruit Jam's codec and the display's
-  speakers (`A8_SOUND_HDMI=1`: HDMI from start-up). 44100 Hz, exactly
+- **Sound over HDMI** (`A8_HDMI_AUDIO`, on in the env): Settings (or Game
+  Settings) > Sound output = HDMI, or serial key `O`, switches the sound
+  between the Fruit Jam's codec and the display's speakers
+  (`A8_SOUND_HDMI=1`: HDMI from start-up when nothing is saved). 44100 Hz, exactly
   twice the emulator's rate (each sample sent twice, the first the mean
   with the one before). Core 1 encodes the HDMI audio packets from a RAM
   ring that paces the emulator as the I2S one does; only one output plays

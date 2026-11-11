@@ -62,6 +62,10 @@ void    pico_audio_set_output(int mode);
 void    pico_audio_report(void);
 /* A key from the serial monitor: + - volume, A H S B output, I report. */
 void    pico_audio_key(int c);
+/* Settings > Sound output: 0 - 3 as pico_audio_set_output, 4 HDMI
+ * (A8_HDMI_AUDIO). Any time, before pico_audio_init too. */
+void    pico_audio_set_sound_output(int o);
+int     pico_audio_get_sound_output(void);
 #ifdef A8_HDMI_AUDIO
 /* Sound over HDMI instead of the codec (serial key O toggles). */
 void    pico_audio_set_hdmi(int on);

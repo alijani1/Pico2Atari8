@@ -13,6 +13,15 @@
  *   Paddle sens.     Very low / Low / Medium / High / Very high
  *                                                (Quad; pico_paddles.cpp)
  *   Controller test  every control live (a8_ctltest.cpp)
+ *   Sound output     Auto / Headphones / Speaker / Both / HDMI (the Fruit
+ *                                                 Jam; HDMI: A8_HDMI_AUDIO)
+ *   Screen mode      the HDMI modes (the Fruit Jam): left / right picks one
+ *                                                (orange: not in use yet),
+ *                                                 FIRE tries it, FIRE again
+ *                                                 within 10 s keeps it, else
+ *                                                 back to the one before.
+ *                                                 Button 3 held at power-on:
+ *                                                 the build's default.
  *
  * Saved in a 4 KB flash sector of our own (A8_SETTINGS_PHYS), written only
  * when something changed. The same sector holds, after them, the games set
@@ -39,7 +48,8 @@ struct Stored {
     uint32_t check;
 };
 
-A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false, A8_PADDLES_MEDIUM, A8_SCREEN_SCALE_DEFAULT };
+A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false, A8_PADDLES_MEDIUM, A8_SCREEN_SCALE_DEFAULT,
+                           0, 0 };
 
 static const char *const KEYBOARD_NAMES[A8_KBD_MODES] = { "Pause+Auto Resume", "Auto-pause", "Keep running" };
 static const char *const PADDLES_NAMES[A8_PADDLES_LEVELS] = { "Very low", "Low", "Medium", "High", "Very high" };
@@ -120,7 +130,9 @@ static bool cur_is_default(void);
 
 static uint32_t checksum(const Stored &s) {
     return s.magic ^ (s.keyboard << 1) ^ (s.fps << 3) ^ (s.machine_800 << 5) ^ (s.pal << 7) ^
-           (s.paddles << 9) ^ (s.spare[0] << 12) ^ 0xA5A5A5A5u;   /* spare[0]: scale (0 before) */
+           (s.paddles << 9) ^ (s.spare[0] << 12) ^ 0xA5A5A5A5u    /* spare[0]: scale (0 before) */
+           ^ (s.spare[1] << 16) ^ (s.spare[2] << 20);   /* the Fruit Jam's screen mode, sound output
+                                                           (+ 1; 0 = the default, and before) */
 }
 
 /* The saved records in flash, or nullptr. */
@@ -166,12 +178,42 @@ static void load_games(void) {
     }
 }
 
+static bool games_dirty_set(void);
+
+#ifdef PICO_FRUITJAM
+/* Before the display and the sound start: they start with these. Button 3
+ * (GPIO 5, low when pressed) held at power-on: the default screen mode,
+ * for a display that doesn't take the saved one (saved when a game ends).
+ * (Button 1 is also BOOT - the bootloader; button 2 is the ROM drive.) */
+static void fruitjam_apply(bool saved) {
+#ifdef A8_HDMI
+    if (!saved) a8_settings.screen_mode = a8_display_hdmi_mode_default();
+    const uint RESET_PIN = 5;
+    gpio_init(RESET_PIN);
+    gpio_set_dir(RESET_PIN, GPIO_IN);
+    gpio_pull_up(RESET_PIN);
+    delayMicroseconds(100);
+    if (!gpio_get(RESET_PIN) && a8_settings.screen_mode != a8_display_hdmi_mode_default()) {
+        Serial.println("[settings] button 3 held: the default screen mode");
+        a8_settings.screen_mode = a8_display_hdmi_mode_default();
+        games_dirty_set();
+    }
+    a8_display_set_hdmi_mode(a8_settings.screen_mode);
+#endif
+    if (!saved) a8_settings.sound_out = pico_audio_get_sound_output();
+    else pico_audio_set_sound_output(a8_settings.sound_out);
+}
+#endif
+
 void a8_settings_load(void) {
     load_games();
     Stored s;
     memcpy(&s, a8_flash_read(A8_SETTINGS_PHYS), sizeof(s));
     if (s.magic != MAGIC || s.check != checksum(s)) {
         Serial.println("[settings] none saved: defaults");
+#ifdef PICO_FRUITJAM
+        fruitjam_apply(false);
+#endif
         return;
     }
     a8_settings.keyboard = s.keyboard < A8_KBD_MODES ? s.keyboard : A8_KBD_ONE_KEY;
@@ -188,6 +230,20 @@ void a8_settings_load(void) {
                   KEYBOARD_NAMES[a8_settings.keyboard],
                   a8_settings.fps ? "on" : "off", a8_settings.machine_800 ? "400/800" : "800XL",
                   a8_settings.pal ? "PAL" : "NTSC", PADDLES_NAMES[a8_settings.paddles]);
+#ifdef PICO_FRUITJAM
+#ifdef A8_HDMI
+    a8_settings.screen_mode = s.spare[1] && s.spare[1] <= a8_display_hdmi_modes()
+                            ? s.spare[1] - 1 : a8_display_hdmi_mode_default();
+#endif
+    a8_settings.sound_out = s.spare[2] ? s.spare[2] - 1 : pico_audio_get_sound_output();
+    fruitjam_apply(true);
+#ifdef A8_HDMI
+    Serial.printf("[settings] sound %s, screen %s%c", a8_settings_sound_name(a8_settings.sound_out),
+                  a8_display_hdmi_mode_name(a8_settings.screen_mode), 10);
+#else
+    Serial.printf("[settings] sound %s%c", a8_settings_sound_name(a8_settings.sound_out), 10);
+#endif
+#endif
 }
 
 static void save(void) {
@@ -203,6 +259,12 @@ static void save(void) {
     s.paddles = (uint8_t)a8_settings.paddles;
     memset(s.spare, 0, sizeof(s.spare));
     s.spare[0] = (uint8_t)((a8_settings.scale - A8_SCREEN_SCALE_DEFAULT + A8_SCREEN_SCALES) % A8_SCREEN_SCALES);
+#ifdef PICO_FRUITJAM
+#ifdef A8_HDMI
+    s.spare[1] = (uint8_t)(a8_settings.screen_mode + 1);
+#endif
+    s.spare[2] = (uint8_t)(a8_settings.sound_out + 1);
+#endif
     s.check = checksum(s);
     memcpy(sector, &s, sizeof(s));
     /* the saved records, but the current game's as it is now (at the end:
@@ -224,10 +286,46 @@ static void save(void) {
     g->count = (uint32_t)n;
     g->check = cfgs_check(CFG_MAGIC, g->cfg, n * sizeof(GameCfg), g->count);
     cur_dirty = false;
+    games_dirty = false;                     /* (all of it is in this write) */
     pico_audio_suspend();                    /* its DMA can't ride out a flash write */
     a8_flash_write_sector(A8_SETTINGS_PHYS, sector);
     pico_audio_resume();
     Serial.println("[settings] saved");
+}
+
+/* A setting for every game changed in Game Settings: saved when the game
+ * ends (with its own, a8_settings_save_game). */
+static bool games_dirty_set(void) { games_dirty = true; return true; }
+
+/* ---- for every game, in both screens -------------------------------------- */
+
+void a8_settings_volume_step(int dir) {
+    int v = pico_audio_get_volume_pct() + dir * 10;
+    v = v < 0 ? 0 : v > 100 ? 100 : v;
+    pico_audio_set_volume_pct(v);
+    handoff_volume_write(v);                 /* the Quad takes it back on exit */
+}
+
+#ifdef A8_HDMI_AUDIO
+static const int SOUND_OUTS = 5;
+#else
+static const int SOUND_OUTS = 4;
+#endif
+const char *a8_settings_sound_name(int o) {
+    static const char *const N[5] = { "Auto", "Headphones", "Speaker", "Both", "HDMI" };
+    return o >= 0 && o < SOUND_OUTS ? N[o] : "?";
+}
+
+/* (HDMI may not take - the mode has no room for sound: then it stays) */
+void a8_settings_sound_step(int dir) {
+    int o = (a8_settings.sound_out + dir + SOUND_OUTS) % SOUND_OUTS;
+#ifdef PICO_FRUITJAM
+    pico_audio_set_sound_output(o);
+    o = pico_audio_get_sound_output();
+#endif
+    if (o == a8_settings.sound_out) return;
+    a8_settings.sound_out = o;
+    games_dirty_set();
 }
 
 /* ---- per game ------------------------------------------------------------ */
@@ -386,8 +484,15 @@ void a8_settings_save_game(void) {
 /* ---- the screen -------------------------------------------------------- */
 
 /* The rows, in the order shown; which there are depends on the device. */
-enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_PADDLES, ROW_SCALE, ROW_TEST, ROW_BACK };
-#if defined(PICO_TINY_SCREEN)
+enum { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_PADDLES, ROW_SCALE, ROW_TEST, ROW_BACK,
+       ROW_SOUND, ROW_SCREEN };
+#if defined(PICO_FRUITJAM) && defined(A8_HDMI)
+static const int ROW_LIST[] = { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_SOUND, ROW_SCREEN, ROW_SCALE,
+                                ROW_MACHINE, ROW_TV, ROW_TEST, ROW_BACK };
+#elif defined(PICO_FRUITJAM)
+static const int ROW_LIST[] = { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_SOUND, ROW_MACHINE, ROW_TV, ROW_SCALE,
+                                ROW_TEST, ROW_BACK };
+#elif defined(PICO_TINY_SCREEN)
 static const int ROW_LIST[] = { ROW_SCALE, ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV,
                                 ROW_PADDLES, ROW_TEST, ROW_BACK };
 #elif defined(PICO_QUAD)
@@ -402,16 +507,25 @@ static const int ROWS = sizeof(ROW_LIST) / sizeof(ROW_LIST[0]);
 /* 160x80: the 6x8 font, 10 px rows, 7 at a time (the list scrolls), names
  * short enough to leave room for the value (26 characters a row). */
 static const char *const NAMES[] = { "Keyboard", "FPS display", "Volume", "Machine", "TV system",
-                                     "Paddles", "Scale", "Controller test", "Back" };
+                                     "Paddles", "Scale", "Controller test", "Back", "Sound", "Screen" };
 static const int ROW_H = 10, LIST_Y = 10, SHOWN = 7, PANEL_W = 160, FONT = 1, TEXT_X = 2;
 #else
 static const char *const NAMES[] = { "Keyboard", "FPS display", "Volume", "Default machine", "TV system",
-                                     "Paddle sensitivity", "Scale", "Controller test", "Back" };
+                                     "Paddle sensitivity", "Scale", "Controller test", "Back",
+                                     "Sound output", "Screen mode" };
+#if defined(PICO_FRUITJAM) && defined(A8_HDMI)
+static const int ROW_H = 18, LIST_Y = 32, SHOWN = ROWS, PANEL_W = 320, FONT = 2, TEXT_X = 16;   /* (10 rows) */
+#else
 static const int ROW_H = 20, LIST_Y = 34, SHOWN = ROWS, PANEL_W = 320, FONT = 2, TEXT_X = 16;   /* (22: 8 rows; 9 with Scale) */
+#endif
 #endif
 static int first_shown = 0;              /* the list's top row (scrolls on the 160x80 panel) */
 static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2A69,
                       COL_TITLE = 0xFD20, COL_HINT = TFT_DARKGREY, COL_VALUE = 0x07FF;
+#ifdef A8_HDMI
+static const uint16_t COL_PENDING = 0xFD20;   /* a screen mode picked, not in use yet */
+static int pend_mode = 0;                     /* Screen mode: the one picked (FIRE tries it) */
+#endif
 
 #ifdef PICO_TINY_SCREEN
 static const char *const SCALE_NAMES[A8_SCREEN_SCALES] = { "Smooth", "Sharp", "Drop", "Crop" };
@@ -428,6 +542,10 @@ static void value_text(int row, char *buf, size_t cap) {
     case ROW_TV:       snprintf(buf, cap, "%s", a8_settings.pal ? "PAL" : "NTSC"); break;
     case ROW_PADDLES:  snprintf(buf, cap, "%s", PADDLES_NAMES[a8_settings.paddles]); break;
     case ROW_SCALE:    snprintf(buf, cap, "%s", SCALE_NAMES[a8_settings.scale]); break;
+    case ROW_SOUND:    snprintf(buf, cap, "%s", a8_settings_sound_name(a8_settings.sound_out)); break;
+#ifdef A8_HDMI
+    case ROW_SCREEN:   snprintf(buf, cap, "%s", a8_display_hdmi_mode_name(pend_mode)); break;
+#endif
     default:           buf[0] = 0; break;
     }
 }
@@ -442,16 +560,84 @@ static void draw_row(int i, bool sel) {
     tft.fillRect(0, y, PANEL_W, ROW_H, bg);
     tft.setTextFont(FONT);
     tft.setTextColor(COL_TEXT, bg);
-    tft.setCursor(TEXT_X, y + (FONT == 1 ? 1 : 3));
+    tft.setCursor(TEXT_X, y + (FONT == 1 ? 1 : (ROW_H - 16) / 2 + 1));   /* (20 px rows: 3) */
     tft.print(NAMES[row]);
     char v[24];
     value_text(row, v, sizeof(v));
     if (v[0]) {
-        tft.setTextColor(sel ? COL_TEXT : COL_VALUE, bg);
-        tft.setCursor(PANEL_W - TEXT_X - tft.textWidth(v), y + (FONT == 1 ? 1 : 3));
+        uint16_t c = sel ? COL_TEXT : COL_VALUE;
+#ifdef A8_HDMI
+        if (row == ROW_SCREEN && pend_mode != a8_display_hdmi_mode()) c = COL_PENDING;   /* selected too */
+#endif
+        tft.setTextColor(c, bg);
+        tft.setCursor(PANEL_W - TEXT_X - tft.textWidth(v), y + (FONT == 1 ? 1 : (ROW_H - 16) / 2 + 1));
         tft.print(v);
     }
 }
+
+#ifdef A8_HDMI
+/* The footer: what the keys do (on Screen mode: FIRE tries the one picked). */
+static void draw_footer(int sel) {
+    TFT_eSPI &tft = a8_tft();
+    tft.fillRect(0, 220, PANEL_W, 20, COL_BG);
+    tft.setTextFont(FONT);
+    tft.setTextColor(COL_HINT, COL_BG);
+    tft.setCursor(8, 222);
+    if (ROW_LIST[sel] != ROW_SCREEN) tft.print("LEFT / RIGHT: change    MENU: back");
+    else if (pend_mode == a8_display_hdmi_mode()) tft.print("LEFT / RIGHT: pick a mode    MENU: back");
+    else {
+        tft.setTextColor(COL_PENDING, COL_BG);
+        tft.print("FIRE: try this mode    MENU: back");
+    }
+}
+
+/* FIRE on Screen mode: switch to the one picked and ask (10 s) whether to
+ * keep it - nothing to do on a display that shows nothing: it goes back.
+ * True if kept. */
+static bool try_screen_mode(void) {
+    const int old = a8_display_hdmi_mode();
+    if (pend_mode == old) return false;
+    while (a8_input_menu() & A8M_OK) delay(10);          /* FIRE let go: the next press keeps */
+    Serial.printf("[settings] trying screen mode %s%c", a8_display_hdmi_mode_name(pend_mode), 10);
+    bool keep = false;
+    if (a8_display_set_hdmi_mode(pend_mode)) {
+        TFT_eSPI &tft = a8_tft();
+        const int bx = 30, by = 80, bw = 260, bh = 70;
+        int shown = -1;
+        for (uint32_t t0 = millis();;) {
+            int left = 10 - (int)((millis() - t0) / 1000);
+            if (left <= 0) break;
+            if (left != shown) {
+                shown = left;
+                tft.fillRect(bx, by, bw, bh, COL_SEL_BG);
+                tft.drawRect(bx, by, bw, bh, COL_TITLE);
+                tft.setTextFont(FONT);
+                tft.setTextColor(COL_TEXT, COL_SEL_BG);
+                tft.setCursor(bx + 14, by + 12);
+                tft.print("Keep this screen mode?");
+                char t[40];
+                snprintf(t, sizeof(t), "FIRE: keep    back in %d s", left);
+                tft.setTextColor(COL_TITLE, COL_SEL_BG);
+                tft.setCursor(bx + 14, by + 40);
+                tft.print(t);
+            }
+            uint8_t b = a8_input_menu();
+            if (b & A8M_OK) { keep = true; break; }
+            if (b & A8M_BACK) break;
+            delay(10);
+        }
+        while (a8_input_menu() & (A8M_OK | A8M_BACK)) delay(10);
+    }
+    if (keep) {
+        a8_settings.screen_mode = pend_mode;
+        Serial.printf("[settings] screen mode %s kept%c", a8_display_hdmi_mode_name(pend_mode), 10);
+        return true;
+    }
+    a8_display_set_hdmi_mode(old);
+    Serial.printf("[settings] screen mode back to %s%c", a8_display_hdmi_mode_name(old), 10);
+    return false;
+}
+#endif
 
 static void draw_screen(int sel) {
     TFT_eSPI &tft = a8_tft();
@@ -481,9 +667,13 @@ static void draw_screen(int sel) {
     tft.print("v" A8_VERSION);
     tft.drawFastHLine(0, 25, 320, COL_HINT);
     for (int i = 0; i < ROWS; i++) draw_row(i, i == sel);
+#ifdef A8_HDMI
+    draw_footer(sel);
+#else
     tft.setTextColor(COL_HINT, COL_BG);
     tft.setCursor(8, 222);
     tft.print("LEFT / RIGHT: change    MENU: back");
+#endif
 #endif
 }
 
@@ -495,6 +685,16 @@ static bool change(int row, int dir) {
     case ROW_MACHINE:  a8_settings.machine_800 = !a8_settings.machine_800; return true;
     case ROW_TV:       a8_settings.pal = !a8_settings.pal; return true;
     case ROW_SCALE:    a8_settings.scale = (a8_settings.scale + dir + A8_SCREEN_SCALES) % A8_SCREEN_SCALES; return true;
+    case ROW_SOUND: {
+        int before = a8_settings.sound_out;
+        a8_settings_sound_step(dir);
+        return a8_settings.sound_out != before;
+    }
+#ifdef A8_HDMI
+    case ROW_SCREEN:                         /* only picked: FIRE tries it (try_screen_mode) */
+        pend_mode = (pend_mode + dir + a8_display_hdmi_modes()) % a8_display_hdmi_modes();
+        return false;
+#endif
     case ROW_PADDLES: {                      /* stops at the ends */
         int v = a8_settings.paddles + dir;
         if (v < 0 || v >= A8_PADDLES_LEVELS) return false;
@@ -516,6 +716,9 @@ void a8_settings_screen(void) {
     int sel = 0;
     bool dirty = false;
     first_shown = 0;
+#ifdef A8_HDMI
+    pend_mode = a8_display_hdmi_mode();
+#endif
     draw_screen(sel);
     for (uint32_t t0 = millis(); a8_input_menu() && millis() - t0 < 1000; ) delay(10);
     uint8_t prev = 0xFF;
@@ -542,6 +745,9 @@ void a8_settings_screen(void) {
             if (sel >= first_shown + SHOWN) first_shown = sel - SHOWN + 1;
             if (first_shown != top) draw_screen(sel);
             else { draw_row(old, false); draw_row(sel, true); }
+#ifdef A8_HDMI
+            draw_footer(sel);
+#endif
         }
         const int row = ROW_LIST[sel];
         if (pressed & (A8M_LEFT | A8M_RIGHT | A8M_OK)) {
@@ -554,10 +760,20 @@ void a8_settings_screen(void) {
                     prev = 0xFF;                 /* MENU still down: not a "back" */
                     continue;
                 }
+#ifdef A8_HDMI
+            } else if (row == ROW_SCREEN && (pressed & A8M_OK)) {
+                if (try_screen_mode()) dirty = true;
+                draw_screen(sel);
+                prev = 0xFF;
+                continue;
+#endif
             } else {
                 int dir = (pressed & A8M_LEFT) ? -1 : 1;
                 if (change(row, dir)) dirty = true;
                 draw_row(sel, true);
+#ifdef A8_HDMI
+                draw_footer(sel);
+#endif
             }
         }
         if (pressed & A8M_BACK) break;
