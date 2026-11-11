@@ -381,6 +381,20 @@ extern "C" void tuh_hid_report_received_cb(uint8_t dev, uint8_t idx, uint8_t con
     tuh_hid_receive_report(dev, idx);
 }
 
+/* TinyUSB waits in its device set-up (debounce 150 ms, resets 50 ms,
+ * retries 100 ms): its own wait spins, and on core 1 that stopped the HDMI
+ * output's work - the sound fed into its packets (so the emulator, paced
+ * by that sound, stalled) and the overlays. Here core 1 keeps doing it while
+ * the host waits (core 0, should it ever wait here: as before). */
+extern "C" void tusb_time_delay_ms_api(uint32_t ms) {
+    const uint32_t t0 = millis();
+    while (millis() - t0 < ms) {
+#ifdef A8_HDMI
+        if (get_core_num() == 1) a8_display_core1_loop();
+#endif
+    }
+}
+
 /* Core 1 (loop1): the host stack. The first call starts it - before the
  * HDMI output and the sound (PIO 2 and DMA channel 11, clear of the HDMI
  * driver's channels 0-3 and the I2S's PIO). */
