@@ -90,7 +90,11 @@ static uint32_t emu_stack_used(void) {
 
 /* ---- start-up --------------------------------------------------------- */
 
+#ifdef A8_SD
+static char game_file[160];                /* (a card's long names, or the unzip prefix + one) */
+#else
 static char game_file[96];
+#endif
 static bool start_as_800 = false;
 static bool start_as_5200 = false;
 
@@ -245,6 +249,7 @@ void setup() {
     pico_audio_menu_sound(A8_SAMPLE_RATE, 1);   /* the menus' sound: beeps, music (pico_audio.cpp) */
     const char *path = a8_menu_pick();
     pico_audio_menu_sound(0, 0);
+    romfs_cache_reset();               /* (the SD card: the list's zips out of PSRAM) */
 #endif
     strncpy(game_file, path, sizeof(game_file) - 1);
     a8_settings_set_game(path);        /* its own settings (the zip's path for a zip) */

@@ -26,7 +26,11 @@
 #include "a8_platform.h"
 
 static const int MAX_GAMES = 128;      /* + the Settings and ROM drive rows */
+#ifdef A8_SD
+struct Game { char path[128]; char name[40]; bool osb; char kind[5]; };   /* (a card's long names) */
+#else
 struct Game { char path[48]; char name[40]; bool osb; char kind[5]; };
+#endif
 
 /* What the file is, shown at the right of its row: two files can share a
  * name ("Slime" = SLIME.BIN and SLIME.ZIP). */
@@ -48,15 +52,16 @@ static const char *kind_of(const char *path) {
     if (!strcasecmp(dot, ".a52")) return "5200";
     if (!strcasecmp(dot, ".rom") || !strcasecmp(dot, ".bin")) {
         /* a 5200 cartridge by its last bytes (a8_raw_cart_is_5200) */
-        const uint8_t *p;
+        /* (a peek: on the SD card, not the whole file loaded) */
+        uint8_t tail[6];
         size_t size;
-        if (romfs_map(path, &p, &size) && size >= 4096 && raw_5200(p + size - 6, size)) return "5200";
+        if (romfs_peek(path, -6, tail, sizeof(tail), &size) && size >= 4096 && raw_5200(tail, size)) return "5200";
         return "CART";
     }
     if (!strcasecmp(dot, ".car")) {
-        const uint8_t *p;
+        uint8_t head[16];
         size_t size;
-        if (romfs_map(path, &p, &size) && size >= 16 && a8_car_is_5200(p)) return "5200";
+        if (romfs_peek(path, 0, head, sizeof(head), &size) && a8_car_is_5200(head)) return "5200";
         return "CART";
     }
     return "XEX";

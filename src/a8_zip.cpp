@@ -22,11 +22,27 @@
 
 static uint32_t unzipped_size = 0;
 
+#ifdef A8_SD
+/* From the SD card: unpacked into PSRAM (A8_SD_UNZIP_SIZE), not the flash
+ * area - no flash write (faster, no wear, the USB ports not reset), and
+ * room for bigger games. 0: the flash area, as from the flash drive. */
+#ifndef A8_SD_UNZIP_SIZE
+#define A8_SD_UNZIP_SIZE (3584u * 1024u)
+#endif
+#if A8_SD_UNZIP_SIZE > 0
+PSRAM static uint8_t unzip_psram[A8_SD_UNZIP_SIZE];
+#endif
+static bool unzip_in_psram = false;
+#endif
+
 extern "C" uint8_t *a8_screen_scratch(size_t *size);    /* a8_platform.c, idle before start */
 
 const uint8_t *a8_unzipped(size_t *size) {
     if (!unzipped_size) return nullptr;
     *size = unzipped_size;
+#if defined(A8_SD) && A8_SD_UNZIP_SIZE > 0
+    if (unzip_in_psram) return unzip_psram;
+#endif
     return a8_flash_read(A8_UNZIP_PHYS);
 }
 
@@ -36,6 +52,12 @@ static void write_sector(uint32_t index, const uint8_t *data) {
 }
 
 static void put_sector(uint32_t index, const uint8_t *data, void *) {
+#if defined(A8_SD) && A8_SD_UNZIP_SIZE > 0
+    if (unzip_in_psram) {
+        if ((index + 1) * 4096u <= A8_SD_UNZIP_SIZE) memcpy(unzip_psram + index * 4096u, data, 4096);
+        return;
+    }
+#endif
     write_sector(index, data);
 }
 
@@ -60,9 +82,16 @@ bool a8_unzip(const char *zip_path, char *inner_name, size_t inner_cap) {
     if (!a8z_find(zip, zsize, &e)) { Serial.printf("[zip] %s: no Atari file inside\n", zip_path); return false; }
     Serial.printf("[zip] %s: %s, %lu -> %lu bytes, method %u\n", zip_path, e.name,
                   (unsigned long)e.csize, (unsigned long)e.usize, e.method);
-    if (e.usize == 0 || e.usize > A8_UNZIP_SIZE) {
+    uint32_t area = A8_UNZIP_SIZE;
+#ifdef A8_SD
+    unzip_in_psram = false;
+#if A8_SD_UNZIP_SIZE > 0
+    if (romfs_on_card()) { unzip_in_psram = true; area = A8_SD_UNZIP_SIZE; }
+#endif
+#endif
+    if (e.usize == 0 || e.usize > area) {
         Serial.printf("[zip] %s is %lu bytes; the unzip area holds %u\n", e.name,
-                      (unsigned long)e.usize, (unsigned)A8_UNZIP_SIZE);
+                      (unsigned long)e.usize, (unsigned)area);
         return false;
     }
 

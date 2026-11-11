@@ -46,6 +46,8 @@ extern "C" FILE *__wrap_fopen(const char *path, const char *mode) {
         if (!(data = a8_unzipped(&size))) return nullptr;      /* unpacked zip, in flash */
     } else if (romfs_map(path, &data, &size)) {
         /* in place */
+    } else if (FILE *s = romfs_fopen_stream(path)) {
+        return s;                             /* the SD card, too big to load: read as it goes */
     } else if (romfs_slurp(path, &buf, &size)) {
         data = buf;
     } else {

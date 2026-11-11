@@ -295,6 +295,16 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
 | Button 2 | OK | START |
 | Button 3 | tap: up; hold: back | tap: on-screen keyboard; hold 1 s: the game list |
 
+**SD card** (`A8_SD`): with a microSD card in at power-on the game list
+comes from the card (the root and folders three deep, long names), else
+from the 1 MB flash drive as before. OS ROMs (`ATARIOSB.ROM`, `ATARIXL.ROM`,
+`5200.ROM`) are found on the card by name in any folder. A game's files up
+to 4 MB (`A8_SD_CACHE_SIZE`) are loaded into PSRAM and run from there; a
+zip is unpacked into PSRAM (3.5 MB, `A8_SD_UNZIP_SIZE`) - no flash write.
+A bigger file (a hard-disk sized ATR) is read from the card as the
+emulator asks. SPI at 25 MHz (`A8_SD_SPI_MHZ`; `A8_SD_SDIO` for 4-bit
+SDIO). Disks stay read-only; USB drive mode still exposes the flash drive.
+
 **USB gamepad / keyboard** (`A8_USB_HOST`): the USB-A ports take a gamepad
 and a keyboard (TinyUSB host over Pico-PIO-USB, a copy in
 `extern/pico-pio-usb`, run on core 0 with its 1 ms frame timer at the

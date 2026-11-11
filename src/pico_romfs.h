@@ -24,6 +24,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,6 +48,19 @@ bool romfs_read(const char *path, uint8_t *buf, size_t cap, size_t *out_sz);
 /* A file stored in one piece on a flash drive: its address in flash (read
  * it in place, no copy). False if it's fragmented (use romfs_slurp). */
 bool romfs_map(const char *path, const uint8_t **out, size_t *out_sz);
+
+/* A few bytes of a file: at `ofs` (negative: from its end), into buf; its
+ * whole size in *size. For a look at a cartridge's ends (the game list)
+ * without loading it. */
+bool romfs_peek(const char *path, long ofs, uint8_t *buf, size_t n, size_t *size);
+/* The SD card (A8_SD): the games come from it now (else the flash drive). */
+bool romfs_on_card(void);
+/* The SD card: a file too big to load (A8_SD_CACHE_SIZE) as a stream that
+ * reads the card as it goes (a disk image's sectors), or nullptr. */
+FILE *romfs_fopen_stream(const char *path);
+/* The SD card: forget the files loaded into PSRAM (romfs_map) - from the
+ * game list's look at its zips - before a game loads its own. */
+void romfs_cache_reset(void);
 
 /* Short human description of where ROMs go, for menu/error text. */
 const char *romfs_where(void);
