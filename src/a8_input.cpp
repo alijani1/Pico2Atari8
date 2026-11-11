@@ -310,6 +310,7 @@ static volatile bool     usb_pad_on = false, usb_kbd_on = false;
 static volatile uint16_t usb_vid = 0, usb_pid = 0;
 static volatile uint8_t  usb_raw[16], usb_raw_len = 0;  /* the pad's last report as it came */
 static volatile uint32_t usb_events = 0;                 /* mounts / unmounts: core 0 logs them */
+static volatile uint32_t usb_reports = 0;                /* DIAG (temporary): reports received */
 static uint8_t usb_pad_addr = 0, usb_kbd_addr = 0;
 
 /* The SNES-style pad's report (and the many cheap pads that share it). */
@@ -391,6 +392,7 @@ extern "C" void tuh_hid_report_received_cb(uint8_t dev, uint8_t idx, uint8_t con
         usb_raw_len = (uint8_t)n;
         usb_pad = usb_parse_pad(r, len);
     }
+    usb_reports++;
     tuh_hid_receive_report(dev, idx);
 }
 
@@ -439,9 +441,34 @@ static void usb_start(void) {
     }
 }
 
+/* A flash write (a8_flash.cpp: unpacking a game, saving the settings) runs
+ * with interrupts off for tens to hundreds of ms: no USB frames meanwhile,
+ * and a USB device suspends after 3 ms of an idle bus. The SNES-style pad
+ * then never woke properly (it kept repeating its last report: no button
+ * worked in any game - each starts with an unpack - or after a save). So
+ * after a write the ports' 5 V goes off for USB_POWER_OFF_MS and back on:
+ * to the host, an unplug and a plug, and every device is set up again
+ * (about half a second). Several writes in a row: one power-cycle, timed
+ * from the last. */
+static const uint32_t USB_POWER_OFF_MS = 300;
+static bool usb_power_off = false;
+static uint32_t usb_power_off_at = 0;
+
+void a8_input_usb_flash_written(void) {
+    if (!usb_started) return;
+    digitalWrite(PIN_5V_EN, !PIN_5V_EN_STATE);
+    usb_power_off = true;
+    usb_power_off_at = millis();
+}
+
 /* Core 0: the host stack's task (its callbacks run here), from the input
  * polling - the menus' (a8_input_menu) and the game's (a8_input_frame). */
 void a8_input_usb_task(void) {
+    if (usb_power_off && millis() - usb_power_off_at >= USB_POWER_OFF_MS) {
+        digitalWrite(PIN_5V_EN, PIN_5V_EN_STATE);
+        usb_power_off = false;
+        Serial.printf("[usb] ports powered again (after a flash write)%c", 10);
+    }
     if (usb_started) usb_host.task();
 }
 
@@ -559,18 +586,20 @@ static int usb_kbd_akey(bool is5200) {
 /* Core 0: everything held on the USB ports (the pad and the keyboard). */
 static uint32_t usb_buttons(void) {
     {   /* DIAG (temporary): is core 1's loop running, the USB frame timer? */
-        static uint32_t last = 0, sof0 = 0;
+        static uint32_t last = 0, sof0 = 0, rep0 = 0;
         uint32_t now = millis();
         if (now - last >= 2000) {
             uint32_t f = pio_usb_host_get_frame_number();
-            Serial.printf("[usb] diag: USB frames %lu in %lu ms, HDMI sound %s%c",
+            uint32_t r = usb_reports;
+            Serial.printf("[usb] diag: USB frames %lu in %lu ms, %lu reports, pad held %03lx, HDMI sound %s%c",
                           (unsigned long)(f - sof0), (unsigned long)(now - last),
+                          (unsigned long)(r - rep0), (unsigned long)usb_pad,
 #ifdef A8_HDMI_AUDIO
                           a8_display_hdmi_audio() ? "on" : "off", 10);
 #else
                           "not built", 10);
 #endif
-            last = now; sof0 = f;
+            last = now; sof0 = f; rep0 = r;
         }
     }
     static uint32_t seen = 0;
@@ -809,6 +838,16 @@ bool a8_input_frame(void) {
 #endif
 #ifdef A8_USB_HOST
     a8_input_usb_task();
+    {   /* DIAG (temporary): what the game sees from the pad, as it changes */
+        static uint32_t was = 0xFFFFFFFF;
+        uint32_t now_b = usb_buttons();
+        if (now_b != was) {
+            Serial.printf("[usb] game sees pad %03lx (last report %u bytes:", (unsigned long)now_b, usb_raw_len);
+            for (int i = 0; i < usb_raw_len && i < 8; i++) Serial.printf(" %02x", usb_raw[i]);
+            Serial.printf(")%c", 10);
+            was = now_b;
+        }
+    }
 #endif
     a8_input_t in;
     memset(&in, 0, sizeof(in));

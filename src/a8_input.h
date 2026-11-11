@@ -41,6 +41,8 @@ bool    a8_input_button(int which);
  * input polling calls it; a8_input_init starts the host); and for
  * Controller test, what is plugged in and held. */
 void    a8_input_usb_task(void);
+/* After a flash write (a8_flash.cpp): the ports are power-cycled. */
+void    a8_input_usb_flash_written(void);
 enum { A8U_UP = 1, A8U_DOWN = 2, A8U_LEFT = 4, A8U_RIGHT = 8, A8U_A = 16, A8U_B = 32, A8U_X = 64,
        A8U_Y = 128, A8U_L = 256, A8U_R = 512, A8U_SELECT = 1024, A8U_START = 2048 };
 struct A8UsbDiag {

@@ -20,6 +20,9 @@
 #include <hardware/sync.h>
 #include <hardware/structs/qmi.h>
 #include "a8_flash.h"
+#ifdef A8_USB_HOST
+#include "a8_input.h"                      /* the USB ports: a pad slept through the write */
+#endif
 
 static const uint32_t WINDOW1 = 0x10400000u;
 static const uint32_t WINDOW1_BASE = A8_UNZIP_PHYS & ~0x3FFFFFu;   /* physical start of window 1 */
@@ -51,4 +54,7 @@ void a8_flash_write_sector(uint32_t phys, const uint8_t *data) {
     program_sector(phys, data);
     restore_interrupts(irq);
     rp2040.resumeOtherCore();
+#ifdef A8_USB_HOST
+    a8_input_usb_flash_written();
+#endif
 }
