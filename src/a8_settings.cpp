@@ -75,7 +75,8 @@ struct GameCfg {
     uint32_t hash;
     uint8_t flags;
     uint8_t btn[A8_GB_COUNT];                     /* A8_ACT_*; A8_ACT_DEFAULT = as shipped */
-    uint8_t spare;
+    uint8_t spare;                                /* (int8_t) the Joy-Con paddle's centre
+                                                     offset (0 in records before it) */
 };
 struct StoredCfgs {
     uint32_t magic, count;
@@ -242,6 +243,7 @@ static int game_index(void) {
 
 static bool cur_is_default(void) {
     if (cur.flags & CFG_SETTINGS) return false;
+    if (cur.spare != 0) return false;             /* paddle centre offset */
     for (uint8_t b : cur.btn) if (b != A8_ACT_DEFAULT) return false;
     return true;
 }
@@ -297,6 +299,20 @@ bool a8_settings_game_buttons_custom(bool is5200) {
 void a8_settings_game_reset(void) {
     cur.flags = 0;
     memset(cur.btn, A8_ACT_DEFAULT, sizeof(cur.btn));
+    cur.spare = 0;
+    cur_changed();
+}
+
+int a8_settings_game_paddle_ofs(void) {
+    int o = (int8_t)cur.spare;
+    return o < -A8_PADDLE_OFS_MAX ? -A8_PADDLE_OFS_MAX : o > A8_PADDLE_OFS_MAX ? A8_PADDLE_OFS_MAX : o;
+}
+
+void a8_settings_set_game_paddle_ofs(int ofs) {
+    if (ofs < -A8_PADDLE_OFS_MAX) ofs = -A8_PADDLE_OFS_MAX;
+    if (ofs > A8_PADDLE_OFS_MAX) ofs = A8_PADDLE_OFS_MAX;
+    if (ofs == a8_settings_game_paddle_ofs()) return;
+    cur.spare = (uint8_t)(int8_t)ofs;
     cur_changed();
 }
 

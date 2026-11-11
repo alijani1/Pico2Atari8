@@ -70,6 +70,12 @@ void    a8_settings_set_game_drive_off(bool on);
 enum { A8_MACH_DEFAULT = 0, A8_MACH_XL, A8_MACH_800, A8_MACH_COUNT };
 int     a8_settings_game_machine(void);
 void    a8_settings_set_game_machine(int m);
+/* The Joy-Con paddle's centre (at rest), moved by this much of the pot's
+ * range: + = to the right. The pot runs 1 (right) .. 228 (left), centre
+ * 114, so -A8_PADDLE_OFS_MAX .. +A8_PADDLE_OFS_MAX. */
+#define A8_PADDLE_OFS_MAX 113
+int     a8_settings_game_paddle_ofs(void);
+void    a8_settings_set_game_paddle_ofs(int ofs);
 void a8_settings_next_scale(void);             /* Scale: the next mode (saved as above) */
 
 #endif

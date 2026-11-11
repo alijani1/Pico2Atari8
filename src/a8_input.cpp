@@ -222,7 +222,9 @@ static int16_t joycon_paddle(void) {
     static const int GAIN_PCT[A8_PADDLES_LEVELS] = { 100, 100, 100, 125, 167 };
     int v = axis_sample(joy_x), centre, half;
     axis_centre(joy_x, &centre, &half);
-    int p = 114 - (v - centre) * 113 * GAIN_PCT[a8_settings.paddles] / 100 / half;
+    /* Game Settings > Paddle center: the rest position, moved (+ = right) */
+    int p = 114 - a8_settings_game_paddle_ofs()
+            - (v - centre) * 113 * GAIN_PCT[a8_settings.paddles] / 100 / half;
     return (int16_t)(p < 1 ? 1 : p > 228 ? 228 : p);
 }
 

@@ -7,10 +7,12 @@
  *     (Quad)
  *   Thumbstick               Joystick / Paddle (400/800/XL games, a Joy-Con;
  *                            Yellow + click in a game switches it too)
+ *   Paddle center            -113 .. +113: where the Joy-Con paddle rests
+ *                            (400/800/XL games, a Joy-Con)
  *   Machine                  Default / 800XL / 400/800 (400/800/XL games;
  *                            from the game's next start)
  *   Disk drive 1             On / Off after load (disk games; was the
- *                            keyboard's DRV: off 3 s after the game stops
+ *                            keyboard's DRV: off 1.5 s after the game stops
  *                            reading the disk, a8_drive1_auto_off_poll)
  *   Reset to defaults
  *
@@ -47,20 +49,21 @@ static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Red", "Green", "Yellow", "
 #endif
 
 /* The rows: a button slot (0 .. A8_GB_COUNT - 1), or one of these. */
-enum { ROW_STICK = 20, ROW_MACHINE, ROW_DRIVE, ROW_RESET, ROW_BACK };
+enum { ROW_STICK = 20, ROW_PADDLE_OFS, ROW_MACHINE, ROW_DRIVE, ROW_RESET, ROW_BACK };
 
 #ifdef PICO_TINY_SCREEN
 static const int ROW_H = 10, LIST_Y = 10, SHOWN = 7, PANEL_W = 160, PANEL_H = 80, FONT = 1, TEXT_X = 2;
 #else
-/* 11 rows at most (the Quad: 6 buttons, Thumbstick, Machine, Disk drive 1,
- * Reset, Back) between the game's name and the footer */
+/* 12 rows at most (the Quad: 6 buttons, Thumbstick, Paddle center, Machine,
+ * Disk drive 1, Reset, Back): 11 between the game's name and the footer,
+ * the list scrolls */
 static const int ROW_H = 16, LIST_Y = 46, SHOWN = 11, PANEL_W = 320, PANEL_H = 240, FONT = 2, TEXT_X = 16;
 #endif
 static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2A69,
                       COL_TITLE = 0xFD20, COL_HINT = TFT_DARKGREY, COL_VALUE = 0x07FF,
                       COL_CHANGED = 0xFD20, COL_KEY = 0x39E7;
 
-static int rows[A8_GB_COUNT + 5], n_rows = 0, first_shown = 0;
+static int rows[A8_GB_COUNT + 6], n_rows = 0, first_shown = 0;
 static bool g5200 = false, g_in_game = false;
 static const char *g_name = "";
 
@@ -107,6 +110,12 @@ static void value_text(int row, char *buf, size_t cap, bool *changed) {
         snprintf(buf, cap, "%s", a8_settings_game_paddle() ? "Paddle" : "Joystick");
         *changed = a8_settings_game_paddle();
         return;
+    case ROW_PADDLE_OFS: {
+        int o = a8_settings_game_paddle_ofs();
+        snprintf(buf, cap, o > 0 ? "+%d" : "%d", o);
+        *changed = o != 0;
+        return;
+    }
     case ROW_MACHINE: {
         static const char *const M[A8_MACH_COUNT] = { "Default", "800XL", "400/800" };
         int m = a8_settings_game_machine();
@@ -130,6 +139,7 @@ static const char *row_name(int row) {
     if (row < A8_GB_COUNT) return SLOT_NAMES[row];
     switch (row) {
     case ROW_STICK: return "Thumbstick";
+    case ROW_PADDLE_OFS: return "Paddle center";
     case ROW_MACHINE: return "Machine";
     case ROW_DRIVE: return "Disk drive 1";
     case ROW_RESET: return "Reset to defaults";
@@ -182,6 +192,14 @@ static void draw_screen(int sel) {
     tft.setCursor(8, 28);
     tft.print(g_name);                      /* (clipped at the panel's edge) */
     for (int i = 0; i < n_rows; i++) draw_row(i, i == sel);
+    /* more above / below: a mark at the right edge */
+    /* (in the right margin of the first / last row shown: the footer sits
+     * right under the list) */
+    if (first_shown > 0) tft.fillTriangle(311, LIST_Y + 3, 307, LIST_Y + 8, 315, LIST_Y + 8, COL_HINT);
+    if (first_shown + SHOWN < n_rows) {
+        int yb = LIST_Y + SHOWN * ROW_H - 4;
+        tft.fillTriangle(311, yb, 307, yb - 5, 315, yb - 5, COL_HINT);
+    }
     tft.setTextColor(COL_HINT, COL_BG);
     tft.setCursor(8, 222);
     tft.print("LEFT/RIGHT: change  FIRE: any key  MENU: back");   /* 303 px: fits */
@@ -327,7 +345,7 @@ void a8_gamecfg_screen(const char *name, bool is5200, bool in_game, bool has_dis
     g_name = name ? name : "";
     n_rows = 0;
     for (int s = 0; s < A8_GB_COUNT; s++) if (a8_input_has_slot(s)) rows[n_rows++] = s;
-    if (!is5200 && a8_input_has_joycon()) rows[n_rows++] = ROW_STICK;
+    if (!is5200 && a8_input_has_joycon()) { rows[n_rows++] = ROW_STICK; rows[n_rows++] = ROW_PADDLE_OFS; }
     if (!is5200) rows[n_rows++] = ROW_MACHINE;
     if (!is5200 && has_disk) rows[n_rows++] = ROW_DRIVE;
     rows[n_rows++] = ROW_RESET;
@@ -363,6 +381,12 @@ void a8_gamecfg_screen(const char *name, bool is5200, bool in_game, bool has_dis
             }
         } else if (row == ROW_STICK && (dir || (p & A8M_OK))) {
             a8_settings_set_game_paddle(!a8_settings_game_paddle());
+            draw_row(sel, true);
+        } else if (row == ROW_PADDLE_OFS && (dir || (p & A8M_OK))) {
+            /* 1 a step; held over 1.5 s, 5 (the range is 226 steps) */
+            int step = (rep.held_since && millis() - rep.held_since > 1500) ? 5 : 1;
+            if (p & A8M_OK) a8_settings_set_game_paddle_ofs(0);          /* FIRE: back to 0 */
+            else a8_settings_set_game_paddle_ofs(a8_settings_game_paddle_ofs() + dir * step);
             draw_row(sel, true);
         } else if (row == ROW_MACHINE && (dir || (p & A8M_OK))) {
             int m = a8_settings_game_machine() + (dir < 0 ? -1 : 1);

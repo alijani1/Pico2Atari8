@@ -17,8 +17,10 @@
   the 400/800 always starts on it.
 - **Disk drive 1: On / Off after load** replaces the keyboard's DRV key and
   is remembered per game: for the few disk games that won't start while a
-  drive answers, the drive switches itself off 3 seconds after the game
+  drive answers, the drive switches itself off 1.5 seconds after the game
   stops reading the disk.
+- **Paddle center (-113 to +113)** per game: moves where the thumbstick
+  paddle rests, for paddle games whose centre is off.
 - A game that isn't on its defaults shows **PADDLE MODE** or **CUSTOM KEYS**
   for a moment when it starts. Up to 300 games are remembered; games set to
   use the thumbstick as a paddle in 2.0 keep that setting.
