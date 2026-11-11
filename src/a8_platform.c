@@ -438,14 +438,17 @@ int a8_drive1_is_on(void)
 }
 
 /* The disk read and then quiet for AUTO_OFF_FRAMES: the game has loaded.
- * SIO marks each operation in SIO_last_op_time (only the disk LED, which
- * isn't shown here, counts it down), so it's taken and cleared here. */
+ * Disk operations are counted in SIO_op_count (sio.c). (It used to watch
+ * SIO_last_op_time, which the core's disk LED - Screen_DrawDiskLED, inside
+ * Atari800_Frame - counts back to 0 before this runs, so no read was ever
+ * seen and the drive never went off.) */
 #define AUTO_OFF_FRAMES 180
 int a8_drive1_auto_off_poll(int enabled)
 {
 	static int seen = FALSE, quiet = 0, done = FALSE;
-	if (SIO_last_op_time > 0) {
-		SIO_last_op_time = 0;
+	static unsigned ops_was = 0;
+	if (SIO_op_count != ops_was) {
+		ops_was = SIO_op_count;
 		seen = TRUE;
 		quiet = 0;
 		return FALSE;

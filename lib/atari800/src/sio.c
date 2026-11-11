@@ -165,6 +165,10 @@ Util_tmpbufdef(static, sio_tmpbuf[SIO_MAX_DRIVES])
 
 int SIO_last_op;
 int SIO_last_op_time = 0;
+/* Pico2Atari8: every disk operation, counted (SIO_last_op_time can't tell:
+ * Screen_DrawDiskLED counts it down within the same frame) - for Game
+ * Settings' "Disk drive 1: Off after load" (a8_drive1_auto_off_poll). */
+unsigned SIO_op_count = 0;
 int SIO_last_drive;
 int SIO_last_sector;
 char SIO_status[256];
@@ -652,7 +656,7 @@ int SIO_ReadSector(int unit, int sector, UBYTE *buffer)
 	if (sector <= 0 || sector > sectorcount[unit])
 		return 'E';
 	SIO_last_op = SIO_LAST_READ;
-	SIO_last_op_time = 1;
+	SIO_last_op_time = 1; SIO_op_count++;
 	SIO_last_drive = unit + 1;
 #ifdef LIBATARI800
 	/* Call disk activity callback for real-time LED updates */
@@ -835,7 +839,7 @@ int SIO_WriteSector(int unit, int sector, const UBYTE *buffer)
 	if (SIO_drive_status[unit] != SIO_READ_WRITE || sector <= 0 || sector > sectorcount[unit])
 		return 'E';
 	SIO_last_op = SIO_LAST_WRITE;
-	SIO_last_op_time = 1;
+	SIO_last_op_time = 1; SIO_op_count++;
 	SIO_last_drive = unit + 1;
 #ifdef LIBATARI800
 	/* Call disk activity callback for real-time LED updates */
@@ -1401,7 +1405,7 @@ static UBYTE Command_Frame(void)
 		DataIndex = 0;
 		TransferStatus = SIO_WriteFrame;
 		SIO_last_op = SIO_LAST_WRITE;
-		SIO_last_op_time = 10;
+		SIO_last_op_time = 10; SIO_op_count++;
 		SIO_last_drive = unit + 1;
 #ifdef LIBATARI800
 		/* Call disk activity callback for real-time LED updates */
@@ -1444,7 +1448,7 @@ static UBYTE Command_Frame(void)
 		}
 #endif
 		SIO_last_op = SIO_LAST_READ;
-		SIO_last_op_time = 10;
+		SIO_last_op_time = 10; SIO_op_count++;
 		SIO_last_drive = unit + 1;
 #ifdef LIBATARI800
 		/* Call disk activity callback for real-time LED updates */

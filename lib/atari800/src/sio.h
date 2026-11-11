@@ -24,6 +24,7 @@ extern char SIO_filename[SIO_MAX_DRIVES][FILENAME_MAX];
 #define SIO_LAST_WRITE 1
 extern int SIO_last_op;
 extern int SIO_last_op_time;
+extern unsigned SIO_op_count;   /* Pico2Atari8: disk operations so far */
 extern int SIO_last_drive; /* 1 .. 8 */
 extern int SIO_last_sector;
 
