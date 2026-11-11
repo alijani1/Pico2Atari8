@@ -266,6 +266,35 @@ static void draw_empty(void) {
 
 /* ---- the list -------------------------------------------------------- */
 
+#ifdef A8_HEADLESS
+const char *a8_menu_auto(const char *want, int *index) {
+    game_count = 0;
+    romfs_list(add_game, nullptr);
+    qsort(games, game_count, sizeof(Game), by_name);
+    found = game_count;
+    Serial.printf("[menu] %d games\n", found);
+    picked_alt = false;
+    picked_osb = false;
+    int sel = -1;
+    if (want && *want) {
+        for (int i = 0; i < found && sel < 0; i++)
+            if (!strcasecmp(games[i].path, want)) sel = i;
+        if (sel < 0 && romfs_exists(want)) {       /* not listed (e.g. its kind), but there */
+            Serial.printf("[menu] auto-start %s (not in the list)\n", want);
+            *index = -1;
+            return want;
+        }
+        if (sel < 0) Serial.printf("[menu] %s not on the drive\n", want);
+    }
+    if (found == 0) return nullptr;
+    if (sel < 0) sel = ((*index % found) + found) % found;
+    *index = sel;
+    picked_osb = games[sel].osb;
+    Serial.printf("[menu] auto-start %d of %d: %s (%s)\n", sel + 1, found, games[sel].path, games[sel].name);
+    return games[sel].path;
+}
+#endif
+
 const char *a8_menu_pick(void) {
     game_count = 0;
     romfs_list(add_game, nullptr);

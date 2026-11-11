@@ -10,6 +10,9 @@
  * PICO_DUO        (with PICO_STANDALONE) Duo Ultimate run standalone, the
  *                 160x80 ST7735 panel test (PICO_TINY_SCREEN): built-in
  *                 Duo profile, no ARCADE.INI.
+ * PICO_FRUITJAM   (with PICO_STANDALONE) Adafruit Fruit Jam, the headless
+ *                 sound test (I2S to its TLV320DAC3100, no display):
+ *                 built-in profile, no ARCADE.INI.
  * (PicoCartReader keeps its fixed PCA9539 expander wiring — not table-driven.)
  *
  * All buttons/directions are active LOW with the internal pull-up (switch to

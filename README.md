@@ -160,6 +160,7 @@ pio run -e quad
 | `quad` | Quad Ultimate CX / CX-W, chain-booted from its Atari 8-bit slot |
 | `duo5200` | Duo 5200 Ultimate, chain-booted from its Atari 8-bit slot |
 | `duo_tiny` | Duo Ultimate (160x80 ST7735 panel) - **test build**, standalone: flashes at offset 0 and **replaces** the Duo firmware (reflash the Duo UF2 afterwards). Shares the 1 MB ROM drive at 0x200000 with Pico2Arcade's `duo_tiny` |
+| `fruitjam` | Adafruit Fruit Jam - **headless test build** of the sound path (I2S to its TLV320DAC3100), standalone; see below |
 
 ## Duo Ultimate (160x80 test build)
 
@@ -221,6 +222,36 @@ keyboard, joysticks and paddles on both ports.
   helps when what matters is in lines 36-195.
 - **5200 games** have no 5200 controller to use: paddles stand in for its
   stick (as on the Quad), the keypad is on Blue.
+
+## Fruit Jam (headless sound test)
+
+A prototype for the next hardware revision's sound: the Fruit Jam
+(RP2350B) has a TLV320DAC3100 I2S codec instead of the PAM amp and PWM.
+There is no picture yet (the Fruit Jam has only HDMI, a later phase), so
+this build proves the emulator's audio path (rate, pacing, refills) on its
+own. `pio run -e fruitjam -t upload`, then open the serial monitor.
+
+- **Sound:** arduino-pico's `I2S` at the emulator's 22050 Hz (16-bit
+  frames, BCLK 705.6 kHz on GPIO 26, WS 27, DIN 24). The codec is set up
+  over I2C0 (SDA 20 / SCL 21, reset 22) by PicoMultiTrackAudio's
+  `PicoTlv320` (header-only use: nothing else of that library is built).
+  Its PLL runs from BCLK. Volume is in the sample path, as on PWM. The
+  amp's on / off is the codec's soft mute.
+- **Output:** headphones while some are plugged in, else the speaker
+  (`A8_TLV_OUTPUT` in platformio.ini fixes it: 1 headphones, 2 speaker,
+  3 both).
+- **Games:** USB ROM drive mode (the 1 MB drive at 0x200000, as
+  `duo_tiny`). It starts by itself while the drive is empty, or with
+  button 2 held at power-on (button 1 is BOOT). Eject, then button 2 or 3.
+- **Start:** `A8_AUTOSTART` (a drive path) if set, else the first game in
+  name order. **Button 3** goes to the next game, **button 1** is fire,
+  **button 2** is START.
+- **Serial:** the codec and clock setup. Every 5 s, emulator fps and the
+  ring's health (lowest level, stretched samples, under-runs). Keys:
+  `+` / `-` volume, `a` `h` `s` `b` output (auto, headphones, speaker,
+  both), `i` the audio report now.
+- At 200 MHz no PIO divider is exact at 22050 Hz, so BCLK has fractional
+  jitter. `-DA8_SAMPLE_RATE=25000` gives an exact one (125) to compare.
 
 ## Layout
 

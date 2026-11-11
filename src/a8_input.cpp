@@ -42,6 +42,9 @@
  *   MENU              tap in a game: the next Scale mode; hold 1 s: back
  *                     to the game list
  *
+ * Adafruit Fruit Jam (PICO_FRUITJAM, the headless sound test): only its
+ * three buttons - 1 fire, 2 START, 3 the next game on the drive.
+ *
  * A 5200 game (any device; a8_is_5200) has its own controls:
  *
  *   Joy-Con stick     controller 1's analog stick (POKEY pots 0/1)
@@ -79,6 +82,16 @@ static const int8_t PORT_PINS[2][5] = {     /* up down left right fire */
     { 26, 27, 34, 35, 36 },
 };
 static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
+#elif defined(PICO_FRUITJAM)
+/* Adafruit Fruit Jam (headless sound test): no joystick port - one port of
+ * unconnected pins (-1: pinMode ignores them, low() reads them as up), so
+ * the loops over the ports stay as they are. Its GPIO 24-39 are I2S, SD
+ * card and NeoPixels here, 10-21 HDMI and the codec's I2C. */
+static const int NUM_PORTS = 1;
+static const int8_t PORT_PINS[1][5] = {     /* up down left right fire */
+    { -1, -1, -1, -1, -1 },
+};
+static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
 #else
 static const int NUM_PORTS = 4;
 static const int8_t PORT_PINS[4][5] = {     /* up down left right fire */
@@ -95,6 +108,16 @@ static const int PIN_SELECT = 24, PIN_START = 22, PIN_MENU = 23, PIN_CLICK = -1;
 static const int PIN_JOY_X = -1, PIN_JOY_Y = -1;                     /* no Joy-Con */
 static const int8_t PIN_5WAY[4] = { 25, 8, 12, 6 };                  /* up down left right */
 static const int PIN_RETURN = 7;                                     /* the 5-way's press */
+#elif defined(PICO_FRUITJAM)
+/* The Fruit Jam's three buttons (active LOW, pulled up): button 1 (GPIO 0,
+ * also BOOT) = fire, button 2 (GPIO 4) = START, button 3 (GPIO 5) = the
+ * next game on the drive (a8_input_next_game, main.cpp). No Joy-Con. */
+static const int PIN_RED = 0, PIN_GREEN = -1, PIN_BLUE = -1, PIN_YELLOW = -1;
+static const int PIN_SELECT = -1, PIN_START = 4, PIN_MENU = -1, PIN_CLICK = -1;
+static const int PIN_JOY_X = -1, PIN_JOY_Y = -1;
+static const int8_t PIN_5WAY[4] = { -1, -1, -1, -1 };
+static const int PIN_RETURN = PIN_SIDE_DOWN;                         /* none */
+static const int PIN_NEXT_GAME = 5;
 #else
 static const int PIN_RED = 14, PIN_GREEN = 15, PIN_BLUE = 16, PIN_YELLOW = 17;
 static const int PIN_SELECT = 19, PIN_START = 20, PIN_MENU = 18, PIN_CLICK = 21;
@@ -206,6 +229,9 @@ void a8_input_init(void) {
                             PIN_START, PIN_MENU, PIN_CLICK, PIN_SIDE_UP, PIN_SIDE_DOWN,
                             PIN_5WAY[0], PIN_5WAY[1], PIN_5WAY[2], PIN_5WAY[3], PIN_RETURN };
     for (int p : buttons) if (p >= 0) pinMode(p, INPUT_PULLUP);
+#ifdef PICO_FRUITJAM
+    pinMode(PIN_NEXT_GAME, INPUT_PULLUP);
+#endif
     if (PIN_JOY_X < 0) { axis_init(joy_x, 2048); axis_init(joy_y, 2048); return; }
     /* Joy-Con: a first guess at the centre; it keeps learning (axis_sample) */
     analogReadResolution(12);
@@ -657,3 +683,22 @@ uint8_t a8_input_five_way(bool *press) {
     *press = PIN_RETURN != PIN_SIDE_DOWN && low(PIN_RETURN);
     return five_way();
 }
+
+#ifdef PICO_FRUITJAM
+/* Button 3 pressed (a new press, 30 ms debounce). */
+bool a8_input_next_game(void) {
+    static bool was_down = true;           /* held at start: not a press */
+    static uint32_t since = 0;
+    bool down = low(PIN_NEXT_GAME);
+    uint32_t now = millis();
+    if (down != was_down) {
+        if (!since) since = now;
+        if (now - since < 30) return false;
+        was_down = down;
+        since = 0;
+        return down;
+    }
+    since = 0;
+    return false;
+}
+#endif

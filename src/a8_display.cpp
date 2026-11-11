@@ -325,6 +325,13 @@ uint8_t *a8_display_scratch(size_t *size) {
 }
 
 void a8_display_init(void) {
+#ifdef A8_HEADLESS
+    /* No panel (the Fruit Jam sound test): TFT_eSPI is never started, so
+     * it touches no pins (its build flags' pins are the Fruit Jam's button
+     * 3 and ESP32 UART), and nothing is drawn: core 1 stays idle. */
+    Serial.println("[display] none (headless build)");
+    return;
+#endif
     /* clk_peri back on clk_sys: platformio's f_cpu override leaves it on
      * the USB PLL (48 MHz), which caps SPI at 24 MHz (as in Pico2Arcade). */
     uint32_t sys_hz = clock_get_hz(clk_sys);
@@ -357,6 +364,9 @@ void a8_display_palette(void) {
 }
 
 void a8_display_start(void) {
+#ifdef A8_HEADLESS
+    return;                              /* running stays false: no frames copied */
+#endif
     a8_display_palette();
     tft.fillScreen(TFT_BLACK);
     hashes_valid = false;                /* send the first frame whole */
@@ -364,6 +374,9 @@ void a8_display_start(void) {
 }
 
 void a8_display_stop(void) {
+#ifdef A8_HEADLESS
+    return;
+#endif
     running = false;
     while (frame_ready) tight_loop_contents();
     tft.dmaWait();

@@ -29,6 +29,9 @@
 #include "a8_settings.h"
 #include "a8_gamecfg.h"
 #include "a8_version.h"
+#ifdef A8_HEADLESS
+#include <hardware/structs/watchdog.h>
+#endif
 
 extern "C" {
 #include "atari.h"
@@ -129,6 +132,11 @@ static volatile bool g_gave_up = false;
 /* A message in the middle of the panel: a line and a grey second line
  * (320x240: font 2 in a box; 160x80: the 6x8 font). */
 static void show_message(const char *line1, const char *line2, bool box) {
+#ifdef A8_HEADLESS
+    (void)box;                           /* no display: the serial monitor */
+    Serial.printf("[a8] %s %s%c", line1, line2 ? line2 : "", 10);
+    return;
+#endif
     TFT_eSPI &tft = a8_tft();
 #ifdef PICO_TINY_SCREEN
     (void)box;
@@ -173,6 +181,44 @@ static void log_file(const char *path) {
     }
 }
 
+#ifdef A8_HEADLESS
+/* No display, so no game list: the game is A8_AUTOSTART (a drive path, e.g.
+ * -DA8_AUTOSTART=\"/ATARI/GAME.XEX\") on the first start, else the first in
+ * the list; later starts take the game number kept in a watchdog scratch
+ * register (the Fruit Jam's button 3 moves on to the next). No games on the
+ * drive: USB ROM drive mode, to copy some on. */
+static int game_index = 0;
+
+static const char *headless_pick(void) {
+    uint32_t s = watchdog_hw->scratch[HANDOFF_SCRATCH_GAME];
+    const char *want = nullptr;
+    if ((s & 0xFFFF0000u) == HANDOFF_GAME_TAG) {
+        game_index = (int)(s & 0xFFFFu);
+    } else {
+        game_index = 0;
+#ifdef A8_AUTOSTART
+        want = A8_AUTOSTART;
+#endif
+    }
+    const char *path = a8_menu_auto(want, &game_index);
+    if (!path) {
+        Serial.println("[a8] no games on the drive: USB ROM drive mode");
+        pico_drive_run();                /* never returns */
+    }
+    if (game_index >= 0)
+        watchdog_hw->scratch[HANDOFF_SCRATCH_GAME] = HANDOFF_GAME_TAG | (uint32_t)game_index;
+    return path;
+}
+
+/* Restart with the next game on the drive. */
+static void __attribute__((noreturn)) next_game(void) {
+    Serial.printf("[a8] next game (%d)%c", game_index + 1, 10);
+    watchdog_hw->scratch[HANDOFF_SCRATCH_GAME] = HANDOFF_GAME_TAG | (uint32_t)((game_index + 1) & 0xFFFF);
+    handoff_relaunch_arcade();
+    for (;;) {}
+}
+#endif
+
 void setup() {
     Serial.begin(115200);
     Serial.println("[a8] Pico2Atari8 " A8_VERSION);
@@ -187,7 +233,11 @@ void setup() {
     a8_display_init();
     if (pico_drive_requested()) pico_drive_run();      /* never returns */
 
+#ifdef A8_HEADLESS
+    const char *path = headless_pick();
+#else
     const char *path = a8_menu_pick();
+#endif
     strncpy(game_file, path, sizeof(game_file) - 1);
     a8_settings_set_game(path);        /* its own settings (the zip's path for a zip) */
     /* the default machine, or the other one if picked with SELECT; a
@@ -206,6 +256,10 @@ void setup() {
         char inner[64];
         if (!a8_unzip(path, inner, sizeof(inner))) {
             show_message("Can't unpack this zip.", "MENU: the game list", false);
+#ifdef PICO_FRUITJAM
+            Serial.println("[a8] button 3: the next game");
+            for (;;) { if (a8_input_next_game()) next_game(); delay(10); }
+#endif
             while (a8_input_menu() & A8M_BACK) delay(10);
             while (!(a8_input_menu() & A8M_BACK)) delay(10);
             handoff_relaunch_arcade();
@@ -259,7 +313,39 @@ static bool game_is_disk(void) {
     return dot && (!strcasecmp(dot, ".atr") || !strcasecmp(dot, ".xfd"));
 }
 
+#ifdef PICO_FRUITJAM
+/* Bench keys on the serial monitor: + / - volume, a h s b output (auto,
+ * headphones, speaker, both), i the audio report now. */
+static void serial_keys(void) {
+    while (Serial.available() > 0) {
+        int c = Serial.read();
+        int v = pico_audio_get_volume_pct();
+        switch (c) {
+        case '+': case '=': pico_audio_set_volume_pct(v + 10); break;
+        case '-':           pico_audio_set_volume_pct(v - 10); break;
+        case 'a': pico_audio_set_output(0); break;
+        case 'h': pico_audio_set_output(1); break;
+        case 's': pico_audio_set_output(2); break;
+        case 'b': pico_audio_set_output(3); break;
+        case 'i': pico_audio_report(); break;
+        default: continue;
+        }
+        if (c == '+' || c == '=' || c == '-')
+            Serial.printf("[audio] volume %d %%%c", pico_audio_get_volume_pct(), 10);
+    }
+}
+#endif
+
 void loop() {
+#ifdef PICO_FRUITJAM
+    if (a8_input_next_game()) {
+        pico_audio_amp_off();
+        a8_settings_save_game();
+        next_game();
+    }
+    pico_audio_poll();
+    serial_keys();
+#endif
     static bool first = true;
     if (first) {
         first = false;
@@ -327,6 +413,9 @@ void loop() {
                       frames / secs, (shown - last_shown) / secs, (unsigned long)skipped,
                       push_us / 1000.0f, (unsigned long)rows, (unsigned long)emu_stack_used());
         last_shown = shown;
+#ifdef PICO_FRUITJAM
+        pico_audio_report();
+#endif
         busy = frames = 0;
         last = now;
     }

@@ -200,7 +200,7 @@ extern "C" void pico_drive_run(void) {
     const char *driveName = "ARCADE ROMS";
     static const char LABEL[11] = {'A','R','C','A','D','E',' ','R','O','M','S'};
     if (!is_formatted()) {
-#if defined(PICO_STANDALONE) && !defined(PICO_DUO)
+#if defined(PICO_STANDALONE) && !defined(PICO_DUO) && !defined(PICO_FRUITJAM)
         static const char INI83[11] = {'A','R','C','A','D','E',' ',' ','I','N','I'};
         format_drive(LABEL, INI83, board_default_ini());
 #else
@@ -219,6 +219,12 @@ extern "C" void pico_drive_run(void) {
     delay(20);
     TinyUSBDevice.attach();
 
+#ifdef A8_HEADLESS
+    /* No display (the Fruit Jam test): the instructions go to the serial
+     * monitor, which stays up (the drive is added to the same USB device). */
+    Serial.println("[drive] Copy Atari games (.xex .car .rom .atr .zip, root or an ATARI folder)");
+    Serial.printf("[drive] onto the %s drive, eject it, then press button 2 or 3.%c", driveName, 10);
+#else
     TFT_eSPI &tft = a8_tft();
     tft.fillScreen(TFT_BLACK);
 #ifdef PICO_TINY_SCREEN
@@ -252,6 +258,7 @@ extern "C" void pico_drive_run(void) {
     tft.setCursor(10, y += 24); tft.print("Eject the drive, then press");
     tft.setCursor(10, y += 12); tft.print("MENU or START to play.");
     }
+#endif
 
     delay(300);
     while (pin_low(g_pins.menu) || pin_low(g_pins.start)) delay(10);   /* released from entry */
@@ -259,11 +266,22 @@ extern "C" void pico_drive_run(void) {
     for (;;) {
         /* Commit a partially written sector once the host goes quiet. */
         if (s_cacheDirty && millis() - s_lastWriteMs > 500) flush_cache();
+#ifdef A8_HEADLESS
+        /* again now and then, for a serial monitor opened later */
+        static uint32_t said = millis();
+        if (millis() - said > 10000) {
+            said = millis();
+            Serial.printf("[drive] ROM drive mode: copy games onto %s, eject, then button 2 or 3%c", driveName, 10);
+        }
+#endif
         if (pin_low(g_pins.menu) || pin_low(g_pins.start)) break;
         delay(5);
     }
 
     flush_cache();
+#ifdef A8_HEADLESS
+    Serial.println("[drive] restarting");
+#else
     tft.fillScreen(TFT_BLACK);
 #ifdef PICO_TINY_SCREEN
     tft.setTextSize(1);
@@ -275,6 +293,7 @@ extern "C" void pico_drive_run(void) {
     tft.setCursor(10, 100);
 #endif
     tft.print("Restarting...");
+#endif
     delay(300);
     handoff_relaunch_arcade();
     for (;;) {}

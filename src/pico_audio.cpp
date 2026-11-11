@@ -1,9 +1,253 @@
 /* pico_audio.cpp — PWM audio implementation. */
+/* (PICO_FRUITJAM: I2S to the Fruit Jam's TLV320DAC3100 instead - the first
+ * block below; the PWM code is the #else.) */
 
 #include <Arduino.h>
+#ifdef PICO_FRUITJAM
+#include <I2S.h>
+#include <hardware/clocks.h>
+#include <PicoTlv320.hpp>
+#else
 #include <PWMAudio.h>
+#endif
 #include "pico_audio.h"
 #include "pico_board.h"
+
+#ifdef PICO_FRUITJAM
+/* ---- I2S + TLV320DAC3100 (Adafruit Fruit Jam) ----------------------------
+ *
+ * arduino-pico's I2S class (the same AudioBufferManager ring as PWMAudio,
+ * DMA_IRQ_0) sends 16-bit stereo frames - the mono sample in both halves -
+ * at the emulator's rate: BCLK = 32 x rate (22050 Hz: 705.6 kHz). The codec
+ * has no MCLK; its PLL runs from BCLK, so the codec is configured once BCLK
+ * runs. Its driver is PicoMultiTrackAudio's PicoTlv320 (only that: the
+ * Impl header below, none of the mixer), on the SDK's I2C, not Wire.
+ *
+ * At 200 MHz no PIO divider is exact at 22050 Hz (22050 has factors 3 and
+ * 7), so BCLK has fractional jitter; -DA8_SAMPLE_RATE=25000 gives an exact
+ * divider (125) to compare on the bench.
+ *
+ * Volume stays in the sample path (the same curve as PWM); the codec sits
+ * at fixed levels. Amp on / off = the DAC's soft mute (no pop). Output:
+ * headphones while some are plugged in, else the speaker (A8_TLV_OUTPUT
+ * forces 1 headphones, 2 speaker, 3 both; serial keys, main.cpp). */
+#include <PicoTlv320Impl.hpp>          /* the driver's code: in this one file */
+
+#ifndef A8_I2S_BCLK_PIN
+#define A8_I2S_BCLK_PIN 26             /* WS = 27 (BCLK + 1) */
+#endif
+#ifndef A8_I2S_DATA_PIN
+#define A8_I2S_DATA_PIN 24             /* DIN to the codec */
+#endif
+#ifndef A8_TLV_SDA_PIN
+#define A8_TLV_SDA_PIN 20              /* I2C0, shared with STEMMA QT and HDMI DDC */
+#endif
+#ifndef A8_TLV_SCL_PIN
+#define A8_TLV_SCL_PIN 21
+#endif
+#ifndef A8_TLV_RESET_PIN
+#define A8_TLV_RESET_PIN 22            /* also the ESP32-C6's EN: resets it too */
+#endif
+#ifndef A8_TLV_OUTPUT
+#define A8_TLV_OUTPUT 0                /* 0 auto (headset detect), 1 HP, 2 speaker, 3 both */
+#endif
+
+static I2S g_i2s(OUTPUT);
+static PicoTlv320 g_codec;
+static bool     g_codec_ok = false;
+static bool     g_started    = false;
+static int      g_sample_rate = 0;
+static bool     g_amp_on = false;      /* unmuted (wanted); kept across suspend */
+static int      g_output_mode = A8_TLV_OUTPUT;
+// Volume 0..100 %, applied as gain = pct² / 10000 — the same perceptual
+// curve PicoCartReader uses, so a given % sounds the same in both.
+static volatile int g_volume_pct = 50;    /* default 50 %: full is too loud */
+static volatile int g_gain       = 10000;   // pct², 0..10000
+
+/* Health, reported every 5 s (pico_audio_report). */
+static volatile uint32_t g_underruns = 0;      /* pushes that found the ring had run dry */
+static volatile uint32_t g_stretched = 0;      /* samples played twice (ring under half) */
+static volatile int      g_min_queued = 1 << 30;
+
+static void i2s_start(int rate) {
+    g_i2s.setBCLK(A8_I2S_BCLK_PIN);
+    g_i2s.setDATA(A8_I2S_DATA_PIN);
+    g_i2s.setBitsPerSample(16);
+    // 8 buffers × 128 words = 1024 samples, as PWMAudio (see below).
+    g_i2s.setBuffers(8, 128);
+    bool ok = g_i2s.begin(rate);
+    uint32_t sys = clock_get_hz(clk_sys), bclk = (uint32_t)rate * 32;
+    Serial.printf("[audio] I2S %s: %d Hz, BCLK %lu Hz (GPIO %d, WS %d, DIN %d), "
+                  "PIO divider %.4f (sys %lu MHz)\n",
+                  ok ? "running" : "FAILED", rate, (unsigned long)bclk, A8_I2S_BCLK_PIN,
+                  A8_I2S_BCLK_PIN + 1, A8_I2S_DATA_PIN, (double)sys / (2.0 * bclk),
+                  (unsigned long)(sys / 1000000));
+}
+
+static PicoTlv320::Output wanted_output(void) {
+    if (g_output_mode) return (PicoTlv320::Output)g_output_mode;
+    PicoTlv320::Headset h = g_codec.headset();
+    return (h == PicoTlv320::HEADSET_NONE || h == PicoTlv320::HEADSET_UNKNOWN)
+           ? PicoTlv320::OUTPUT_SPEAKER : PicoTlv320::OUTPUT_HEADPHONE;
+}
+
+static const char *output_name(int o) {
+    static const char *const n[4] = { "none", "headphones", "speaker", "speaker + headphones" };
+    return n[o & 3];
+}
+
+extern "C" void pico_audio_init(int sample_rate) {
+    if (g_started && sample_rate == g_sample_rate) return;
+    if (g_started) {                    /* rate change: the codec's clocks too */
+        g_codec.powerDown();
+        g_i2s.end();
+    } else {
+        PicoTlv320::busBegin(i2c0, A8_TLV_SDA_PIN, A8_TLV_SCL_PIN);
+        g_codec_ok = g_codec.begin(i2c0, PicoTlv320::DEFAULT_ADDRESS, A8_TLV_RESET_PIN);
+        Serial.printf("[audio] TLV320DAC3100 at 0x%02x: %s\n", PicoTlv320::DEFAULT_ADDRESS,
+                      g_codec_ok ? "found" : "NOT FOUND");
+    }
+    i2s_start(sample_rate);             /* BCLK first: the codec's PLL locks to it */
+    g_sample_rate = sample_rate;
+    g_started = true;
+    if (!g_codec_ok) return;
+    if (!g_codec.configure((uint32_t)sample_rate * 32, (uint32_t)sample_rate)) {
+        Serial.println("[audio] codec configure FAILED (no clock solution?)");
+        return;
+    }
+    const PicoTlv320Clocks &c = g_codec.clocks();
+    Serial.printf("[audio] codec PLL P %u R %u J %u = %lu Hz, NDAC %u MDAC %u DOSR %u\n",
+                  c.p, c.r, c.j, (unsigned long)c.pllHz, c.ndac, c.mdac, c.dosr);
+    g_codec.enableHeadsetDetect(true);
+    PicoTlv320::Output o = wanted_output();
+    g_codec.setOutput(o);
+    g_codec.setMute(!g_amp_on);
+    Serial.printf("[audio] output: %s (%s)\n", output_name(o), g_output_mode ? "fixed" : "auto");
+}
+
+/* Flash writes: I2S off (its DMA can't ride out interrupts off, as PWM's),
+ * the codec muted first so BCLK stopping isn't heard; it keeps its setup,
+ * and its PLL locks again once BCLK is back. */
+extern "C" void pico_audio_suspend(void) {
+    if (!g_started) return;
+    if (g_codec.ready()) {
+        g_codec.setMute(true);
+        delay(10);                       /* soft-step mute: up to ~128 samples (6 ms) */
+    }
+    g_i2s.end();
+}
+extern "C" void pico_audio_resume(void) {
+    if (!g_started) return;
+    i2s_start(g_sample_rate);
+    if (g_codec.ready() && g_amp_on) {
+        delay(10);                       /* PLL lock (typically 10 ms) */
+        g_codec.setMute(false);
+    }
+}
+
+extern "C" void pico_audio_set_sample_rate(int sample_rate) {
+    pico_audio_init(sample_rate);
+}
+
+/* As the PWM version below (the stretch while the ring is under half full,
+ * and the DC blocker - see there), but each sample goes out as one stereo
+ * word (it in both halves), written a block at a time. In RAM: it runs for
+ * every sample, and from flash its loop would compete with the emulator's
+ * per-scanline code for the XIP cache (config.h, A8_RAM). */
+static const int RING_SAMPLES = 8 * 128;               /* setBuffers(8, 128): a word = a frame = a sample */
+static int32_t  g_dc_x1 = 0, g_dc_y1 = 0;              /* DC blocker: last in, last out (x256) */
+static uint32_t g_stretch_acc = 0;                     /* 16.16: due extra samples */
+
+extern "C" size_t __not_in_flash_func(pico_audio_push_s16)(const void *data, size_t bytes) {
+    if (!g_started || bytes < 2) return 0;
+    if (g_i2s.getUnderflow()) g_underruns++;           /* the DMA found no buffer: silence played */
+    const int16_t *samples = (const int16_t *)data;
+    size_t nsamp = bytes / 2, written = 0;
+    int room = g_i2s.availableForWrite() / 4;
+    int queued = RING_SAMPLES - room;
+    if (queued < g_min_queued) g_min_queued = queued;
+    uint32_t step = queued < RING_SAMPLES / 2
+        ? (uint32_t)(RING_SAMPLES / 2 - (queued < 0 ? 0 : queued)) * (65536 / 2) / (RING_SAMPLES / 2)
+        : 0;
+    uint32_t block[64];
+    int nb = 0;
+    while (written < nsamp && room > 0) {
+        int32_t x = samples[written];
+        g_dc_y1 += ((x - g_dc_x1) << 8) - (g_dc_y1 >> 10);   /* y = x - x1 + (1 - 1/1024) y1 */
+        g_dc_x1 = x;
+        int32_t s = (g_dc_y1 >> 8) * g_gain / 10000;
+        if (s >  32767) s =  32767;
+        if (s < -32768) s = -32768;
+        uint32_t w = (uint16_t)s | ((uint32_t)(uint16_t)s << 16);
+        block[nb++] = w;
+        room--;
+        written++;
+        g_stretch_acc += step;
+        if (g_stretch_acc >= 65536) {
+            g_stretch_acc -= 65536;
+            if (room > 0) { block[nb++] = w; room--; g_stretched++; }
+        }
+        if (nb >= 63) { g_i2s.write((const uint8_t *)block, nb * 4); nb = 0; }
+    }
+    if (nb) g_i2s.write((const uint8_t *)block, nb * 4);
+    return written * 2;
+}
+
+extern "C" void pico_audio_amp_on(void) {
+    g_amp_on = true;
+    /* the health counts start here: before it (the machine starting, a
+     * pause) the ring ran dry on purpose */
+    g_i2s.getUnderflow();
+    g_underruns = 0;
+    g_stretched = 0;
+    g_min_queued = 1 << 30;
+    if (g_codec.ready()) g_codec.setMute(false);
+}
+extern "C" void pico_audio_amp_off(void) {
+    g_amp_on = false;
+    if (g_codec.ready()) g_codec.setMute(true);
+}
+
+/* Main loop: follow the headphone jack (I2C, so not more than 4 times a
+ * second; about 0.1 ms each). */
+extern "C" void pico_audio_poll(void) {
+    static uint32_t last = 0;
+    uint32_t now = millis();
+    if (!g_codec.ready() || g_output_mode || now - last < 250) return;
+    last = now;
+    PicoTlv320::Headset h = g_codec.headset();
+    if (h == PicoTlv320::HEADSET_UNKNOWN) return;
+    PicoTlv320::Output o = h == PicoTlv320::HEADSET_NONE ? PicoTlv320::OUTPUT_SPEAKER
+                                                         : PicoTlv320::OUTPUT_HEADPHONE;
+    if (o != g_codec.output()) {
+        g_codec.setOutput(o);
+        Serial.printf("[audio] output -> %s\n", output_name(o));
+    }
+}
+
+extern "C" void pico_audio_set_output(int mode) {
+    g_output_mode = mode & 3;
+    if (!g_codec.ready()) return;
+    PicoTlv320::Output o = wanted_output();
+    g_codec.setOutput(o);
+    Serial.printf("[audio] output: %s (%s)\n", output_name(o), g_output_mode ? "fixed" : "auto");
+}
+
+/* Every 5 s from main.cpp: what the ring went through since the last one. */
+extern "C" void pico_audio_report(void) {
+    int minq = g_min_queued;
+    uint32_t under = g_underruns, str = g_stretched;
+    g_min_queued = 1 << 30;
+    g_underruns = 0;
+    g_stretched = 0;
+    Serial.printf("[audio] %d Hz, ring low %d of %d samples, %lu stretched, %lu under-runs, "
+                  "volume %d %%, %s%s\n",
+                  g_sample_rate, minq > RING_SAMPLES ? -1 : minq, RING_SAMPLES,
+                  (unsigned long)str, (unsigned long)under, g_volume_pct,
+                  output_name(g_codec.output()), g_amp_on ? "" : " (muted)");
+}
+
+#else   /* PWM */
 
 #ifdef PICO_BOARD_TABLE
 /* Pins from the runtime table (pico_board.h) — the PWMAudio object is created
@@ -139,6 +383,8 @@ extern "C" size_t pico_audio_push_s16(const void *data, size_t bytes) {
     return written * 2;
 }
 
+#endif  /* PWM */
+
 extern "C" void pico_audio_set_volume_pct(int pct) {
     if (pct < 0)   pct = 0;
     if (pct > 100) pct = 100;
@@ -160,9 +406,11 @@ extern "C" uint8_t pico_audio_get_volume(void) {
     return (uint8_t)((g_volume_pct * 16 + 50) / 100);
 }
 
+#ifndef PICO_FRUITJAM
 extern "C" void pico_audio_amp_on(void) {
     if (AMP_EN_PIN >= 0) digitalWrite(AMP_EN_PIN, HIGH);
 }
 extern "C" void pico_audio_amp_off(void) {
     if (AMP_EN_PIN >= 0) digitalWrite(AMP_EN_PIN, LOW);
 }
+#endif

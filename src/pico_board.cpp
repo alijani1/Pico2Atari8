@@ -63,6 +63,25 @@ board_pins_t g_pins = {
     /* backlight          */ 5,
     /* stick_x stick_y    */ -1, -1,
 };
+#elif defined(PICO_FRUITJAM)
+/* Adafruit Fruit Jam (RP2350B), the headless sound test, standalone: only
+ * menu / start are used from here (USB ROM drive mode: button 2 held at
+ * power-on enters it, button 2 or 3 leaves it; button 1 is also BOOT, so
+ * not that one). a8_input.cpp reads the buttons itself. No PWM audio: the
+ * sound is I2S to the TLV320DAC3100 (pico_audio.cpp) - GPIO 22, the
+ * standalone default's audio pin, is the codec's and the ESP32-C6's reset. */
+board_pins_t g_pins = {
+    /* up down left right */ -1, -1, -1, -1,
+    /* fire fire2 fire3 fire4 */ 0, -1, -1, -1,
+    /* fireb fireb2 fireb3 */ -1, -1, -1,
+    /* start coin menu    */ 5, -1, 4,     /* button 3, -, button 2 */
+    /* nav_up nav_down    */ -1, -1,
+    /* joy_x joy_y        */ -1, -1,
+    /* joy_click          */ -1,
+    /* audio amp          */ -1, -1,
+    /* backlight          */ -1,
+    /* stick_x stick_y    */ -1, -1,
+};
 #else
 /* Plain Pico 2 defaults (also the contents of the default ARCADE.INI). Chosen
  * clear of the display (SPI0: SCLK 6, MOSI 7, CS 5, DC 8, RST 9). */
@@ -178,7 +197,7 @@ static void parse_ini(const char *text, size_t len) {
 #endif
 
 extern "C" void board_pins_load(void) {
-#if defined(PICO_STANDALONE) && !defined(PICO_DUO)   /* the Duo keeps its built-in profile */
+#if defined(PICO_STANDALONE) && !defined(PICO_DUO) && !defined(PICO_FRUITJAM)   /* the Duo keeps its built-in profile */
     uint8_t *ini = nullptr;
     size_t n = 0;
     if (romfs_slurp("/ARCADE.INI", &ini, &n)) {
