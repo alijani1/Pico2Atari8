@@ -1522,6 +1522,21 @@ uint8_t a8_input_menu(void) {
 /* ---- controller test (a8_ctltest.cpp) ---------------------------------- */
 
 void a8_input_joycon_diag(int raw[2], int centre[2], int lo[2], int hi[2], int16_t pot[2]) {
+#ifdef A8_USB_HOST
+    if (usb_analog(0)) {                     /* a USB pad's analog stick: as reported, its range */
+        const UsbPad &p = usb_pads[0];
+        const HidField *f[2] = { &p.lay.x, &p.lay.y };
+        const int32_t v[2] = { p.ax, p.ay };
+        for (int a = 0; a < 2; a++) {
+            raw[a] = (int)v[a];
+            lo[a] = (int)f[a]->lmin;
+            hi[a] = (int)f[a]->lmax;
+            centre[a] = (int)((f[a]->lmin + f[a]->lmax) / 2);
+        }
+        usb_pots(0, &pot[0], &pot[1]);
+        return;
+    }
+#endif
     JoyAxis *axes[2] = { &joy_x, &joy_y };
     for (int a = 0; a < 2; a++) {
         raw[a] = axis_sample(*axes[a]);
