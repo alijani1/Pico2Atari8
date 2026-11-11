@@ -239,6 +239,7 @@ static void serial_key(int c) {
     case 'k':           vpin_press(VP_BLUE, TAP); break;
 #ifdef A8_HDMI
     case 'V':           a8_display_next_hdmi_mode(); break;
+    case '#':           a8_display_dump(); break;
 #endif
     default:            pico_audio_key(c); break;
     }

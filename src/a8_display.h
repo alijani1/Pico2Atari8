@@ -22,6 +22,8 @@ uint32_t a8_display_push_us(uint32_t *avg_rows);
 #ifdef A8_HDMI
 /* HDMI set-up line on the serial monitor (at start). */
 void a8_display_report(void);
+/* Dump the canvas's top-right corner (serial monitor key #). */
+void a8_display_dump(void);
 /* Step to the next HDMI video mode (serial monitor key V). */
 void a8_display_next_hdmi_mode(void);
 #endif

@@ -323,8 +323,22 @@ static void fps_tick(void) {
 
 #ifdef A8_HDMI
 /* HDMI: the menus draw with the same TFT_eSPI calls into an 8-bit (RGB332)
- * sprite whose pixels are frame8 (see the HDMI section at the end). */
-static TFT_eSprite canvas(&tft);
+ * sprite whose pixels are frame8 (see the HDMI section at the end).
+ * fillScreen() fills TFT_eSPI's _width x _height, which a sprite leaves at
+ * the panel size of the build flags (TFT_WIDTH 240 x TFT_HEIGHT 320, the
+ * panel's portrait size until init() rotates it, which the canvas never
+ * runs): every clear missed x 240-319, and leftovers showed there (bytes of
+ * the game zips the list peeks into, a8_menu.cpp's scratch use). So the
+ * canvas takes its real size. */
+class A8Canvas : public TFT_eSprite {
+public:
+    explicit A8Canvas(TFT_eSPI *parent) : TFT_eSprite(parent) {}
+    void set_screen_size(int32_t w, int32_t h) {
+        _init_width = _width = w;
+        _init_height = _height = h;
+    }
+};
+static A8Canvas canvas(&tft);
 TFT_eSPI &a8_tft(void) { return canvas; }
 #else
 TFT_eSPI &a8_tft(void) { return tft; }
@@ -738,6 +752,7 @@ void a8_display_init(void) {
         Serial.println("[display] no RAM for the 320x240 canvas");
         return;
     }
+    canvas.set_screen_size(SCR_W, SCR_H);    /* fillScreen(): all of it (A8Canvas) */
     canvas.fillSprite(TFT_BLACK);
     for (int y = 0; y < SCR_H; y++) hdmi_src_row[y] = (uint8_t)(24 + y * 192 / SCR_H);
     hdmi_pal_332();
@@ -912,6 +927,25 @@ static void hdmi_compose(void) {
     push_us_sum += time_us_32() - t0;
     rows_sum += (uint32_t)(top + SCR_H - bottom);
     push_count++;
+}
+
+/* The serial monitor's # key: the canvas bytes of the top-right corner
+ * (rows 0-27, x 224-319; RGB332), to find what draws noise there.
+ * TODO: remove once found. */
+void a8_display_dump(void) {
+    Serial.printf("[display] frame8 %p, rows 0-27, x 224-319 (RGB332 hex), game %d%c",
+                  frame8, (int)hdmi_game, 10);
+    for (int y = 0; y < 28; y++) {
+        char line[2 * 96 + 1];
+        for (int x = 0; x < 96; x++) {
+            static const char HEXD[] = "0123456789abcdef";
+            uint8_t v = frame8[y * SCR_W + 224 + x];
+            line[2 * x] = HEXD[v >> 4];
+            line[2 * x + 1] = HEXD[v & 15];
+        }
+        line[2 * 96] = 0;
+        Serial.printf("%2d %s%c", y, line, 10);
+    }
 }
 
 /* The serial monitor's V key: the next video mode (core 1 switches). */
