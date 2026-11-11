@@ -60,6 +60,8 @@ void    pico_audio_poll(void);
 void    pico_audio_set_output(int mode);
 /* Log the ring's health since the last call (under-runs, lowest level). */
 void    pico_audio_report(void);
+/* A key from the serial monitor: + - volume, A H S B output, I report. */
+void    pico_audio_key(int c);
 #endif
 
 #ifdef __cplusplus

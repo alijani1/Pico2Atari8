@@ -41,8 +41,8 @@ int     a8_input_num_ports(void);
 /* The Duo Ultimate's 5-way (A8_UP ... directions; *press = its press);
  * 0 / false elsewhere. */
 uint8_t a8_input_five_way(bool *press);
-#ifdef PICO_FRUITJAM
-/* The Fruit Jam's button 3 was pressed: go to the next game. */
+#if defined(PICO_FRUITJAM) && defined(A8_HEADLESS)
+/* The Fruit Jam's button 3 was pressed: go to the next game (headless). */
 bool    a8_input_next_game(void);
 #endif
 

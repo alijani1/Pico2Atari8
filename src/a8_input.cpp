@@ -67,6 +67,9 @@
 #include "a8_settings.h"
 #include "pico_5200ctl.h"
 #include "pico_paddles.h"
+#ifdef PICO_FRUITJAM
+#include "pico_audio.h"                    /* the serial monitor's sound keys */
+#endif
 
 extern "C" {
 #include "akey.h"
@@ -83,13 +86,17 @@ static const int8_t PORT_PINS[2][5] = {     /* up down left right fire */
 };
 static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
 #elif defined(PICO_FRUITJAM)
-/* Adafruit Fruit Jam (headless sound test): no joystick port - one port of
- * unconnected pins (-1: pinMode ignores them, low() reads them as up), so
- * the loops over the ports stay as they are. Its GPIO 24-39 are I2S, SD
- * card and NeoPixels here, 10-21 HDMI and the codec's I2C. */
+/* Adafruit Fruit Jam: no joystick port. Port 1 is the serial monitor's
+ * "virtual controller" (virtual pins from VPIN_BASE: no GPIO, see low() and
+ * serial_poll below), so the loops over the ports stay as they are. Its
+ * GPIO 24-39 are I2S, SD card and NeoPixels here, 12-21 HDMI and the
+ * codec's I2C. */
+enum { VPIN_BASE = 48,                      /* above the RP2350B's GPIO 0-47 */
+       VP_UP = VPIN_BASE, VP_DOWN, VP_LEFT, VP_RIGHT, VP_FIRE, VP_SELECT, VP_OPTION, VP_BLUE,
+       VPIN_END };
 static const int NUM_PORTS = 1;
 static const int8_t PORT_PINS[1][5] = {     /* up down left right fire */
-    { -1, -1, -1, -1, -1 },
+    { VP_UP, VP_DOWN, VP_LEFT, VP_RIGHT, VP_FIRE },
 };
 static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
 #else
@@ -110,14 +117,21 @@ static const int8_t PIN_5WAY[4] = { 25, 8, 12, 6 };                  /* up down 
 static const int PIN_RETURN = 7;                                     /* the 5-way's press */
 #elif defined(PICO_FRUITJAM)
 /* The Fruit Jam's three buttons (active LOW, pulled up): button 1 (GPIO 0,
- * also BOOT) = fire, button 2 (GPIO 4) = START, button 3 (GPIO 5) = the
- * next game on the drive (a8_input_next_game, main.cpp). No Joy-Con. */
-static const int PIN_RED = 0, PIN_GREEN = -1, PIN_BLUE = -1, PIN_YELLOW = -1;
-static const int PIN_SELECT = -1, PIN_START = 4, PIN_MENU = -1, PIN_CLICK = -1;
+ * also BOOT) = fire, button 2 (GPIO 4) = START, button 3 (GPIO 5) = MENU
+ * (tap: keyboard, hold: the game list). In the game list (a8_input_menu):
+ * 1 down, 3 tap up, 2 OK, 3 held back. Headless (no list): button 3 = the
+ * next game on the drive instead (a8_input_next_game, main.cpp). SELECT,
+ * OPTION and Blue (the keyboard) only from the serial monitor. No Joy-Con. */
+static const int PIN_RED = 0, PIN_GREEN = -1, PIN_BLUE = VP_BLUE, PIN_YELLOW = -1;
+#ifdef A8_HEADLESS
+static const int PIN_SELECT = VP_SELECT, PIN_START = 4, PIN_MENU = -1, PIN_CLICK = -1;
+static const int PIN_NEXT_GAME = 5;
+#else
+static const int PIN_SELECT = VP_SELECT, PIN_START = 4, PIN_MENU = 5, PIN_CLICK = -1;
+#endif
 static const int PIN_JOY_X = -1, PIN_JOY_Y = -1;
 static const int8_t PIN_5WAY[4] = { -1, -1, -1, -1 };
 static const int PIN_RETURN = PIN_SIDE_DOWN;                         /* none */
-static const int PIN_NEXT_GAME = 5;
 #else
 static const int PIN_RED = 14, PIN_GREEN = 15, PIN_BLUE = 16, PIN_YELLOW = 17;
 static const int PIN_SELECT = 19, PIN_START = 20, PIN_MENU = 18, PIN_CLICK = 21;
@@ -192,7 +206,71 @@ static int16_t axis_pot(const JoyAxis &a, int v) {
     return (int16_t)p;
 }
 
+#ifdef PICO_FRUITJAM
+/* ---- the serial monitor as a controller (Fruit Jam) ----------------------
+ * A terminal sends key presses, not releases: a key holds its (virtual or
+ * real) pin down for a short while, kept down by the terminal's key repeat.
+ *   arrows / w a s d   joystick 1 (game list: up / down)
+ *   space              fire (game list: OK)
+ *   Enter              START (button 2; game list: OK)
+ *   Esc / m            MENU held (button 3: back / the game list)
+ *   Tab / e            SELECT      o  OPTION      k  the on-screen keyboard
+ * Anything else goes to the sound's bench keys (pico_audio_key). */
+static uint32_t vpin_until[VPIN_END];      /* indexed by pin: down until this millis() */
+
+static void vpin_press(int p, uint32_t ms) { if (p >= 0 && p < VPIN_END) vpin_until[p] = millis() + ms; }
+static bool vpin_down(int p) {
+    return p >= 0 && p < VPIN_END && (int32_t)(vpin_until[p] - millis()) > 0;
+}
+
+static void serial_key(int c) {
+    static const uint32_t TAP = 150, HOLD = 1200;
+    switch (c) {
+    case 'w': case 'W': vpin_press(VP_UP, TAP); break;
+    case 's':           vpin_press(VP_DOWN, TAP); break;
+    case 'a':           vpin_press(VP_LEFT, TAP); break;
+    case 'd': case 'D': vpin_press(VP_RIGHT, TAP); break;
+    case ' ':           vpin_press(VP_FIRE, TAP); break;
+    case 13: case 10:   vpin_press(PIN_START, TAP); break;
+    case 27: case 'm':  vpin_press(PIN_MENU, HOLD); break;
+    case 9: case 'e':   vpin_press(VP_SELECT, TAP); break;
+    case 'o':           vpin_press(VP_OPTION, TAP); break;
+    case 'k':           vpin_press(VP_BLUE, TAP); break;
+    default:            pico_audio_key(c); break;
+    }
+}
+
+static void serial_poll(void) {
+    /* arrows come as Esc [ A..D: a lone Esc is MENU once nothing follows */
+    static int esc = 0;                    /* 1: Esc seen, 2: Esc [ seen */
+    static uint32_t esc_at = 0;
+    while (Serial.available() > 0) {
+        int c = Serial.read();
+        if (esc == 1) {
+            if (c == '[') { esc = 2; continue; }
+            esc = 0;
+            serial_key(27);
+        } else if (esc == 2) {
+            esc = 0;
+            if (c == 'A') vpin_press(VP_UP, 150);
+            else if (c == 'B') vpin_press(VP_DOWN, 150);
+            else if (c == 'C') vpin_press(VP_RIGHT, 150);
+            else if (c == 'D') vpin_press(VP_LEFT, 150);
+            continue;                      /* another sequence: ignored */
+        }
+        if (c == 27) { esc = 1; esc_at = millis(); continue; }
+        serial_key(c);
+    }
+    if (esc == 1 && millis() - esc_at > 30) { esc = 0; serial_key(27); }
+}
+
+/* A real button (GPIO) or a key standing in for it. */
+static inline bool low(int p) {
+    return p >= 0 && ((p < VPIN_BASE && digitalRead(p) == LOW) || vpin_down(p));
+}
+#else
 static inline bool low(int p) { return p >= 0 && digitalRead(p) == LOW; }
+#endif
 
 /* The Duo's 5-way as joystick directions (none elsewhere). */
 static uint8_t five_way(void) {
@@ -229,7 +307,7 @@ void a8_input_init(void) {
                             PIN_START, PIN_MENU, PIN_CLICK, PIN_SIDE_UP, PIN_SIDE_DOWN,
                             PIN_5WAY[0], PIN_5WAY[1], PIN_5WAY[2], PIN_5WAY[3], PIN_RETURN };
     for (int p : buttons) if (p >= 0) pinMode(p, INPUT_PULLUP);
-#ifdef PICO_FRUITJAM
+#if defined(PICO_FRUITJAM) && defined(A8_HEADLESS)
     pinMode(PIN_NEXT_GAME, INPUT_PULLUP);
 #endif
     if (PIN_JOY_X < 0) { axis_init(joy_x, 2048); axis_init(joy_y, 2048); return; }
@@ -366,6 +444,9 @@ bool a8_input_osk_paused(void) {
 }
 
 bool a8_input_frame(void) {
+#ifdef PICO_FRUITJAM
+    serial_poll();
+#endif
     a8_input_t in;
     memset(&in, 0, sizeof(in));
     for (int n = 0; n < 8; n++) in.pot[n] = A8_POT_NONE;
@@ -499,6 +580,9 @@ bool a8_input_frame(void) {
         in.start  |= low(PIN_START) || m.start;
         in.select = low(PIN_SELECT) || m.select;
         in.option = m.option;
+#ifdef PICO_FRUITJAM
+        if (vpin_down(VP_OPTION)) in.option = 1;
+#endif
         if (m.key >= 0) in.key = m.key;
         in.stick[1] |= m.j2;                  /* joystick 2 (twin-stick games) */
         kb_level = m.keyboard;
@@ -632,6 +716,34 @@ bool a8_input_frame(void) {
 
 static const int MENU_JOY_DEAD_X = 65;     /* % of the half-range (30 in a game) */
 
+#ifdef PICO_FRUITJAM
+/* Three buttons: 1 down, 2 OK, 3 tap up / held (0.6 s) back; and the
+ * serial monitor's keys. */
+uint8_t a8_input_menu(void) {
+    serial_poll();
+    uint8_t b = 0;
+    static bool m_down = false;
+    static uint32_t m_since = 0, up_until = 0;
+    uint32_t now = millis();
+    bool m = low(PIN_MENU);
+    if (m && !m_down) { m_down = true; m_since = now; }
+    if (!m && m_down) {
+        m_down = false;
+        if (now - m_since < 600) up_until = now + 60;   /* a tap: UP for a moment */
+    }
+    if (m_down && now - m_since >= 600) b |= A8M_BACK;
+    if ((int32_t)(up_until - now) > 0) b |= A8M_UP;
+    uint8_t d = port_dirs(0);
+    if (d & A8_UP)    b |= A8M_UP;
+    if ((d & A8_DOWN) || low(PIN_RED)) b |= A8M_DOWN;
+    if (d & A8_LEFT)  b |= A8M_LEFT;
+    if (d & A8_RIGHT) b |= A8M_RIGHT;
+    if (low(PIN_START) || port_fire(0)) b |= A8M_OK;
+    if (low(PIN_SELECT)) b |= A8M_ALT;
+    if (low(PIN_GREEN)) b |= A8M_GREEN;
+    return b;
+}
+#else
 uint8_t a8_input_menu(void) {
     uint8_t b = 0;
     ports_poll();
@@ -648,6 +760,8 @@ uint8_t a8_input_menu(void) {
     if (low(PIN_GREEN)) b |= A8M_GREEN;
     return b;
 }
+
+#endif
 
 /* ---- controller test (a8_ctltest.cpp) ---------------------------------- */
 
@@ -684,7 +798,7 @@ uint8_t a8_input_five_way(bool *press) {
     return five_way();
 }
 
-#ifdef PICO_FRUITJAM
+#if defined(PICO_FRUITJAM) && defined(A8_HEADLESS)
 /* Button 3 pressed (a new press, 30 ms debounce). */
 bool a8_input_next_game(void) {
     static bool was_down = true;           /* held at start: not a press */

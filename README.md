@@ -160,7 +160,7 @@ pio run -e quad
 | `quad` | Quad Ultimate CX / CX-W, chain-booted from its Atari 8-bit slot |
 | `duo5200` | Duo 5200 Ultimate, chain-booted from its Atari 8-bit slot |
 | `duo_tiny` | Duo Ultimate (160x80 ST7735 panel) - **test build**, standalone: flashes at offset 0 and **replaces** the Duo firmware (reflash the Duo UF2 afterwards). Shares the 1 MB ROM drive at 0x200000 with Pico2Arcade's `duo_tiny` |
-| `fruitjam` | Adafruit Fruit Jam - **headless test build** of the sound path (I2S to its TLV320DAC3100), standalone; see below |
+| `fruitjam` | Adafruit Fruit Jam - **test build** for the next revision: HDMI picture (HSTX) and I2S sound (TLV320DAC3100), standalone; see below |
 
 ## Duo Ultimate (160x80 test build)
 
@@ -223,35 +223,66 @@ keyboard, joysticks and paddles on both ports.
 - **5200 games** have no 5200 controller to use: paddles stand in for its
   stick (as on the Quad), the keypad is on Blue.
 
-## Fruit Jam (headless sound test)
+## Fruit Jam (HDMI + I2S test build)
 
-A prototype for the next hardware revision's sound: the Fruit Jam
-(RP2350B) has a TLV320DAC3100 I2S codec instead of the PAM amp and PWM.
-There is no picture yet (the Fruit Jam has only HDMI, a later phase), so
-this build proves the emulator's audio path (rate, pacing, refills) on its
-own. `pio run -e fruitjam -t upload`, then open the serial monitor.
+A prototype for the next hardware revision: the Adafruit Fruit Jam (RP2350B)
+has HDMI instead of a TFT, and a TLV320DAC3100 I2S codec instead of the PAM
+amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
 
+- **Picture:** HDMI 640x480 at 60 Hz from the RP2350's HSTX (GPIO 12-19),
+  with Pimoroni's dvhstx driver from Adafruit-DVI-HSTX 2.1.0. Only the
+  driver is built (at the end of [src/a8_display.cpp](src/a8_display.cpp)); the
+  library's Arduino wrapper and Adafruit GFX are not. There is **no frame
+  buffer**: the driver's line interrupt (core 1, in RAM) has each line made
+  just before it goes out, from colour indices through a palette, each
+  pixel and line doubled.
+  - In a game the lines are read straight from the emulator's screen, with
+    the Scale mode applied as they are read (no copy per frame). The rows
+    under an overlay (FPS, messages, the on-screen keyboard) come from a
+    buffer core 1 fills once a frame.
+  - The menus (game list, Settings, Game Settings, the ROM drive screen)
+    draw with the same TFT_eSPI code into a 320x240 8-bit sprite, shown
+    through an RGB332 palette.
+  - The driver's start-up runs clk_sys at 240 MHz (from PLL_USB) and HSTX
+    at the exact pixel clock, so `f_cpu` stays at 150 MHz in platformio.ini
+    (any other value makes the core move clk_sys back).
+  - The emulator (59.92 Hz, paced by the sound) isn't locked to the HDMI
+    frame, so a tear line may drift through the picture (a TODO if it shows).
 - **Sound:** arduino-pico's `I2S` at the emulator's 22050 Hz (16-bit
   frames, BCLK 705.6 kHz on GPIO 26, WS 27, DIN 24). The codec is set up
   over I2C0 (SDA 20 / SCL 21, reset 22) by PicoMultiTrackAudio's
   `PicoTlv320` (header-only use: nothing else of that library is built).
   Its PLL runs from BCLK. Volume is in the sample path, as on PWM. The
-  amp's on / off is the codec's soft mute.
+  amp's on / off is the codec's soft mute. No PIO divider is exact at
+  22050 Hz, so BCLK has fractional jitter.
 - **Output:** headphones while some are plugged in, else the speaker
   (`A8_TLV_OUTPUT` in platformio.ini fixes it: 1 headphones, 2 speaker,
   3 both).
-- **Games:** USB ROM drive mode (the 1 MB drive at 0x200000, as
-  `duo_tiny`). It starts by itself while the drive is empty, or with
-  button 2 held at power-on (button 1 is BOOT). Eject, then button 2 or 3.
-- **Start:** `A8_AUTOSTART` (a drive path) if set, else the first game in
-  name order. **Button 3** goes to the next game, **button 1** is fire,
-  **button 2** is START.
-- **Serial:** the codec and clock setup. Every 5 s, emulator fps and the
-  ring's health (lowest level, stretched samples, under-runs). Keys:
-  `+` / `-` volume, `a` `h` `s` `b` output (auto, headphones, speaker,
-  both), `i` the audio report now.
-- At 200 MHz no PIO divider is exact at 22050 Hz, so BCLK has fractional
-  jitter. `-DA8_SAMPLE_RATE=25000` gives an exact one (125) to compare.
+
+| Control | Game list | In a game |
+|---|---|---|
+| Button 1 (also BOOT) | down | fire |
+| Button 2 | OK | START |
+| Button 3 | tap: up; hold: back | tap: on-screen keyboard; hold 1 s: the game list |
+
+The **serial monitor** is a controller too: arrows or `w` `a` `s` `d`
+(joystick 1), space (fire), Enter (START / OK), Esc or `m` (MENU held),
+Tab or `e` (SELECT), `o` (OPTION), `k` (on-screen keyboard). A terminal sends
+presses, not releases, so a key holds for a moment and its repeat keeps it
+held. Sound keys: `+` / `-` volume, `A` `H` `S` `B` output (auto,
+headphones, speaker, both), `I` audio report.
+
+**Games:** USB ROM drive mode (the 1 MB drive at 0x200000, as `duo_tiny`):
+the list's ROM Drive row, button 2 held at power-on, or by itself when the
+drive isn't formatted yet. Eject, then button 2 or 3.
+
+**Serial log:** the HDMI and clock setup, the codec's clocks, and every 5 s
+the emulator's fps and the sound ring's health (lowest level, stretched
+samples, under-runs).
+
+`-DA8_HEADLESS` instead of `-DA8_HDMI` builds the earlier sound-only test:
+no picture, a game started by itself (`A8_AUTOSTART` or the first),
+button 3 = the next game.
 
 ## Layout
 
@@ -259,7 +290,7 @@ own. `pio run -e fruitjam -t upload`, then open the serial monitor.
 |---|---|
 | `lib/atari800/` | the atari800 emulation core (GPL-2.0-or-later), a trimmed copy of upstream with a hand-written `config.h`; changes to upstream files are listed in `lib/atari800/PATCHES.md` |
 | `src/a8_platform.c` | atari800's platform layer: input, screen, sound |
-| `src/a8_display.cpp` | the Atari screen on the TFT (core 1, DMA) |
+| `src/a8_display.cpp` | the Atari screen on the TFT (core 1, DMA), or on HDMI (Fruit Jam) |
 | `src/a8_input.cpp` | the Quad's controls |
 | `src/a8_menu.cpp` | the game list |
 | `src/a8_files.cpp` | `fopen` for the core, served from the ROM drive |

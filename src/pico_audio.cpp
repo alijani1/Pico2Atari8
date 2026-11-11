@@ -233,6 +233,23 @@ extern "C" void pico_audio_set_output(int mode) {
     Serial.printf("[audio] output: %s (%s)\n", output_name(o), g_output_mode ? "fixed" : "auto");
 }
 
+/* The serial monitor's sound keys (a8_input.cpp passes on the keys it
+ * doesn't use): + / - volume, A H S B output (auto, headphones, speaker,
+ * both), I the report now. */
+extern "C" void pico_audio_key(int c) {
+    switch (c) {
+    case '+': case '=': pico_audio_set_volume_pct(g_volume_pct + 10); break;
+    case '-': case '_': pico_audio_set_volume_pct(g_volume_pct - 10); break;
+    case 'A': pico_audio_set_output(0); return;
+    case 'H': pico_audio_set_output(1); return;
+    case 'S': pico_audio_set_output(2); return;
+    case 'B': pico_audio_set_output(3); return;
+    case 'I': pico_audio_report(); return;
+    default: return;
+    }
+    Serial.printf("[audio] volume %d %%%c", g_volume_pct, 10);
+}
+
 /* Every 5 s from main.cpp: what the ring went through since the last one. */
 extern "C" void pico_audio_report(void) {
     int minq = g_min_queued;

@@ -256,7 +256,7 @@ void setup() {
         char inner[64];
         if (!a8_unzip(path, inner, sizeof(inner))) {
             show_message("Can't unpack this zip.", "MENU: the game list", false);
-#ifdef PICO_FRUITJAM
+#if defined(PICO_FRUITJAM) && defined(A8_HEADLESS)
             Serial.println("[a8] button 3: the next game");
             for (;;) { if (a8_input_next_game()) next_game(); delay(10); }
 #endif
@@ -313,38 +313,16 @@ static bool game_is_disk(void) {
     return dot && (!strcasecmp(dot, ".atr") || !strcasecmp(dot, ".xfd"));
 }
 
-#ifdef PICO_FRUITJAM
-/* Bench keys on the serial monitor: + / - volume, a h s b output (auto,
- * headphones, speaker, both), i the audio report now. */
-static void serial_keys(void) {
-    while (Serial.available() > 0) {
-        int c = Serial.read();
-        int v = pico_audio_get_volume_pct();
-        switch (c) {
-        case '+': case '=': pico_audio_set_volume_pct(v + 10); break;
-        case '-':           pico_audio_set_volume_pct(v - 10); break;
-        case 'a': pico_audio_set_output(0); break;
-        case 'h': pico_audio_set_output(1); break;
-        case 's': pico_audio_set_output(2); break;
-        case 'b': pico_audio_set_output(3); break;
-        case 'i': pico_audio_report(); break;
-        default: continue;
-        }
-        if (c == '+' || c == '=' || c == '-')
-            Serial.printf("[audio] volume %d %%%c", pico_audio_get_volume_pct(), 10);
-    }
-}
-#endif
-
 void loop() {
 #ifdef PICO_FRUITJAM
+#ifdef A8_HEADLESS
     if (a8_input_next_game()) {
         pico_audio_amp_off();
         a8_settings_save_game();
         next_game();
     }
-    pico_audio_poll();
-    serial_keys();
+#endif
+    pico_audio_poll();                   /* the headphone jack */
 #endif
     static bool first = true;
     if (first) {
@@ -425,7 +403,11 @@ void loop() {
  * progress - it keeps coming if core 0 hangs or faults. */
 void setup1() {}
 void loop1() {
+#ifdef A8_HDMI
+    a8_display_core1_loop();             /* starts the HDMI output, then the overlays */
+#else
     if (g_emulating) a8_display_core1_loop();
+#endif
     static uint32_t last = 0;
     uint32_t now = millis();
     if (g_heartbeat && now - last >= 1000) {
