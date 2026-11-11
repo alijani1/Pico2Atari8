@@ -615,6 +615,7 @@ static volatile uint8_t hdmi_mode = 0;                  /* the Scale mode the li
 static volatile int ov_top = 0, ov_bottom = SCR_H;      /* rows < ov_top or >= ov_bottom: frame8 */
 static volatile bool hdmi_wanted = false, hdmi_started = false, hdmi_ok = false;
 static volatile bool composing = false;                 /* core 1 is in hdmi_compose */
+static volatile bool ov_redraw = true;                  /* frame8 was reused: redraw the overlays */
 static const uint8_t HDMI_BLACK = 0x00;                 /* Atari palette: black (side bands) */
 
 /* The video mode: the picture is 640x480 (320x240 doubled), centred in the
@@ -752,6 +753,7 @@ void a8_display_init(void) {
 
 void a8_display_start(void) {
     hdmi_pal_atari();
+    ov_redraw = true;
     ov_top = 0;
     ov_bottom = SCR_H;
     frame_ready = false;
@@ -782,21 +784,85 @@ extern "C" void a8_display_frame(void) {
 
 void a8_display_refresh(void) { a8_display_frame(); }
 
-/* Core 1, once a frame: the overlays' rows into frame8. */
+/* What the on-screen keyboard shows: its layout, keys and cursor. */
+static uint32_t osk_signature(void) {
+    uint32_t h = 2166136261u;
+    int cr, ci, rows = a8_osk_rows();
+    a8_osk_cursor(&cr, &ci);
+    h = (h ^ (uint32_t)rows) * 16777619u;
+    h = (h ^ (uint32_t)(cr * 64 + ci)) * 16777619u;
+    for (int r = 0; r < rows; r++) {
+        int n;
+        const A8Key *keys = a8_osk_row(r, &n);
+        for (int i = 0; i < n; i++) {
+            h = (h ^ (uint32_t)(uintptr_t)keys[i].label) * 16777619u;
+            h = (h ^ (uint32_t)keys[i].span) * 16777619u;
+            for (const char *t = keys[i].label; *t; t++) h = (h ^ (uint8_t)*t) * 16777619u;
+        }
+    }
+    return h;
+}
+
+/* Core 1, once a frame: the overlays' rows into frame8. The lines are read
+ * from frame8 while this runs, so nothing is written there that isn't
+ * meant to be seen: an overlay is redrawn only when it changes (drawing
+ * clears it first), and the game rows around the top boxes are copied
+ * around them, never under them. The keyboard covers its rows whole, so no
+ * game rows go there at all. (Writing them all every frame, then the
+ * overlays over them, showed as tearing in the keyboard.) */
 static void hdmi_compose(void) {
+    static uint32_t osk_sig = 0;
+    static int fps_shown = -1, last_top = 0, last_bottom = SCR_H;
+    static char toast_shown[sizeof(toast_text)] = "";
+    static uint8_t line[SCR_W];
     uint32_t t0 = time_us_32();
+    if (ov_redraw) {                     /* a game (re)started: frame8 held the menus */
+        ov_redraw = false;
+        last_top = 0;
+        last_bottom = SCR_H;
+        osk_sig = 0;
+    }
     const int mode = a8_settings_scale_now();   /* the game's own, or Settings > Scale */
     const bool toast = toast_until && (int32_t)(toast_until - millis()) > 0;
     const int top = (fps_on || toast) ? OV_H + 2 : 0;
-    const int bottom = a8_osk_is_open() ? SCR_H - a8_osk_rows() * OSK_CELL_H - 4 : SCR_H;
-    for (int y = 0; y < top; y++) hdmi_scaled_row(y, mode, frame8 + y * SCR_W);
-    for (int y = bottom; y < SCR_H; y++) hdmi_scaled_row(y, mode, frame8 + y * SCR_W);
-    if (fps_on) draw_fps();
-    if (toast) draw_toast();
-    if (a8_osk_is_open()) draw_osk();
+    const bool osk = a8_osk_is_open();
+    const int bottom = osk ? SCR_H - a8_osk_rows() * OSK_CELL_H - 4 : SCR_H;
+
+    /* top band: the game rows, around the boxes (as draw_toast / draw_fps
+     * place them: OV_H rows from y 2; the toast from x 2, FPS to SCR_W - 2) */
+    const int box_y0 = 2, box_y1 = 2 + OV_H;
+    const int toast_x1 = toast ? 2 + (int)strlen(toast_text) * OV_CHAR_W + 2 : 0;
+    const int fps_x0 = fps_on ? SCR_W - (7 * OV_CHAR_W + 2) - 2 : SCR_W;
+    for (int y = 0; y < top; y++) {
+        uint8_t *d = frame8 + y * SCR_W;
+        hdmi_scaled_row(y, mode, line);
+        if (y < box_y0 || y >= box_y1) { memcpy(d, line, SCR_W); continue; }
+        if (toast) memcpy(d, line, 2);                       /* left of the toast */
+        memcpy(d + toast_x1, line + toast_x1, fps_x0 - toast_x1);   /* between */
+        if (fps_on) memcpy(d + SCR_W - 2, line + SCR_W - 2, 2);     /* right of FPS */
+    }
+    const int fps_now = fps_emu * 100 + fps_scr;
+    if (fps_on && (fps_now != fps_shown || last_top == 0)) { draw_fps(); fps_shown = fps_now; }
+    if (toast && (strcmp(toast_text, toast_shown) || last_top == 0)) {
+        draw_toast();
+        strcpy(toast_shown, toast_text);
+    }
+    if (!toast) toast_shown[0] = 0;
+    if (!fps_on) fps_shown = -1;
+
+    /* the keyboard: only when it changed (or its band just appeared) */
+    if (osk) {
+        uint32_t sig = osk_signature();
+        if (sig != osk_sig || bottom != last_bottom) { draw_osk(); osk_sig = sig; }
+    } else {
+        osk_sig = 0;
+    }
+
     hdmi_mode = (uint8_t)mode;
     ov_top = top;
     ov_bottom = bottom;
+    last_top = top;
+    last_bottom = bottom;
     push_us_sum += time_us_32() - t0;
     rows_sum += (uint32_t)(top + SCR_H - bottom);
     push_count++;
