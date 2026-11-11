@@ -59,7 +59,17 @@ uint8_t a8_settings_game_action(int slot, bool is5200);     /* never A8_ACT_DEFA
 uint8_t a8_settings_default_action(int slot, bool is5200);
 void    a8_settings_set_game_action(int slot, bool is5200, uint8_t act);
 bool    a8_settings_game_buttons_custom(bool is5200);       /* any button not on its default */
-void    a8_settings_game_reset(void);                       /* buttons and Joy-Con back to defaults */
+void    a8_settings_game_reset(void);                       /* everything back to defaults */
+/* Disk drive 1 switched off once the game has loaded (a8_platform.c,
+ * a8_drive1_auto_off_poll) - for the few disk games that won't start
+ * while a drive answers. */
+bool    a8_settings_game_drive_off(void);
+void    a8_settings_set_game_drive_off(bool on);
+/* The machine for this game: A8_MACH_DEFAULT = Settings > Default machine
+ * (SELECT in the list still starts the other one). */
+enum { A8_MACH_DEFAULT = 0, A8_MACH_XL, A8_MACH_800, A8_MACH_COUNT };
+int     a8_settings_game_machine(void);
+void    a8_settings_set_game_machine(int m);
 void a8_settings_next_scale(void);             /* Scale: the next mode (saved as above) */
 
 #endif

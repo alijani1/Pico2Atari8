@@ -192,7 +192,10 @@ void setup() {
     a8_settings_set_game(path);        /* its own settings (the zip's path for a zip) */
     /* the default machine, or the other one if picked with SELECT; a
      * 400/800 game by its name always on the 800 */
-    start_as_800 = (a8_settings.machine_800 != a8_menu_picked_alt()) || a8_menu_picked_osb();
+    /* (the game's own Game Settings > Machine first) */
+    int gm = a8_settings_game_machine();
+    bool base_800 = gm == A8_MACH_DEFAULT ? a8_settings.machine_800 : gm == A8_MACH_800;
+    start_as_800 = (base_800 != a8_menu_picked_alt()) || a8_menu_picked_osb();
     log_file(game_file);
 
     /* A zip: unpack its game into the flash area first (before the audio
@@ -250,6 +253,12 @@ static const char *game_title(void) {
     return t;
 }
 
+/* The game is a disk image (a zip's game: the unpacked file). */
+static bool game_is_disk(void) {
+    const char *dot = strrchr(game_file, '.');
+    return dot && (!strcasecmp(dot, ".atr") || !strcasecmp(dot, ".xfd"));
+}
+
 void loop() {
     static bool first = true;
     if (first) {
@@ -285,7 +294,7 @@ void loop() {
         pico_audio_amp_off();
         a8_display_stop();
         pico_audio_suspend();
-        a8_gamecfg_screen(game_title(), a8_is_5200(), true);
+        a8_gamecfg_screen(game_title(), a8_is_5200(), true, game_is_disk());
         pico_audio_resume();
         a8_display_start();
         pico_audio_amp_on();
@@ -299,6 +308,9 @@ void loop() {
     }
     uint32_t t0 = time_us_32();
     on_emu_stack(emu_frame);
+    /* Game Settings > Disk drive 1: Off after load */
+    if (a8_drive1_auto_off_poll(!a8_is_5200() && a8_settings_game_drive_off()))
+        a8_display_toast("DRIVE OFF");
     static uint32_t busy = 0, frames = 0, last = 0;
     busy += time_us_32() - t0;
     frames++;

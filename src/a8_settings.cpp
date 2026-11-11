@@ -67,7 +67,10 @@ static uint32_t games_check(const uint32_t *h, uint32_t n) {
 static const uint32_t CFG_MAGIC = 0x31464347u;    /* "GCF1" */
 static const int MAX_CFGS = 300;
 enum { CFG_PADDLE = 0x01,                         /* the Joy-Con is paddle 1 */
-       CFG_5200 = 0x02 };                         /* btn[] is for a 5200 game */
+       CFG_5200 = 0x02,                           /* btn[] is for a 5200 game */
+       CFG_DRIVE_OFF = 0x04,                      /* disk drive 1 off once loaded */
+       CFG_MACH_SHIFT = 3, CFG_MACH_MASK = 0x18,  /* A8_MACH_* */
+       CFG_SETTINGS = CFG_PADDLE | CFG_DRIVE_OFF | CFG_MACH_MASK };   /* not on the defaults */
 struct GameCfg {
     uint32_t hash;
     uint8_t flags;
@@ -238,7 +241,7 @@ static int game_index(void) {
 }
 
 static bool cur_is_default(void) {
-    if (cur.flags & CFG_PADDLE) return false;
+    if (cur.flags & CFG_SETTINGS) return false;
     for (uint8_t b : cur.btn) if (b != A8_ACT_DEFAULT) return false;
     return true;
 }
@@ -294,6 +297,25 @@ bool a8_settings_game_buttons_custom(bool is5200) {
 void a8_settings_game_reset(void) {
     cur.flags = 0;
     memset(cur.btn, A8_ACT_DEFAULT, sizeof(cur.btn));
+    cur_changed();
+}
+
+bool a8_settings_game_drive_off(void) { return (cur.flags & CFG_DRIVE_OFF) != 0; }
+
+void a8_settings_set_game_drive_off(bool on) {
+    if (on == a8_settings_game_drive_off()) return;
+    cur.flags = on ? (cur.flags | CFG_DRIVE_OFF) : (cur.flags & ~CFG_DRIVE_OFF);
+    cur_changed();
+}
+
+int a8_settings_game_machine(void) {
+    int m = (cur.flags & CFG_MACH_MASK) >> CFG_MACH_SHIFT;
+    return m < A8_MACH_COUNT ? m : A8_MACH_DEFAULT;
+}
+
+void a8_settings_set_game_machine(int m) {
+    if (m < 0 || m >= A8_MACH_COUNT || m == a8_settings_game_machine()) return;
+    cur.flags = (uint8_t)((cur.flags & ~CFG_MACH_MASK) | (m << CFG_MACH_SHIFT));
     cur_changed();
 }
 

@@ -79,7 +79,8 @@ game waits). Changes are remembered for that game (up to 300 games).
 | Thumbstick click (Duo: 5-way press) | as above |
 | Left / Right side button (Quad) | as above |
 | Thumbstick | Joystick / Paddle (400/800/XL games; Yellow + click in a game switches it too) |
-| Disk drive 1 | On / Off, during a game (was the keyboard's DRV key) |
+| Machine | Default / 800XL / 400/800 (400/800/XL games): the machine this game starts on; Default = Settings > Default machine. SELECT in the list still starts the other one |
+| Disk drive 1 | On / Off after load (disk games and zips): for the few disk games that won't start while a drive answers - the drive switches off by itself 3 s after the game stops reading the disk (DRIVE OFF shows). Changed during a game, it applies at once. Replaces the keyboard's DRV key |
 | Reset to defaults | the buttons and the thumbstick back to the table below |
 
 Blue, START, SELECT, MENU and the sticks always stay as they are. Values

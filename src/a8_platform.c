@@ -437,6 +437,28 @@ int a8_drive1_is_on(void)
 	return SIO_drive_status[0] != SIO_OFF;
 }
 
+/* The disk read and then quiet for AUTO_OFF_FRAMES: the game has loaded.
+ * SIO marks each operation in SIO_last_op_time (only the disk LED, which
+ * isn't shown here, counts it down), so it's taken and cleared here. */
+#define AUTO_OFF_FRAMES 180
+int a8_drive1_auto_off_poll(int enabled)
+{
+	static int seen = FALSE, quiet = 0, done = FALSE;
+	if (SIO_last_op_time > 0) {
+		SIO_last_op_time = 0;
+		seen = TRUE;
+		quiet = 0;
+		return FALSE;
+	}
+	if (!enabled || done || !seen || SIO_drive_status[0] == SIO_OFF)
+		return FALSE;
+	if (++quiet < AUTO_OFF_FRAMES)
+		return FALSE;
+	done = TRUE;                          /* once a game */
+	a8_toggle_drive1();
+	return TRUE;
+}
+
 /* Raw cartridge images (.rom/.bin) carry no type: pick the commonest one
  * for the size (KB). The .car format names the type and never gets here. */
 int a8_guess_cart_type(int kb)

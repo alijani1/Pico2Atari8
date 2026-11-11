@@ -13,7 +13,12 @@
   click. Blue, START, SELECT, MENU and the sticks stay fixed.
 - **Thumbstick: Joystick / Paddle** is now a setting you can see, per game.
   Yellow + click still switches it during play.
-- **Disk drive 1 On / Off** moved here from the keyboard's DRV key.
+- **Machine: Default / 800XL / 400/800** per game, so a game that needs
+  the 400/800 always starts on it.
+- **Disk drive 1: On / Off after load** replaces the keyboard's DRV key and
+  is remembered per game: for the few disk games that won't start while a
+  drive answers, the drive switches itself off 3 seconds after the game
+  stops reading the disk.
 - A game that isn't on its defaults shows **PADDLE MODE** or **CUSTOM KEYS**
   for a moment when it starts. Up to 300 games are remembered; games set to
   use the thumbstick as a paddle in 2.0 keep that setting.

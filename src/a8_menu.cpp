@@ -345,7 +345,8 @@ const char *a8_menu_pick(void) {
                 /* Green: this game's Game Settings (saved now: no game runs) */
                 while (a8_input_menu() & A8M_GREEN) delay(10);
                 a8_settings_set_game(games[sel].path);
-                a8_gamecfg_screen(games[sel].name, strcmp(games[sel].kind, "5200") == 0, false);
+                a8_gamecfg_screen(games[sel].name, strcmp(games[sel].kind, "5200") == 0, false,
+                                  !strcmp(games[sel].kind, "DISK") || !strcmp(games[sel].kind, "ZIP"));
                 a8_settings_save_game();
                 draw_frame();
                 draw_list(top, sel);
