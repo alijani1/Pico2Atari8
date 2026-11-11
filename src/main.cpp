@@ -236,13 +236,9 @@ void setup() {
 #ifdef A8_HEADLESS
     const char *path = headless_pick();
 #else
-#ifdef A8_MENU_MUSIC
-    pico_audio_menu_music(A8_SAMPLE_RATE);   /* the menus' music (pico_audio.cpp) */
-#endif
+    pico_audio_menu_sound(A8_SAMPLE_RATE);   /* the menus' sound: beeps, music (pico_audio.cpp) */
     const char *path = a8_menu_pick();
-#ifdef A8_MENU_MUSIC
-    pico_audio_menu_music(0);
-#endif
+    pico_audio_menu_sound(0);
 #endif
     strncpy(game_file, path, sizeof(game_file) - 1);
     a8_settings_set_game(path);        /* its own settings (the zip's path for a zip) */

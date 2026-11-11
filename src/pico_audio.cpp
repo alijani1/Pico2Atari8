@@ -264,7 +264,8 @@ extern "C" void pico_audio_set_hdmi(int on_) {
 extern "C" void pico_audio_toggle_hdmi(void) { pico_audio_set_hdmi(!g_hdmi); }
 #endif
 
-extern "C" size_t __not_in_flash_func(pico_audio_push_s16)(const void *data, size_t bytes) {
+/* (pico_audio_push_s16 is at the end: it mixes the beep in, then this) */
+static size_t __not_in_flash_func(push_s16_raw)(const void *data, size_t bytes) {
     if (!g_started || bytes < 2) return 0;
 #ifdef A8_HDMI_AUDIO
     if (g_hdmi) return push_hdmi((const int16_t *)data, bytes / 2);
@@ -367,55 +368,6 @@ extern "C" int pico_audio_get_sound_output(void) {
     return g_output_mode;
 }
 
-#ifdef A8_MENU_MUSIC
-/* The menus' music: the Game Adapter's menu tune (GameAdapterRGBPico's
- * include/sounds/menu16s8.h - 16 kHz signed 8-bit mono, a 7.8 s loop, 122
- * KB of flash), through the game's own path - so Volume and Sound output
- * are heard as they change. Fed from the menus' input polling
- * (a8_input_menu, every 10 ms or so) as far as the ring has room; 16000 Hz
- * to the output's rate by linear interpolation, at half scale (background,
- * as the Adapter plays it quieter than its volume setting). */
-#include "sounds/menu16s8.h"
-static bool     g_music = false;
-static uint32_t g_music_idx = 0, g_music_frac = 0;     /* where in menu16s8: sample, 1/65536 */
-static const uint32_t MUSIC_LEN = sizeof(menu16s8);
-
-/* From setup: on (the sound's rate) before the game list, off (0) once a
- * game is picked. */
-extern "C" void pico_audio_menu_music(int sample_rate) {
-    if (sample_rate) {
-        if (!g_started) pico_audio_init(sample_rate);
-        g_music_idx = g_music_frac = 0;
-        g_music = true;
-        pico_audio_amp_on();
-    } else if (g_music) {
-        g_music = false;
-        pico_audio_amp_off();            /* the game unmutes when it runs */
-    }
-}
-
-extern "C" void pico_audio_menu_music_poll(void) {
-    if (!g_music) return;
-    pico_audio_poll();                   /* the headphone jack, as in a game */
-    const uint32_t step = (uint32_t)((16000ull << 16) / (uint32_t)g_sample_rate);   /* < 65536 */
-    int16_t buf[128];
-    for (int chunk = 0; chunk < 8; chunk++) {
-        uint32_t idx = g_music_idx, frac = g_music_frac;
-        for (int i = 0; i < 128; i++) {
-            int a = menu16s8[idx], b = menu16s8[idx + 1 < MUSIC_LEN ? idx + 1 : 0];
-            buf[i] = (int16_t)((a * 65536 + (b - a) * (int)frac) >> 9);   /* 8-bit << 7: half scale */
-            frac += step;
-            if (frac >= 65536) { frac -= 65536; if (++idx >= MUSIC_LEN) idx = 0; }
-        }
-        size_t n = pico_audio_push_s16(buf, sizeof(buf)) / 2;
-        for (size_t i = 0; i < n; i++) {     /* past what was taken (the rest: next time) */
-            g_music_frac += step;
-            if (g_music_frac >= 65536) { g_music_frac -= 65536; if (++g_music_idx >= MUSIC_LEN) g_music_idx = 0; }
-        }
-        if (n < 128) break;
-    }
-}
-#endif
 
 /* The serial monitor's sound keys (a8_input.cpp passes on the keys it
  * doesn't use): + / - volume, A H S B output (auto, headphones, speaker,
@@ -570,7 +522,8 @@ static const int RING_SAMPLES = 8 * 128;               /* setBuffers(8, 128), mo
 static int32_t  g_dc_x1 = 0, g_dc_y1 = 0;              /* DC blocker: last in, last out (x256) */
 static uint32_t g_stretch_acc = 0;                     /* 16.16: due extra samples */
 
-extern "C" size_t pico_audio_push_s16(const void *data, size_t bytes) {
+/* (pico_audio_push_s16 is at the end: it mixes the beep in, then this) */
+static size_t push_s16_raw(const void *data, size_t bytes) {
     if (!g_started || bytes < 2) return 0;
     const int16_t *samples = (const int16_t *)data;
     size_t nsamp = bytes / 2, written = 0;
@@ -627,3 +580,129 @@ extern "C" void pico_audio_amp_off(void) {
     if (AMP_EN_PIN >= 0) digitalWrite(AMP_EN_PIN, LOW);
 }
 #endif
+
+/* ---- the beep (every board) ----------------------------------------------
+ * A short tone, a triangle wave fading out, mixed into whatever is pushed:
+ * a move in a menu (pico_audio_menu_beep), and a move on the on-screen
+ * keyboard in a game (pico_audio_beep) - where the game's sound, or the
+ * paused game's silent frames, carry it. Before the volume: it follows it.
+ * The beep moves on only by the samples the ring took (the rest come again). */
+static const int BEEP_HZ = 1200, BEEP_MS = 40, BEEP_LEVEL = 9000;
+static volatile uint32_t g_beep_left = 0;
+static uint32_t g_beep_len = 1, g_beep_phase = 0, g_beep_step = 0;
+
+extern "C" void pico_audio_beep(void) {
+    const uint32_t rate = g_sample_rate > 0 ? (uint32_t)g_sample_rate : 22050u;
+    g_beep_step = (uint32_t)(((uint64_t)BEEP_HZ << 32) / rate);
+    g_beep_len = rate * BEEP_MS / 1000;
+    g_beep_phase = 0;
+    g_beep_left = g_beep_len;
+}
+
+#ifdef PICO_FRUITJAM
+#define BEEP_RAM(f) __not_in_flash_func(f)    /* (the game's sound path runs from RAM here) */
+#else
+#define BEEP_RAM(f) f
+#endif
+extern "C" size_t BEEP_RAM(pico_audio_push_s16)(const void *data, size_t bytes) {
+    if (!g_beep_left || bytes < 2) return push_s16_raw(data, bytes);
+    static int16_t mix[256];
+    const int16_t *in = (const int16_t *)data;
+    size_t n = bytes / 2;
+    if (n > 256) n = 256;                /* (the caller sends the rest again) */
+    uint32_t left = g_beep_left, phase = g_beep_phase;
+    for (size_t i = 0; i < n; i++) {
+        int32_t v = in[i];
+        if (left) {
+            int32_t tri = (int32_t)(phase >> 16);                       /* 0 .. 65535 */
+            tri = (tri < 32768 ? tri : 65535 - tri) * 2 - 32768;        /* -32768 .. 32766 */
+            v += tri * BEEP_LEVEL / 32768 * (int32_t)left / (int32_t)g_beep_len;
+            phase += g_beep_step;
+            left--;
+        }
+        mix[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+    }
+    size_t done = push_s16_raw(mix, n * 2);
+    const uint32_t took = (uint32_t)(done / 2);
+    const uint32_t was = g_beep_left;
+    g_beep_phase += g_beep_step * (took < was ? took : was);
+    g_beep_left = took < was ? was - took : 0;
+    return done;
+}
+
+/* ---- the menus' sound (every board) ---------------------------------------
+ * From the game list's start to a game's: the sound runs (the amp on) and
+ * is fed from the menus' input polling (a8_input_menu, every 10 ms or so)
+ * as far as the ring has room: a short tone on each move (every board),
+ * the menu music (A8_MENU_MUSIC: the Fruit Jam), silence between - so
+ * Volume and Sound output are heard as they change. Off once a game is
+ * picked (muted: the game unmutes when it runs). */
+#ifdef A8_MENU_MUSIC
+/* The menus' music: the Game Adapter's menu tune (GameAdapterRGBPico's
+ * include/sounds/menu16s8.h - 16 kHz signed 8-bit mono, a 7.8 s loop, 122
+ * KB of flash), through the game's own path - so Volume and Sound output
+ * are heard as they change. Fed from the menus' input polling
+ * (a8_input_menu, every 10 ms or so) as far as the ring has room; 16000 Hz
+ * to the output's rate by linear interpolation, at half scale (background,
+ * as the Adapter plays it quieter than its volume setting). */
+#include "sounds/menu16s8.h"
+static const uint32_t MUSIC_LEN = sizeof(menu16s8);
+#endif
+
+/* (The tone: the beep above, mixed in by pico_audio_push_s16.) */
+struct MenuSound {
+    uint32_t music_idx, music_frac;      /* where in menu16s8: sample, 1/65536 */
+};
+static MenuSound g_ms;
+static bool     g_menu = false;
+static uint32_t g_menu_rate = 22050, g_music_step = 0;
+
+/* One sample, and the state one sample on. */
+static int16_t menu_sample(MenuSound &m) {
+    int32_t v = 0;
+#ifdef A8_MENU_MUSIC
+    int a = menu16s8[m.music_idx], b = menu16s8[m.music_idx + 1 < MUSIC_LEN ? m.music_idx + 1 : 0];
+    v = (a * 65536 + (b - a) * (int32_t)m.music_frac) >> 9;          /* 8-bit << 7: half scale */
+    m.music_frac += g_music_step;
+    if (m.music_frac >= 65536) { m.music_frac -= 65536; if (++m.music_idx >= MUSIC_LEN) m.music_idx = 0; }
+#endif
+    (void)m;
+    return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+}
+
+/* From setup: on (the sound's rate: starts the sound) before the game
+ * list, off (0) once a game is picked. */
+extern "C" void pico_audio_menu_sound(int sample_rate) {
+    if (sample_rate) {
+        pico_audio_init(sample_rate);
+        g_menu_rate = (uint32_t)sample_rate;
+        g_music_step = (uint32_t)((16000ull << 16) / g_menu_rate);    /* < 65536: rates over 16 kHz */
+        g_ms = MenuSound();
+        g_menu = true;
+        pico_audio_amp_on();
+    } else if (g_menu) {
+        g_menu = false;
+        pico_audio_amp_off();            /* the game unmutes when it runs */
+    }
+}
+
+/* A move in a menu (a8_input_menu). */
+extern "C" void pico_audio_menu_beep(void) {
+    if (g_menu) pico_audio_beep();       /* (a game's menus: the sound is suspended there) */
+}
+
+extern "C" void pico_audio_menu_poll(void) {
+    if (!g_menu) return;
+#ifdef PICO_FRUITJAM
+    pico_audio_poll();                   /* the headphone jack, as in a game */
+#endif
+    int16_t buf[128];
+    for (int chunk = 0; chunk < 8; chunk++) {
+        MenuSound m = g_ms;
+        for (int i = 0; i < 128; i++) buf[i] = menu_sample(m);
+        size_t n = pico_audio_push_s16(buf, sizeof(buf)) / 2;
+        if (n == 128) { g_ms = m; continue; }
+        for (size_t i = 0; i < n; i++) menu_sample(g_ms);          /* past what was taken */
+        break;
+    }
+}

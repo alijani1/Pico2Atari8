@@ -67,8 +67,8 @@
 #include "a8_settings.h"
 #include "pico_5200ctl.h"
 #include "pico_paddles.h"
+#include "pico_audio.h"                    /* the menus' sound; the serial monitor's sound keys */
 #ifdef PICO_FRUITJAM
-#include "pico_audio.h"                    /* the serial monitor's sound keys */
 #include "a8_display.h"                    /* V: the next HDMI mode */
 #endif
 
@@ -638,7 +638,7 @@ bool a8_input_frame(void) {
         dirs_was = dirs;
         int dx = (edge & A8_RIGHT) ? 1 : (edge & A8_LEFT) ? -1 : 0;
         int dy = (edge & A8_DOWN) ? 1 : (edge & A8_UP) ? -1 : 0;
-        if (dx || dy) a8_osk_move(dx, dy);
+        if (dx || dy) { a8_osk_move(dx, dy); pico_audio_beep(); }   /* (a move: a beep) */
         /* Typing: the game runs while fire holds the key down (at least
          * KEY_DOWN_FRAMES) and KEY_UP_FRAMES after, so it sees a whole
          * press and release; otherwise it stays paused. */
@@ -724,14 +724,23 @@ bool a8_input_frame(void) {
 
 static const int MENU_JOY_DEAD_X = 65;     /* % of the half-range (30 in a game) */
 
+/* Every menu screen polls a8_input_menu: it feeds the menus' sound, and a
+ * new press of a direction (a move) beeps (pico_audio.cpp: only while the
+ * menus have the sound - not in a game's menus). */
+static uint8_t menu_sound(uint8_t b) {
+    static uint8_t prev = 0;
+    const uint8_t mv = b & (A8M_UP | A8M_DOWN | A8M_LEFT | A8M_RIGHT);
+    if (mv & ~prev) pico_audio_menu_beep();
+    prev = mv;
+    pico_audio_menu_poll();
+    return b;
+}
+
 #ifdef PICO_FRUITJAM
 /* Three buttons: 1 down, 2 OK, 3 tap up / held (0.6 s) back; and the
  * serial monitor's keys. */
 uint8_t a8_input_menu(void) {
     serial_poll();
-#ifdef A8_MENU_MUSIC
-    pico_audio_menu_music_poll();          /* (every menu screen polls this: the music's feed) */
-#endif
     uint8_t b = 0;
     static bool m_down = false;
     static uint32_t m_since = 0, up_until = 0;
@@ -752,7 +761,7 @@ uint8_t a8_input_menu(void) {
     if (low(PIN_START) || port_fire(0)) b |= A8M_OK;
     if (low(PIN_SELECT)) b |= A8M_ALT;
     if (low(PIN_GREEN)) b |= A8M_GREEN;
-    return b;
+    return menu_sound(b);
 }
 #else
 uint8_t a8_input_menu(void) {
@@ -769,7 +778,7 @@ uint8_t a8_input_menu(void) {
     if (low(PIN_MENU)) b |= A8M_BACK;
     if (low(PIN_SELECT)) b |= A8M_ALT;
     if (low(PIN_GREEN)) b |= A8M_GREEN;
-    return b;
+    return menu_sound(b);
 }
 
 #endif

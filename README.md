@@ -54,6 +54,9 @@ request). The DRV key on the on-screen keyboard switches disk drive 1 off
 and on, like the switch on a real drive: let the game load, type DRV
 ("DRIVE OFF"), then START. (2.1: Game Settings > Disk drive 1 instead.)
 
+A short tone sounds on each move in the menus and on the on-screen
+keyboard (in a game too: mixed into its sound); it follows Volume.
+
 **Settings** (a row at the end of the game list; saved in flash):
 
 | Setting | Choices |
