@@ -338,9 +338,23 @@ static uint32_t usb_parse_pad(const uint8_t *r, uint16_t len) {
     return b;
 }
 
-extern "C" void tuh_hid_mount_cb(uint8_t dev, uint8_t idx, uint8_t const *desc, uint16_t desc_len) {
+/* DIAG (temporary): every device the host sets up (the hub too) */
+extern "C" void tuh_mount_cb(uint8_t dev) {
+    uint16_t vid = 0, pid = 0;
+    tuh_vid_pid_get(dev, &vid, &pid);
+    Serial.printf("[usb] device %u mounted: %04x:%04x%c", dev, vid, pid, 10);
+}
+extern "C" void tuh_umount_cb(uint8_t dev) { Serial.printf("[usb] device %u unmounted%c", dev, 10); }
+
+/* (TinyUSB's header declares the HID mount / unmount callbacks weak, which
+ * made these definitions weak too - and the linker took Adafruit's empty
+ * ones: the pad was set up but never asked for a report. a8_stubs.c, which
+ * doesn't include that header, defines them and calls these.) */
+extern "C" void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, uint16_t desc_len) {
     (void)desc; (void)desc_len;
     uint8_t proto = tuh_hid_interface_protocol(dev, idx);
+    Serial.printf("[usb] device %u HID interface %u, protocol %u, report descriptor %u bytes%c",
+                  dev, idx, proto, desc_len, 10);   /* DIAG (temporary) */
     if (proto == HID_ITF_PROTOCOL_KEYBOARD) {
         usb_kbd_addr = dev;
         usb_kbd_on = true;
@@ -358,7 +372,7 @@ extern "C" void tuh_hid_mount_cb(uint8_t dev, uint8_t idx, uint8_t const *desc, 
     tuh_hid_receive_report(dev, idx);
 }
 
-extern "C" void tuh_hid_umount_cb(uint8_t dev, uint8_t idx) {
+extern "C" void a8_usb_hid_umount(uint8_t dev, uint8_t idx) {
     (void)idx;
     if (dev == usb_pad_addr && usb_pad_on) { usb_pad_on = false; usb_pad = 0; usb_raw_len = 0; }
     if (dev == usb_kbd_addr && usb_kbd_on) {
