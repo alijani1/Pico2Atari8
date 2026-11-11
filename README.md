@@ -308,7 +308,7 @@ the host is silent and didn't wake properly, so it reconnects instead
 | USB gamepad (SNES-style) | Game | Menus |
 |---|---|---|
 | D-pad | joystick 1 | move |
-| A, B, X, Y, L, R | Game Settings' slots, mapped per game (default: A, B fire; X OPTION; Y on-screen keyboard; L SPACE; R RETURN) | A OK, B back, X Game Settings |
+| B, A, X, Y, L, R | Game Settings' slots, mapped per game (default: B, A fire - in a 5200 game B the bottom fire, A the top; X OPTION; Y on-screen keyboard; L SPACE; R RETURN) | A OK, B back, X Game Settings |
 | Select / Start | SELECT / START | |
 | Start + Select | MENU (tap: keyboard, hold: the game list) | |
 

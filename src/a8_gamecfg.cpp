@@ -60,7 +60,7 @@ static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Red", "Green", "Yellow", "
                                                      "Left side", "Right side", "Blue" };
 #elif defined(PICO_FRUITJAM)
 /* the USB pad's buttons (A also the Fruit Jam's button 1) */
-static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Pad A / Button 1", "Pad B", "Pad X", "Click",
+static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Pad B / Button 1", "Pad A", "Pad X", "Click",
                                                      "Pad L", "Pad R", "Pad Y" };
 #else
 static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Red", "Green", "Yellow", "Thumbstick click",

@@ -300,10 +300,11 @@ static void serial_poll(void) {
  *   nibble, where there is one):
  *     D-pad    joystick 1 / menus: move      Select   SELECT
  *     Start    START                         Start + Select  MENU (tap:
- *     A, B, X, Y, L, R: Game Settings' slots            keyboard, hold: the
+ *     B, A, X, Y, L, R: Game Settings' slots            keyboard, hold: the
  *       Red, Green, Yellow, Blue, side L, side R -       game list)
- *       mapped per game (by default A, B fire, X nothing, Y the on-screen
- *       keyboard, L nothing, R RETURN)
+ *       mapped per game (by default B, A fire - a 5200 game: B the bottom
+ *       one, A the top -, X OPTION, Y the on-screen keyboard, L SPACE, R
+ *       RETURN). (B first: the main fire, as button 1; it was A.)
  *     menus: A OK, B back, X Game Settings (the game under the cursor)
  *   A second pad is player 2: its D-pad joystick 2 (a 5200 game:
  *   controller 2), its slots through the same map - fire to joystick 2,
@@ -770,7 +771,7 @@ static uint32_t usb_kbd_buttons(void) {
         if (usb_kbd_has(0x50)) b |= A8U_LEFT;
         if (usb_kbd_has(0x4F)) b |= A8U_RIGHT;
     }
-    if (mod & 0x04 || mod & 0x10) b |= A8U_A;            /* Left Alt, Right Ctrl: fire (Red) */
+    if (mod & 0x04 || mod & 0x10) b |= A8U_B;            /* Left Alt, Right Ctrl: fire (Red: B's slot) */
     if (usb_kbd_has(0x3B)) b |= A8U_OPTION;              /* F2 OPTION */
     if (usb_kbd_has(0x3C)) b |= A8U_SELECT;              /* F3 */
     if (usb_kbd_has(0x3D)) b |= A8U_START;               /* F4 */
@@ -886,8 +887,8 @@ static uint32_t usb_pad2(void) { return usb_pads[1].on ? usb_pads[1].buttons : 0
 /* A pad's A8U_* as Game Settings' slots (A8_GB_* bits). */
 static uint32_t usb_slots(uint32_t b) {
     uint32_t s = 0;
-    if (b & A8U_A) s |= 1u << A8_GB_RED;
-    if (b & A8U_B) s |= 1u << A8_GB_GREEN;
+    if (b & A8U_B) s |= 1u << A8_GB_RED;                 /* B: the first slot (button 1's) */
+    if (b & A8U_A) s |= 1u << A8_GB_GREEN;
     if (b & A8U_X) s |= 1u << A8_GB_YELLOW;
     if (b & A8U_Y) s |= 1u << A8_GB_BLUE;
     if (b & A8U_L) s |= 1u << A8_GB_SIDE_L;
@@ -907,14 +908,14 @@ static bool usb_down(int p) {
     case VP_RIGHT:  return b & A8U_RIGHT;
     case VP_OPTION: return b & A8U_OPTION;               /* (the keyboard's F2) */
     case VP_SELECT: return (b & A8U_SELECT) && !combo;
-    case VP_GREEN:  return b & A8U_B;                    /* the slots: A is Red (button 1's) */
+    case VP_GREEN:  return b & A8U_A;                    /* the slots: B is Red (button 1's) */
     case VP_YELLOW: return b & A8U_X;
     case VP_BLUE:   return b & A8U_Y;
     case VP_SIDE_L: return b & A8U_L;
     case VP_SIDE_R: return b & A8U_R;
     default: break;
     }
-    if (p == PIN_RED)   return b & A8U_A;
+    if (p == PIN_RED)   return b & A8U_B;
     if (p == PIN_START) return (b & A8U_START) && !combo;
     if (p == PIN_MENU)  return combo || (b & A8U_MENU);
     return false;
@@ -1516,7 +1517,9 @@ uint8_t a8_input_menu(void) {
      * Settings (Green on the other devices); Enter: OK */
     /* (player 2's pad too: D-pad / stick, A, B, X, Start as player 1's) */
     const uint32_t u2 = usb_pads[1].on ? (usb_pads[1].buttons | usb_pads[1].adirs) : 0;
-    const uint32_t u = usb_buttons() | (u2 & ~(A8U_START | A8U_SELECT));
+    /* (the pads' own buttons: the keyboard's fire keys share B's slot, and
+     * Alt shouldn't be "back" here - the keyboard has Enter and Esc) */
+    const uint32_t u = (usb_pads[0].on ? usb_pads[0].buttons : 0) | (u2 & ~(A8U_START | A8U_SELECT));
     if (u2 & A8U_UP)    b |= A8M_UP;
     if (u2 & A8U_DOWN)  b |= A8M_DOWN;
     if (u2 & A8U_LEFT)  b |= A8M_LEFT;
