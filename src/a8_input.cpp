@@ -549,7 +549,9 @@ extern "C" void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, 
         PadLayout lay;
         if (desc && desc_len) hid_parse_layout(desc, desc_len, lay);
         const bool snes = vid == 0x081F && pid == 0xE401;
-        if (!lay.ok && !snes) {
+        /* a pad needs a left stick (X) or a D-pad (hat): an interface with
+         * neither (buttons alone, or reports only) gets no player */
+        if (!(lay.x.size || lay.hat.size) && !snes) {
             Serial.printf("[usb] %04x:%04x HID interface %u: not a pad (ignored)%c", vid, pid, idx, 10);
             return;
         }
