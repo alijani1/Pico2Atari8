@@ -53,6 +53,7 @@ void a8_frame(void);                 /* keyboard, emulate one frame, show it */
 void a8_silent_frame(void);          /* paused: a frame's time of silence */
 int  a8_toggle_drive1(void);         /* drive 1 off / back on; true = now on */
 int  a8_drive1_is_on(void);          /* drive 1 answers (Game Settings) */
+void a8_request_warmstart(void);     /* the RESET key, once: the next frame */
 /* Game Settings' "Disk drive 1: Off after load": once a frame. Switches
  * drive 1 off after the game has read the disk and then left it alone for
  * 3 s; true the once it does. */

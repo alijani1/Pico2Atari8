@@ -380,7 +380,8 @@ static uint32_t __not_in_flash_func(hash_row)(const uint8_t *row) {
 /* The 160x80 panel: shrink the snapshot and send all of it. */
 static void __not_in_flash_func(push_frame)(void) {
     uint32_t t0 = time_us_32();
-    const int mode = a8_settings.scale;     /* the keyboard is drawn after the shrink */
+    const int mode = a8_settings_scale_now();   /* the game's own, or Settings > Scale;
+                                                   the keyboard is drawn after the shrink */
     tft.startWrite();
     tft.setAddrWindow(0, 0, A8_TINY_W, A8_TINY_H);
     for (int y = 0, b = 0; y < A8_TINY_H; y += BAND, b ^= 1) {

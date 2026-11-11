@@ -28,6 +28,19 @@
 - The Yellow + click message now reads **PADDLE** / **JOYSTICK** (it was cut
   short before).
 
+**Keyboard on MENU, Blue mappable, twin-stick games**
+- **Tap MENU** in a game for the on-screen keyboard (hold it, as before, to
+  leave the game). **Blue** opens it too by default, but is now a mappable
+  button in Game Settings like the others.
+- New actions for any button: **Keyboard**, **Next scale** (Duo Ultimate's
+  small screen) and **Stick 2 Up / Down / Left / Right** - map four buttons
+  to joystick 2 (a 5200: controller 2) and play twin-stick games such as
+  Robotron: 2084 on the device alone.
+- **Scale per game** (Duo Ultimate): Game Settings > Scale, Default or a
+  mode; a MENU tap used to change it - map Next scale to a button instead.
+- **RST** on the on-screen keyboard: the Atari's RESET key (SPACE is a
+  little narrower to fit it).
+
 **5200 games: no dead zone on the thumbstick**
 - The thumbstick now gives a 5200 game its exact position, every bit of
   movement, as a real 5200 stick does. It used to ignore the first ~15 % of

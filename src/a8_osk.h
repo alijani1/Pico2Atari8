@@ -6,6 +6,7 @@
 #define A8_OSK_COLS 10          /* grid columns; a key spans 1 or more */
 #define A8_OSK_DRIVE (-100)     /* the DRV "key": disk drive 1 off / on */
 #define A8_OSK_GAME  (-101)     /* the gear "key": Game Settings (DRV is there now) */
+#define A8_OSK_RESET (-102)     /* RST: the Atari's RESET key (a warm start, once) */
 
 struct A8Key {
     const char *label;

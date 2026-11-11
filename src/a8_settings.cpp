@@ -63,9 +63,12 @@ static uint32_t games_check(const uint32_t *h, uint32_t n) {
 }
 
 /* Game Settings, one record a game that isn't on its defaults (a hash of
- * its path; the oldest goes when the list is full). 12 bytes each. */
-static const uint32_t CFG_MAGIC = 0x31464347u;    /* "GCF1" */
-static const int MAX_CFGS = 300;
+ * its path; the oldest goes when the list is full). 16 bytes each, "GCF2".
+ * (2.1 test builds had 12-byte "GCF1" records; never released, so not
+ * read - those builds' settings start over.) */
+static const uint32_t CFG_MAGIC = 0x32464347u;    /* "GCF2" */
+static const int MAX_CFGS = 250;
+static const int CFG_BTNS = 8;                    /* A8_GB_COUNT, and a spare */
 enum { CFG_PADDLE = 0x01,                         /* the Joy-Con is paddle 1 */
        CFG_5200 = 0x02,                           /* btn[] is for a 5200 game */
        CFG_DRIVE_OFF = 0x04,                      /* disk drive 1 off once loaded */
@@ -74,16 +77,18 @@ enum { CFG_PADDLE = 0x01,                         /* the Joy-Con is paddle 1 */
 struct GameCfg {
     uint32_t hash;
     uint8_t flags;
-    uint8_t btn[A8_GB_COUNT];                     /* A8_ACT_*; A8_ACT_DEFAULT = as shipped */
-    uint8_t spare;                                /* (int8_t) the Joy-Con paddle's centre
-                                                     offset (0 in records before it) */
+    uint8_t btn[CFG_BTNS];                        /* A8_ACT_*; A8_ACT_DEFAULT = as shipped */
+    int8_t ofs;                                   /* Paddle / Horizontal center */
+    uint8_t scale;                                /* 0 = Settings > Scale, else mode + 1 */
+    uint8_t spare;
 };
 struct StoredCfgs {
     uint32_t magic, count;
     GameCfg cfg[MAX_CFGS];
     uint32_t check;
 };
-static_assert(sizeof(GameCfg) == 12, "GameCfg is 12 bytes");
+static_assert(sizeof(GameCfg) == 16, "GameCfg is 16 bytes");
+static_assert(A8_GB_COUNT <= CFG_BTNS, "the buttons fit the record");
 static_assert(GAMES_AT + sizeof(StoredCfgs) <= 4096, "Game Settings fit the sector");
 /* The records are read where they are in flash (no RAM copy: RAM is
  * tight); only the game being played / set up is kept here, and save()
@@ -93,18 +98,20 @@ static bool cur_set = false, cur_dirty = false;
 static uint32_t this_game = 0;            /* hash of the game being played */
 static bool games_dirty = false;
 
-static uint32_t cfgs_check(const GameCfg *g, uint32_t n) {
-    uint32_t c = CFG_MAGIC ^ n;
+static uint32_t cfgs_check(uint32_t magic, const void *g, uint32_t bytes, uint32_t n) {
+    uint32_t c = magic ^ n;
     const uint8_t *b = (const uint8_t *)g;
-    for (uint32_t i = 0; i < n * sizeof(GameCfg); i++) c = (c << 5 | c >> 27) ^ b[i];
+    for (uint32_t i = 0; i < bytes; i++) c = (c << 5 | c >> 27) ^ b[i];
     return c;
 }
 
 /* What each button does when the game has no setting of its own. */
 static const uint8_t DEFAULT_800[A8_GB_COUNT] = {
-    A8_ACT_FIRE, A8_ACT_OPTION, 0x21 /* AKEY_SPACE */, A8_ACT_FIRE, A8_ACT_NONE, 0x0c /* AKEY_RETURN */ };
+    A8_ACT_FIRE, A8_ACT_OPTION, 0x21 /* AKEY_SPACE */, A8_ACT_FIRE, A8_ACT_NONE, 0x0c /* AKEY_RETURN */,
+    A8_ACT_KEYBOARD };
 static const uint8_t DEFAULT_5200[A8_GB_COUNT] = {
-    A8_ACT_FIRE, A8_ACT_TOP_FIRE, 0x27 /* AKEY_5200_ASTERISK */, A8_ACT_FIRE, A8_ACT_NONE, A8_ACT_NONE };
+    A8_ACT_FIRE, A8_ACT_TOP_FIRE, 0x27 /* AKEY_5200_ASTERISK */, A8_ACT_FIRE, A8_ACT_NONE, A8_ACT_NONE,
+    A8_ACT_KEYBOARD };
 
 static bool cur_is_default(void);
 
@@ -116,7 +123,8 @@ static uint32_t checksum(const Stored &s) {
 /* The saved records in flash, or nullptr. */
 static const StoredCfgs *flash_cfgs(void) {
     const StoredCfgs *c = (const StoredCfgs *)(a8_flash_read(A8_SETTINGS_PHYS) + GAMES_AT);
-    if (c->magic == CFG_MAGIC && c->count <= (uint32_t)MAX_CFGS && c->check == cfgs_check(c->cfg, c->count))
+    if (c->magic == CFG_MAGIC && c->count <= (uint32_t)MAX_CFGS &&
+        c->check == cfgs_check(CFG_MAGIC, c->cfg, c->count * sizeof(GameCfg), c->count))
         return c;
     return nullptr;
 }
@@ -132,16 +140,18 @@ static const StoredGames *flash_joyp(void) {
 /* The i-th saved record (of n), from either form. */
 static int saved_count(void) {
     if (const StoredCfgs *c = flash_cfgs()) return (int)c->count;
-    if (const StoredGames *g = flash_joyp()) return (int)g->count;
+    if (const StoredGames *g = flash_joyp()) return (int)g->count;   /* <= 250 = MAX_CFGS */
     return 0;
 }
 static GameCfg saved_cfg(int i) {
     if (const StoredCfgs *c = flash_cfgs()) return c->cfg[i];
     GameCfg r;
+    memset(r.btn, A8_ACT_DEFAULT, sizeof(r.btn));
+    r.ofs = 0;
+    r.scale = 0;
+    r.spare = 0;
     r.hash = flash_joyp()->hash[i];          /* 2.0: the Joy-Con as a paddle */
     r.flags = CFG_PADDLE;
-    memset(r.btn, A8_ACT_DEFAULT, sizeof(r.btn));
-    r.spare = 0;
     return r;
 }
 
@@ -205,7 +215,7 @@ static void save(void) {
     }
     g->magic = CFG_MAGIC;
     g->count = (uint32_t)n;
-    g->check = cfgs_check(g->cfg, g->count);
+    g->check = cfgs_check(CFG_MAGIC, g->cfg, n * sizeof(GameCfg), g->count);
     cur_dirty = false;
     pico_audio_suspend();                    /* its DMA can't ride out a flash write */
     a8_flash_write_sector(A8_SETTINGS_PHYS, sector);
@@ -230,6 +240,8 @@ void a8_settings_set_game(const char *path) {
         cur.hash = h;
         cur.flags = 0;
         memset(cur.btn, A8_ACT_DEFAULT, sizeof(cur.btn));
+        cur.ofs = 0;
+        cur.scale = 0;
         cur.spare = 0;
     }
 }
@@ -243,7 +255,7 @@ static int game_index(void) {
 
 static bool cur_is_default(void) {
     if (cur.flags & CFG_SETTINGS) return false;
-    if (cur.spare != 0) return false;             /* paddle centre offset */
+    if (cur.ofs != 0 || cur.scale != 0) return false;   /* centre offset, own Scale */
     for (uint8_t b : cur.btn) if (b != A8_ACT_DEFAULT) return false;
     return true;
 }
@@ -299,12 +311,13 @@ bool a8_settings_game_buttons_custom(bool is5200) {
 void a8_settings_game_reset(void) {
     cur.flags = 0;
     memset(cur.btn, A8_ACT_DEFAULT, sizeof(cur.btn));
-    cur.spare = 0;
+    cur.ofs = 0;
+    cur.scale = 0;
     cur_changed();
 }
 
 int a8_settings_game_paddle_ofs(void) {
-    int o = (int8_t)cur.spare;
+    int o = cur.ofs;
     return o < -A8_PADDLE_OFS_MAX ? -A8_PADDLE_OFS_MAX : o > A8_PADDLE_OFS_MAX ? A8_PADDLE_OFS_MAX : o;
 }
 
@@ -312,7 +325,7 @@ void a8_settings_set_game_paddle_ofs(int ofs) {
     if (ofs < -A8_PADDLE_OFS_MAX) ofs = -A8_PADDLE_OFS_MAX;
     if (ofs > A8_PADDLE_OFS_MAX) ofs = A8_PADDLE_OFS_MAX;
     if (ofs == a8_settings_game_paddle_ofs()) return;
-    cur.spare = (uint8_t)(int8_t)ofs;
+    cur.ofs = (int8_t)ofs;
     cur_changed();
 }
 
@@ -335,10 +348,25 @@ void a8_settings_set_game_machine(int m) {
     cur_changed();
 }
 
-/* Scale (160x80 panel): the next mode, at once; saved when the game ends. */
+/* Scale: Settings > Scale, unless the game has its own (Game Settings). */
+int a8_settings_scale_now(void) {
+    int g = a8_settings_game_scale();
+    return g ? g - 1 : a8_settings.scale;
+}
+
+int a8_settings_game_scale(void) { return cur.scale <= A8_SCALE_MODES ? cur.scale : 0; }
+
+void a8_settings_set_game_scale(int s) {
+    if (s < 0 || s > A8_SCALE_MODES || s == a8_settings_game_scale()) return;
+    cur.scale = (uint8_t)s;
+    cur_changed();
+}
+
+/* The Next scale action: the game's own Scale, the mode after the one in
+ * use, at once; saved when the game ends. (It was a MENU tap, changing
+ * Settings > Scale; a MENU tap is the keyboard now.) */
 void a8_settings_next_scale(void) {
-    a8_settings.scale = (a8_settings.scale + 1) % A8_SCALE_MODES;
-    games_dirty = true;
+    a8_settings_set_game_scale((a8_settings_scale_now() + 1) % A8_SCALE_MODES + 1);
 }
 
 /* The display must be stopped: its frame buffer is the sector buffer. */

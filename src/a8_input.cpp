@@ -110,7 +110,7 @@ static const int PIN_SLOT_CLICK = PIN_RETURN;
 static const int PIN_SLOT_CLICK = PIN_CLICK;
 #endif
 static const int SLOT_PINS[A8_GB_COUNT] = { PIN_RED, PIN_GREEN, PIN_YELLOW, PIN_SLOT_CLICK,
-                                            PIN_SIDE_UP, PIN_SIDE_DOWN };
+                                            PIN_SIDE_UP, PIN_SIDE_DOWN, PIN_BLUE };
 
 /* ---- Joy-Con ---------------------------------------------------------
  * The centre is assumed at the first reading (averaged at start-up); as the
@@ -295,9 +295,9 @@ static bool game_cfg_wanted = false;      /* the keyboard's gear key: Game Setti
 
 /* The device buttons held now, through the game's Game Settings. Yellow and
  * the click count for nothing while they're the Joy-Con switch (skip_yc). */
-struct Mapped { bool fire, top, start, select, option; int key; };
+struct Mapped { bool fire, top, start, select, option, keyboard, scale; int key; uint8_t j2; };
 static Mapped mapped_buttons(bool is5200, bool skip_yc) {
-    Mapped m = { false, false, false, false, false, -1 };
+    Mapped m = { false, false, false, false, false, false, false, -1, 0 };
     for (int slot = 0; slot < A8_GB_COUNT; slot++) {
         if (!low(SLOT_PINS[slot])) continue;
         if (skip_yc && (slot == A8_GB_YELLOW || slot == A8_GB_CLICK)) continue;
@@ -309,6 +309,12 @@ static Mapped mapped_buttons(bool is5200, bool skip_yc) {
         case A8_ACT_START:    m.start = true; break;
         case A8_ACT_SELECT:   m.select = true; break;
         case A8_ACT_OPTION:   m.option = true; break;
+        case A8_ACT_KEYBOARD: m.keyboard = true; break;     /* a press: open / close */
+        case A8_ACT_SCALE:    m.scale = true; break;        /* a press: the next mode */
+        case A8_ACT_J2_UP:    m.j2 |= A8_UP; break;          /* joystick 2 (twin-stick) */
+        case A8_ACT_J2_DOWN:  m.j2 |= A8_DOWN; break;
+        case A8_ACT_J2_LEFT:  m.j2 |= A8_LEFT; break;
+        case A8_ACT_J2_RIGHT: m.j2 |= A8_RIGHT; break;
         default:              if (a < 0x40) m.key = a; break;   /* an AKEY_* key */
         }
     }
@@ -337,6 +343,7 @@ bool a8_input_frame(void) {
     for (int n = 0; n < 8; n++) in.pot[n] = A8_POT_NONE;
     in.key = -1;
     uint8_t nav;                          /* moves the on-screen keyboard's cursor */
+    bool kb_level = false, scale_level = false;   /* buttons mapped to Keyboard / Next scale */
     ports_poll();
 #ifdef PICO_5200
     int pad = ctl5200_key();
@@ -410,6 +417,12 @@ bool a8_input_frame(void) {
         if (m.fire) in.trig[0] = 1;
         if (m.top) in.shift = 1;
         if (m.key >= 0) in.key = m.key;
+        if (m.j2) {                           /* controller 2's stick to the edges: */
+            in.stick[1] |= m.j2;              /* its directions, which the core reads */
+            in.pot[2] = in.pot[3] = A8_POT_NONE;   /* when the pots are at rest */
+        }
+        kb_level = m.keyboard;
+        scale_level = m.scale;
         if (low(PIN_SELECT)) in.key = AKEY_5200_PAUSE;
         if (low(PIN_START))  in.key = AKEY_5200_START;
     } else {
@@ -457,6 +470,9 @@ bool a8_input_frame(void) {
         in.select = low(PIN_SELECT) || m.select;
         in.option = m.option;
         if (m.key >= 0) in.key = m.key;
+        in.stick[1] |= m.j2;                  /* joystick 2 (twin-stick games) */
+        kb_level = m.keyboard;
+        scale_level = m.scale;
 
         /* Right side button (Duo: the 5-way's press): RETURN. On the Duo the
          * press is fire 1 instead — a press on a stick is expected to fire
@@ -467,14 +483,23 @@ bool a8_input_frame(void) {
     /* Blue: the on-screen keyboard, open / close on each press. (It used to
      * be RETURN on a tap as well, and a short first press typed a RETURN
      * before the keyboard opened.) */
+    /* (Now: any button mapped to Keyboard - Blue's default, Game Settings -
+     * and a MENU tap, below.) */
     static bool blue_was = true;          /* one still held from the menu: ignored */
     uint32_t t = millis();
-    bool blue = low(PIN_BLUE);
+    bool blue = kb_level;
     if (blue && !blue_was) {
         if (a8_osk_is_open()) a8_osk_close();
         else a8_osk_open();
     }
     blue_was = blue;
+    /* Next scale (a mapped button): the game's own Scale, the next mode */
+    static bool scale_was = true;
+    if (scale_level && !scale_was) {
+        a8_settings_next_scale();
+        a8_display_toast(a8_scale_names[a8_settings_scale_now()]);
+    }
+    scale_was = scale_level;
 
     /* The keyboard takes joystick 1 and its fire: the stick moves the
      * cursor (auto-repeat), fire types the key (held while fire is). */
@@ -507,12 +532,18 @@ bool a8_input_frame(void) {
             in.trig[0] = 0;
             if (a8_settings.keyboard == A8_KBD_ONE_KEY) a8_osk_close();
         }
+        if (fire_edge && a8_osk_key() == A8_OSK_RESET) {    /* RST: the Atari's RESET key */
+            a8_request_warmstart();                         /* once (a8_platform.c) */
+            a8_display_toast("RESET");
+            in.trig[0] = 0;
+            a8_osk_close();                                 /* the game runs it at once */
+        }
         if (fire_edge && a8_osk_key() == A8_OSK_GAME) {     /* the gear: Game Settings */
             game_cfg_wanted = true;                         /* main.cpp opens it */
             in.trig[0] = 0;
             a8_osk_close();
         }
-        if (key < 0 && in.trig[0] && a8_osk_key() >= 0) {  /* a new key (not DRV / the gear) */
+        if (key < 0 && in.trig[0] && a8_osk_key() >= 0) {  /* a new key (not DRV / RST / the gear) */
             key = a8_osk_key();
             down_left = KEY_DOWN_FRAMES;
             up_left = KEY_UP_FRAMES;
@@ -542,17 +573,18 @@ bool a8_input_frame(void) {
 
     /* MENU held 1 s: leave the game. A press already down when the game
      * started (from the menu) counts only after it has been released.
-     * 160x80 panel: a shorter press (a tap) picks the next Scale mode. */
+     * 160x80 panel: a shorter press (a tap) picks the next Scale mode.
+     * (Now, on every device, a tap opens / closes the on-screen keyboard,
+     * so Blue is free to map; Scale is the Next scale action and Game
+     * Settings > Scale.) */
     bool m = low(PIN_MENU);
     if (!m) {
-#ifdef PICO_TINY_SCREEN
         if (menu_seen_up && menu_down && millis() - menu_since < 1000) {
-            a8_settings_next_scale();
-            a8_display_toast(a8_scale_names[a8_settings.scale]);
-            Serial.printf("[input] MENU tap (%lu ms): scale %s\n",
-                          (unsigned long)(millis() - menu_since), a8_scale_names[a8_settings.scale]);
+            if (a8_osk_is_open()) a8_osk_close();
+            else a8_osk_open();
+            Serial.printf("[input] MENU tap (%lu ms): keyboard %s\n",
+                          (unsigned long)(millis() - menu_since), a8_osk_is_open() ? "open" : "closed");
         }
-#endif
         menu_seen_up = true; menu_down = false; return false;
     }
     if (!menu_seen_up) return false;

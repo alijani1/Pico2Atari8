@@ -44,6 +44,7 @@ void a8_settings_save_game(void);              /* ... the game ends (if it chang
  * fixed. The "click" slot is the Joy-Con's click, or the Duo's 5-way press;
  * the side buttons are the Quad's. */
 enum { A8_GB_RED, A8_GB_GREEN, A8_GB_YELLOW, A8_GB_CLICK, A8_GB_SIDE_L, A8_GB_SIDE_R,
+       A8_GB_BLUE,                /* (added last: the stored order) - Keyboard by default */
        A8_GB_COUNT };
 /* A button's action: an AKEY_* key with no SHIFT / CTRL (0x00 - 0x3F; on a
  * 5200 the keypad's AKEY_5200_*), or one of these. */
@@ -54,6 +55,12 @@ enum { A8_GB_RED, A8_GB_GREEN, A8_GB_YELLOW, A8_GB_CLICK, A8_GB_SIDE_L, A8_GB_SI
 #define A8_ACT_START    0xF3      /* 400/800/XL console keys */
 #define A8_ACT_SELECT   0xF4
 #define A8_ACT_OPTION   0xF5
+#define A8_ACT_KEYBOARD 0xF6      /* the on-screen keyboard: open / close (Blue's default) */
+#define A8_ACT_SCALE    0xF7      /* the next picture Scale mode (the game's own) */
+#define A8_ACT_J2_UP    0xF8      /* joystick 2 (a 5200: controller 2's stick) up ... */
+#define A8_ACT_J2_DOWN  0xF9
+#define A8_ACT_J2_LEFT  0xFA
+#define A8_ACT_J2_RIGHT 0xFB      /* ... right: twin-stick games (Robotron) */
 #define A8_ACT_DEFAULT  0xFF      /* stored: the button's default */
 uint8_t a8_settings_game_action(int slot, bool is5200);     /* never A8_ACT_DEFAULT */
 uint8_t a8_settings_default_action(int slot, bool is5200);
@@ -78,6 +85,11 @@ void    a8_settings_set_game_machine(int m);
 #define A8_PADDLE_OFS_MAX 113
 int     a8_settings_game_paddle_ofs(void);
 void    a8_settings_set_game_paddle_ofs(int ofs);
-void a8_settings_next_scale(void);             /* Scale: the next mode (saved as above) */
+/* Picture Scale: Settings > Scale is the default; a game can have its own
+ * (Game Settings, and the Next scale action). */
+int  a8_settings_scale_now(void);              /* the mode in use: the game's, or the default */
+int  a8_settings_game_scale(void);             /* 0 = the default, else mode + 1 */
+void a8_settings_set_game_scale(int s);
+void a8_settings_next_scale(void);             /* the game's own: the next mode (saved as above) */
 
 #endif

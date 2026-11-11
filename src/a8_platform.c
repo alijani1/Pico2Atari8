@@ -134,8 +134,17 @@ void PLATFORM_Sleep(double s)
 
 /* ---- input ------------------------------------------------------------- */
 
+/* The keyboard's RST key: AKEY_WARMSTART for one frame (Atari800_Frame
+ * runs it while it's the key code - held, it would reset every frame). */
+static volatile int warmstart_wanted = FALSE;
+void a8_request_warmstart(void) { warmstart_wanted = TRUE; }
+
 int PLATFORM_Keyboard(void)
 {
+	if (warmstart_wanted) {
+		warmstart_wanted = FALSE;
+		return AKEY_WARMSTART;
+	}
 	INPUT_key_consol = INPUT_CONSOL_NONE;
 	if (a8_input.start)  INPUT_key_consol &= ~INPUT_CONSOL_START;
 	if (a8_input.select) INPUT_key_consol &= ~INPUT_CONSOL_SELECT;

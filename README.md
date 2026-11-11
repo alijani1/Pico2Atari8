@@ -41,18 +41,18 @@ is restarted on an 800 (OS-B if the file is there); files named with
 `-osb` or `(OS-B)` start on the 800 straight away. If it crashes there too,
 the screen says so and MENU goes back to the list.
 
-**Keyboard.** Press Blue in a game and an on-screen
+**Keyboard.** Tap MENU (or press Blue, its default) in a game and an on-screen
 keyboard with most of the Atari's keys (0-9, A-Z, ; , . / - =, ESC, DEL,
-SPACE, RETURN) opens over the bottom of the picture, and the game pauses.
+SPACE, RETURN, and RST: the Atari's RESET key) opens over the bottom of the picture, and the game pauses.
 The stick (or Joy-Con) moves the cursor; fire types the key: the game runs
 while fire holds it down (and a few frames after), then pauses again. A
-tap of Blue closes the keyboard and the game carries on.
+tap of MENU (or Blue) closes the keyboard and the game carries on.
 
 **Disk drive off.** Some disk games refuse to start while a drive answers
 (this Shamus disk reboots on START if any drive replies to a status
 request). The DRV key on the on-screen keyboard switches disk drive 1 off
 and on, like the switch on a real drive: let the game load, type DRV
-("DRIVE OFF"), then START.
+("DRIVE OFF"), then START. (2.1: Game Settings > Disk drive 1 instead.)
 
 **Settings** (a row at the end of the game list; saved in flash):
 
@@ -69,23 +69,24 @@ and on, like the switch on a real drive: let the game load, type DRV
 ## Game Settings
 
 Each game can have its own button setup. Open **Game Settings** from the
-game list (highlight the game, press **Green**) or during a game (**Blue**
-for the on-screen keyboard, then the **gear** key, which replaced DRV; the
-game waits). Changes are remembered for that game (up to 300 games).
+game list (highlight the game, press **Green**) or during a game (tap
+**MENU** for the on-screen keyboard, then the **gear** key, which replaced
+DRV; the game waits). Changes are remembered for that game (up to 300 games).
 
 | Row | Choices |
 |---|---|
-| Red, Green, Yellow | left / right: Fire, OPTION, SELECT, START, SPACE, RETURN, ESC, None; FIRE: pick any key from a keyboard. A 5200 game: Bottom fire, Top fire, `*`, `#`, START, PAUSE, RESET, None, or any keypad key |
+| Red, Green, Yellow, Blue | left / right: Fire, OPTION, SELECT, START, SPACE, RETURN, ESC, Keyboard, Next scale (160x80 panel), Stick 2 Up / Down / Left / Right, None; FIRE: pick any key from a keyboard. A 5200 game: Bottom fire, Top fire, `*`, `#`, START, PAUSE, RESET, Keyboard, Stick 2 ..., None, or any keypad key. Blue is Keyboard by default. Stick 2: joystick 2's directions (a 5200: controller 2's stick at its edges) - four buttons as Robotron's firing stick |
 | Thumbstick click (Duo: 5-way press) | as above |
 | Left / Right side button (Quad) | as above |
 | Thumbstick | Joystick / Paddle (400/800/XL games; Yellow + click in a game switches it too) |
 | Paddle center | -113 to +113 (400/800/XL games): where the thumbstick paddle rests, for games whose playfield centre isn't the paddle's middle; + = to the right. Left / right: 1 a step (5 when held); FIRE: back to 0 |
 | Horizontal center | -113 to +113 (5200 games): the same for controller 1's analog stick x (thumbstick or a 5200 controller), at rest too, for 5200 games whose centre is off; + = to the right |
+| Scale | (160x80 panel) Default / Smooth / Sharp / Drop / Crop: this game's picture Scale; Default = Settings > Scale. The Next scale action changes it in play |
 | Machine | Default / 800XL / 400/800 (400/800/XL games): the machine this game starts on; Default = Settings > Default machine. SELECT in the list still starts the other one |
 | Disk drive 1 | On / Off after load (disk games and zips): for the few disk games that won't start while a drive answers - the drive switches off by itself 1.5 s after the game stops reading the disk (DRIVE OFF shows). Changed during a game, it applies at once. Replaces the keyboard's DRV key |
 | Reset to defaults | the buttons and the thumbstick back to the table below |
 
-Blue, START, SELECT, MENU and the sticks always stay as they are. Values
+START, SELECT, MENU (tap: keyboard, hold: the game list) and the sticks always stay as they are. Values
 that differ from the defaults show in orange. A game that isn't on its
 defaults shows **PADDLE MODE** or **CUSTOM KEYS** for a moment when it
 starts. Red and the click always type on the on-screen keyboard, whatever
@@ -137,7 +138,8 @@ Pico2Arcade, comes with the Quad release, and shares its ARCADE ROMS drive.
 | Yellow + click | | the Joy-Con as **paddle 1** instead of joystick 1, remembered for that game (press again to switch back; also Game Settings > Thumbstick): its left / right is the knob (Settings > Paddle sensitivity), Red / click the paddle's button. Real paddles on port 1 take over |
 | Paddles (ports 1–2) | | the four paddles (pots 0–3), for Kaboom!, Super Breakout and the like; plugging them in shows PADDLES 1 / 2 IN. Turn each one fully right once so it learns its end; 1–228 spans about half the turn, as on a real Atari (Settings > Paddle sensitivity) |
 | Red | play | fire 1 |
-| Blue | | on-screen keyboard: press to open / close - the game pauses, fire types a key (Settings > Keyboard); its gear key opens Game Settings |
+| Blue | | on-screen keyboard (by default; Game Settings can change it) |
+| MENU | | tap: on-screen keyboard, open / close - the game pauses, fire types a key (Settings > Keyboard); its gear key opens Game Settings. Hold 1 s: back to the game list |
 | Yellow | | SPACE (Game Settings can change it) |
 | Green | this game's Game Settings | OPTION (Game Settings can change it) |
 | START / SELECT | START = play; SELECT = play on the other machine (400/800: four joysticks, OS-B) | START / SELECT |

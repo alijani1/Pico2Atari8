@@ -37,21 +37,36 @@ extern "C" {
 }
 
 /* The common choices, in the order left / right steps through them. */
+/* (Next scale: only where there are Scale modes, the 160x80 panel.) */
+#ifdef PICO_TINY_SCREEN
+#define CHOICE_SCALE A8_ACT_SCALE,
+#else
+#define CHOICE_SCALE
+#endif
 static const uint8_t CHOICES_800[] = { A8_ACT_FIRE, A8_ACT_OPTION, A8_ACT_SELECT, A8_ACT_START,
-                                       AKEY_SPACE, AKEY_RETURN, AKEY_ESCAPE, A8_ACT_NONE };
+                                       AKEY_SPACE, AKEY_RETURN, AKEY_ESCAPE, A8_ACT_KEYBOARD,
+                                       CHOICE_SCALE
+                                       A8_ACT_J2_UP, A8_ACT_J2_DOWN, A8_ACT_J2_LEFT, A8_ACT_J2_RIGHT,
+                                       A8_ACT_NONE };
 static const uint8_t CHOICES_5200[] = { A8_ACT_FIRE, A8_ACT_TOP_FIRE, AKEY_5200_ASTERISK, AKEY_5200_HASH,
-                                        AKEY_5200_START, AKEY_5200_PAUSE, AKEY_5200_RESET, A8_ACT_NONE };
+                                        AKEY_5200_START, AKEY_5200_PAUSE, AKEY_5200_RESET, A8_ACT_KEYBOARD,
+                                        CHOICE_SCALE
+                                        A8_ACT_J2_UP, A8_ACT_J2_DOWN, A8_ACT_J2_LEFT, A8_ACT_J2_RIGHT,
+                                        A8_ACT_NONE };
 
 #ifdef PICO_DUO
 static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Red", "Green", "Yellow", "5-way press",
-                                                     "Left side", "Right side" };
+                                                     "Left side", "Right side", "Blue" };
 #else
 static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Red", "Green", "Yellow", "Thumbstick click",
-                                                     "Left side button", "Right side button" };
+                                                     "Left side button", "Right side button", "Blue" };
 #endif
+/* The order the buttons are listed in (Blue with the colours). */
+static const int SLOT_ORDER[A8_GB_COUNT] = { A8_GB_RED, A8_GB_GREEN, A8_GB_YELLOW, A8_GB_BLUE,
+                                             A8_GB_CLICK, A8_GB_SIDE_L, A8_GB_SIDE_R };
 
 /* The rows: a button slot (0 .. A8_GB_COUNT - 1), or one of these. */
-enum { ROW_STICK = 20, ROW_PADDLE_OFS, ROW_MACHINE, ROW_DRIVE, ROW_RESET, ROW_BACK };
+enum { ROW_STICK = 20, ROW_PADDLE_OFS, ROW_MACHINE, ROW_SCALE, ROW_DRIVE, ROW_RESET, ROW_BACK };
 
 #ifdef PICO_TINY_SCREEN
 static const int ROW_H = 10, LIST_Y = 10, SHOWN = 7, PANEL_W = 160, PANEL_H = 80, FONT = 1, TEXT_X = 2;
@@ -65,7 +80,7 @@ static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2
                       COL_TITLE = 0xFD20, COL_HINT = TFT_DARKGREY, COL_VALUE = 0x07FF,
                       COL_CHANGED = 0xFD20, COL_KEY = 0x39E7;
 
-static int rows[A8_GB_COUNT + 6], n_rows = 0, first_shown = 0;
+static int rows[A8_GB_COUNT + 8], n_rows = 0, first_shown = 0;
 static bool g5200 = false, g_in_game = false;
 static const char *g_name = "";
 
@@ -89,6 +104,12 @@ static void action_name(uint8_t a, char *buf, size_t cap) {
     case A8_ACT_START:    snprintf(buf, cap, "START"); return;
     case A8_ACT_SELECT:   snprintf(buf, cap, "SELECT"); return;
     case A8_ACT_OPTION:   snprintf(buf, cap, "OPTION"); return;
+    case A8_ACT_KEYBOARD: snprintf(buf, cap, "Keyboard"); return;
+    case A8_ACT_SCALE:    snprintf(buf, cap, "Next scale"); return;
+    case A8_ACT_J2_UP:    snprintf(buf, cap, "Stick 2 Up"); return;
+    case A8_ACT_J2_DOWN:  snprintf(buf, cap, "Stick 2 Down"); return;
+    case A8_ACT_J2_LEFT:  snprintf(buf, cap, "Stick 2 Left"); return;
+    case A8_ACT_J2_RIGHT: snprintf(buf, cap, "Stick 2 Right"); return;
     }
     if (!g5200 && a == AKEY_RETURN) { snprintf(buf, cap, "RETURN"); return; }
     const char *l = key_label(a, g5200);
@@ -125,6 +146,12 @@ static void value_text(int row, char *buf, size_t cap, bool *changed) {
         *changed = m != A8_MACH_DEFAULT;
         return;
     }
+    case ROW_SCALE: {
+        int g = a8_settings_game_scale();
+        snprintf(buf, cap, "%s", g ? a8_scale_names[g - 1] : "Default");
+        *changed = g != 0;
+        return;
+    }
     case ROW_DRIVE:
 #ifdef PICO_TINY_SCREEN
         snprintf(buf, cap, "%s", a8_settings_game_drive_off() ? "Off at load" : "On");
@@ -143,6 +170,7 @@ static const char *row_name(int row) {
     case ROW_STICK: return "Thumbstick";
     case ROW_PADDLE_OFS: return g5200 ? "Horizontal center" : "Paddle center";
     case ROW_MACHINE: return "Machine";
+    case ROW_SCALE: return "Scale";
     case ROW_DRIVE: return "Disk drive 1";
     case ROW_RESET: return "Reset to defaults";
     default:        return "Back";
@@ -346,10 +374,13 @@ void a8_gamecfg_screen(const char *name, bool is5200, bool in_game, bool has_dis
     g_in_game = in_game;
     g_name = name ? name : "";
     n_rows = 0;
-    for (int s = 0; s < A8_GB_COUNT; s++) if (a8_input_has_slot(s)) rows[n_rows++] = s;
+    for (int s : SLOT_ORDER) if (a8_input_has_slot(s)) rows[n_rows++] = s;
     if (!is5200 && a8_input_has_joycon()) { rows[n_rows++] = ROW_STICK; rows[n_rows++] = ROW_PADDLE_OFS; }
     if (is5200) rows[n_rows++] = ROW_PADDLE_OFS;          /* "Horizontal center" */
     if (!is5200) rows[n_rows++] = ROW_MACHINE;
+#ifdef PICO_TINY_SCREEN
+    rows[n_rows++] = ROW_SCALE;                           /* (Scale modes: this panel) */
+#endif
     if (!is5200 && has_disk) rows[n_rows++] = ROW_DRIVE;
     rows[n_rows++] = ROW_RESET;
     rows[n_rows++] = ROW_BACK;
@@ -390,6 +421,10 @@ void a8_gamecfg_screen(const char *name, bool is5200, bool in_game, bool has_dis
             int step = (rep.held_since && millis() - rep.held_since > 1500) ? 5 : 1;
             if (p & A8M_OK) a8_settings_set_game_paddle_ofs(0);          /* FIRE: back to 0 */
             else a8_settings_set_game_paddle_ofs(a8_settings_game_paddle_ofs() + dir * step);
+            draw_row(sel, true);
+        } else if (row == ROW_SCALE && (dir || (p & A8M_OK))) {
+            int g = a8_settings_game_scale() + (dir < 0 ? -1 : 1);     /* Default, modes */
+            a8_settings_set_game_scale((g + A8_SCALE_MODES + 1) % (A8_SCALE_MODES + 1));
             draw_row(sel, true);
         } else if (row == ROW_MACHINE && (dir || (p & A8M_OK))) {
             int m = a8_settings_game_machine() + (dir < 0 ? -1 : 1);

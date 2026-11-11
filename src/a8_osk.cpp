@@ -9,7 +9,10 @@
  * DRV isn't an Atari key: it switches disk drive 1 off and on (some disk
  * games won't start while a drive answers).
  * From 2.1 the last key is a gear instead (drawn from '@'): the game's
- * Game Settings (a8_gamecfg.cpp), where the drive switch is now.
+ * Game Settings (a8_gamecfg.cpp), where the drive switch is now. Beside it
+ * RST, the Atari's RESET key, and SPACE is 2 columns:
+ *
+ *   ESC DEL [SPACE] [ RET ]  -   =  RST  gear
  *
  * On a 5200 it is the controller's keypad instead:
  *
@@ -39,8 +42,9 @@ static const A8Key ROW3[] = { K("A", AKEY_a), K("S", AKEY_s), K("D", AKEY_d), K(
                               K("H", AKEY_h), K("J", AKEY_j), K("K", AKEY_k), K("L", AKEY_l), K(";", AKEY_SEMICOLON) };
 static const A8Key ROW4[] = { K("Z", AKEY_z), K("X", AKEY_x), K("C", AKEY_c), K("V", AKEY_v), K("B", AKEY_b),
                               K("N", AKEY_n), K("M", AKEY_m), K(",", AKEY_COMMA), K(".", AKEY_FULLSTOP), K("/", AKEY_SLASH) };
-static const A8Key ROW5[] = { K("ESC", AKEY_ESCAPE), K("DEL", AKEY_BACKSPACE), { "SPACE", AKEY_SPACE, 3 },
+static const A8Key ROW5[] = { K("ESC", AKEY_ESCAPE), K("DEL", AKEY_BACKSPACE), { "SPACE", AKEY_SPACE, 2 },
                               { "RET", AKEY_RETURN, 2 }, K("-", AKEY_MINUS), K("=", AKEY_EQUAL),
+                              K("RST", A8_OSK_RESET),       /* the Atari's RESET key */
                               K("@", A8_OSK_GAME) };       /* the gear (was DRV) */
 #define P(l, c) { l, c, 2 }
 static const A8Key PAD1[] = { P("1", AKEY_5200_1), P("2", AKEY_5200_2), P("3", AKEY_5200_3), { "START", AKEY_5200_START, 4 } };
@@ -53,7 +57,7 @@ static const A8Key PAD4[] = { P("*", AKEY_5200_ASTERISK), P("0", AKEY_5200_0), P
 
 struct Row { const A8Key *keys; int n; };
 static const Row KEYBOARD[A8_OSK_ROWS] = {
-    { ROW1, 10 }, { ROW2, 10 }, { ROW3, 10 }, { ROW4, 10 }, { ROW5, 7 },
+    { ROW1, 10 }, { ROW2, 10 }, { ROW3, 10 }, { ROW4, 10 }, { ROW5, 8 },
 };
 static const Row KEYPAD[4] = { { PAD1, 4 }, { PAD2, 4 }, { PAD3, 4 }, { PAD4, 4 } };
 
