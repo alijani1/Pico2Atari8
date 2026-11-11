@@ -654,13 +654,14 @@ struct MenuSound {
     uint32_t music_idx, music_frac;      /* where in menu16s8: sample, 1/65536 */
 };
 static MenuSound g_ms;
-static bool     g_menu = false;
+static bool     g_menu = false, g_menu_music = false;
 static uint32_t g_menu_rate = 22050, g_music_step = 0;
 
 /* One sample, and the state one sample on. */
 static int16_t menu_sample(MenuSound &m) {
     int32_t v = 0;
 #ifdef A8_MENU_MUSIC
+    if (!g_menu_music) return 0;
     int a = menu16s8[m.music_idx], b = menu16s8[m.music_idx + 1 < MUSIC_LEN ? m.music_idx + 1 : 0];
     v = (a * 65536 + (b - a) * (int32_t)m.music_frac) >> 9;          /* 8-bit << 7: half scale */
     m.music_frac += g_music_step;
@@ -671,8 +672,10 @@ static int16_t menu_sample(MenuSound &m) {
 }
 
 /* From setup: on (the sound's rate: starts the sound) before the game
- * list, off (0) once a game is picked. */
-extern "C" void pico_audio_menu_sound(int sample_rate) {
+ * list, off (0) once a game is picked. (And around a game's Game Settings,
+ * without the music.) */
+extern "C" void pico_audio_menu_sound(int sample_rate, int music) {
+    g_menu_music = music != 0;
     if (sample_rate) {
         pico_audio_init(sample_rate);
         g_menu_rate = (uint32_t)sample_rate;

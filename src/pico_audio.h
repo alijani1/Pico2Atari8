@@ -77,9 +77,10 @@ size_t  pico_audio_hdmi_take(int16_t *dst, size_t n);
 
 /* The menus' sound (every board): on (the sound's rate: starts the sound)
  * before the game list, off (0) once a game is picked; a tone on each move
- * (beep), and the music (A8_MENU_MUSIC); poll: from the menus' input
- * polling (a8_input_menu) - it feeds the sound. */
-void    pico_audio_menu_sound(int sample_rate);
+ * (beep), and the music (A8_MENU_MUSIC; music = 0: not - a game's Game
+ * Settings); poll: from the menus' input polling (a8_input_menu) - it
+ * feeds the sound. */
+void    pico_audio_menu_sound(int sample_rate, int music);
 void    pico_audio_menu_beep(void);
 void    pico_audio_menu_poll(void);
 /* The beep itself, any time the sound runs: a move on the on-screen

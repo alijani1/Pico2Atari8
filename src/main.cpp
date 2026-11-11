@@ -236,9 +236,9 @@ void setup() {
 #ifdef A8_HEADLESS
     const char *path = headless_pick();
 #else
-    pico_audio_menu_sound(A8_SAMPLE_RATE);   /* the menus' sound: beeps, music (pico_audio.cpp) */
+    pico_audio_menu_sound(A8_SAMPLE_RATE, 1);   /* the menus' sound: beeps, music (pico_audio.cpp) */
     const char *path = a8_menu_pick();
-    pico_audio_menu_sound(0);
+    pico_audio_menu_sound(0, 0);
 #endif
     strncpy(game_file, path, sizeof(game_file) - 1);
     a8_settings_set_game(path);        /* its own settings (the zip's path for a zip) */
@@ -359,9 +359,12 @@ void loop() {
          * saved when the game ends (the display's buffer is the sector's) */
         pico_audio_amp_off();
         a8_display_stop();
-        pico_audio_suspend();
+        /* (the sound was suspended here - nothing fed it, and an empty PWM
+         * ring clicks; the menus' sound feeds it now: silence, and the beeps
+         * - no music in a game) */
+        pico_audio_menu_sound(A8_SAMPLE_RATE, 0);
         a8_gamecfg_screen(game_title(), a8_is_5200(), true, game_is_disk());
-        pico_audio_resume();
+        pico_audio_menu_sound(0, 0);
         a8_display_start();
         pico_audio_amp_on();
         return;
