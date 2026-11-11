@@ -88,9 +88,15 @@ void __not_in_flash_func(pio_usb_bus_usb_transfer)(pio_port_t *pp,
     send_pre(pp);
   }
 
+  // Pico2Atari8: start + clear as one step. Cleared after the start, the
+  // flag could be wiped after a short packet had already finished, if a
+  // higher-priority interrupt (the Fruit Jam's HDMI scanlines) ran in
+  // between - and the wait below then never ended (core 1 hung).
+  uint32_t const int_state = save_and_disable_interrupts();
   pio_sm_exec(pp->pio_usb_tx, pp->sm_tx, pp->tx_start_instr);
   dma_channel_transfer_from_buffer_now(pp->tx_ch, data, len);
   pp->pio_usb_tx->irq = IRQ_TX_ALL_MASK; // clear complete flag
+  restore_interrupts(int_state);
 
   io_ro_32 *pc = &pp->pio_usb_tx->sm[pp->sm_tx].addr;
   while ((pp->pio_usb_tx->irq & IRQ_TX_ALL_MASK) == 0) {
