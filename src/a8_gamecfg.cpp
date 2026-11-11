@@ -58,6 +58,10 @@ static const uint8_t CHOICES_5200[] = { A8_ACT_FIRE, A8_ACT_TOP_FIRE, AKEY_5200_
 #ifdef PICO_DUO
 static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Red", "Green", "Yellow", "5-way press",
                                                      "Left side", "Right side", "Blue" };
+#elif defined(PICO_FRUITJAM)
+/* the USB pad's buttons (A also the Fruit Jam's button 1) */
+static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Pad A / Button 1", "Pad B", "Pad X", "Click",
+                                                     "Pad L", "Pad R", "Pad Y" };
 #else
 static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Red", "Green", "Yellow", "Thumbstick click",
                                                      "Left side button", "Right side button", "Blue" };

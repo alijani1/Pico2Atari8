@@ -167,17 +167,19 @@ static void draw_paddles(int n, int bar_at[2]) {
 static void draw_usb(int y) {
     A8UsbDiag d;
     a8_input_usb_diag(&d);
-    if (d.pad) text_at(4, y, COL_ON, "USB GAMEPAD %04x:%04x      ", d.vid, d.pid);
-    else       text_at(4, y, COL_HINT, "USB GAMEPAD not plugged     ");
     static const char *const N[12] = { "U", "D", "L", "R", "A", "B", "X", "Y", "L1", "R1", "SEL", "START" };
-    int x = 4;
-    for (int i = 0; i < 12; i++) {
-        lamp(x, y + 12, N[i], d.buttons & (1u << i));
-        x += (int)strlen(N[i]) * 6 + 10;
+    for (int n = 0; n < 2; n++, y += 26) {
+        char hex[28] = "";
+        for (int i = 0; i < d.raw_len[n] && i < 8; i++) snprintf(hex + i * 3, 4, "%02x ", d.raw[n][i]);
+        if (d.pad[n]) text_at(4, y, COL_ON, "PAD %d %04x:%04x  %-26s", n + 1, d.vid[n], d.pid[n], hex);
+        else          text_at(4, y, COL_HINT, "PAD %d not plugged %-26s", n + 1, "");
+        int x = 4;
+        for (int i = 0; i < 12; i++) {
+            lamp(x, y + 10, N[i], d.buttons[n] & (1u << i));
+            x += (int)strlen(N[i]) * 6 + 10;
+        }
     }
-    char hex[52] = "";
-    for (int i = 0; i < d.raw_len && i < 16; i++) snprintf(hex + i * 3, 4, "%02x ", d.raw[i]);
-    text_at(4, y + 28, COL_HINT, "raw %-48s", d.pad ? hex : "");
+    y -= 42;                                             /* (the keyboard line: y + 42) */
     if (d.keyboard) {
         char k[28] = "";
         for (int i = 2; i < 8; i++) if (d.kbd[i]) snprintf(k + strlen(k), sizeof(k) - strlen(k), "%02x ", d.kbd[i]);

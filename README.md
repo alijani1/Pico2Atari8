@@ -308,15 +308,18 @@ the host is silent and didn't wake properly, so it reconnects instead
 | USB gamepad (SNES-style) | Game | Menus |
 |---|---|---|
 | D-pad | joystick 1 | move |
-| A / B | fire | OK / back |
-| X | OPTION | |
-| Y | on-screen keyboard | |
+| A, B, X, Y, L, R | Game Settings' slots, mapped per game (default: A, B fire; X nothing; Y on-screen keyboard; L nothing; R RETURN) | A OK, B back, X Game Settings |
 | Select / Start | SELECT / START | |
-| L, R, or Start + Select | MENU (tap: keyboard, hold: the game list) | back (held) |
+| Start + Select | MENU (tap: keyboard, hold: the game list) | |
+
+A second pad is player 2: its D-pad is joystick 2 (a 5200 game: controller
+2), its buttons go through the same per-game map (fire to joystick 2, keys
+and console keys as player 1's), its Start / Select are START / SELECT.
+Pads are numbered in the order they connect.
 
 A USB keyboard types into the Atari's keyboard (by character, US layout;
 Ctrl = CTRL); arrows are joystick 1 (Ctrl + arrows: the Atari's cursor
-keys), Left Alt / Right Ctrl fire, F1 HELP, F2 / F3 / F4 OPTION / SELECT /
+keys), Left Alt / Right Ctrl fire (the A slot), F1 HELP, F2 / F3 / F4 OPTION / SELECT /
 START, F5 RESET, F12 MENU, Home CLEAR; in the menus arrows, Enter and Esc.
 A 5200 game: digits are the keypad, `*` / `#`, F3 PAUSE, F4 START, F5
 RESET. Settings > Controller test shows both, with the pad's raw report

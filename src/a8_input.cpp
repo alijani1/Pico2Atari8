@@ -94,12 +94,18 @@ static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
  * codec's I2C. */
 enum { VPIN_BASE = 48,                      /* above the RP2350B's GPIO 0-47 */
        VP_UP = VPIN_BASE, VP_DOWN, VP_LEFT, VP_RIGHT, VP_FIRE, VP_SELECT, VP_OPTION, VP_BLUE,
+       VP_GREEN, VP_YELLOW, VP_SIDE_L, VP_SIDE_R,  /* a USB pad's B, X, L, R (A8_USB_HOST) */
        VPIN_END };
 static const int NUM_PORTS = 1;
 static const int8_t PORT_PINS[1][5] = {     /* up down left right fire */
     { VP_UP, VP_DOWN, VP_LEFT, VP_RIGHT, VP_FIRE },
 };
+#ifdef A8_USB_HOST
+/* a USB pad's L / R: Game Settings' side-button slots */
+static const int PIN_SIDE_UP = VP_SIDE_L, PIN_SIDE_DOWN = VP_SIDE_R;
+#else
 static const int PIN_SIDE_UP = -1, PIN_SIDE_DOWN = -1;              /* none */
+#endif
 #else
 static const int NUM_PORTS = 4;
 static const int8_t PORT_PINS[4][5] = {     /* up down left right fire */
@@ -123,7 +129,14 @@ static const int PIN_RETURN = 7;                                     /* the 5-wa
  * 1 down, 3 tap up, 2 OK, 3 held back. Headless (no list): button 3 = the
  * next game on the drive instead (a8_input_next_game, main.cpp). SELECT,
  * OPTION and Blue (the keyboard) only from the serial monitor. No Joy-Con. */
+#ifdef A8_USB_HOST
+/* With the USB host, a pad's A, B, X, Y, L, R are Game Settings' slots
+ * (Red - with button 1 -, Green, Yellow, Blue, side L, side R): mapped per
+ * game like the other devices' buttons. */
+static const int PIN_RED = 0, PIN_GREEN = VP_GREEN, PIN_BLUE = VP_BLUE, PIN_YELLOW = VP_YELLOW;
+#else
 static const int PIN_RED = 0, PIN_GREEN = -1, PIN_BLUE = VP_BLUE, PIN_YELLOW = -1;
+#endif
 #ifdef A8_HEADLESS
 static const int PIN_SELECT = VP_SELECT, PIN_START = 4, PIN_MENU = -1, PIN_CLICK = -1;
 static const int PIN_NEXT_GAME = 5;
@@ -133,6 +146,8 @@ static const int PIN_SELECT = VP_SELECT, PIN_START = 4, PIN_MENU = 5, PIN_CLICK 
 static const int PIN_JOY_X = -1, PIN_JOY_Y = -1;
 static const int8_t PIN_5WAY[4] = { -1, -1, -1, -1 };
 static const int PIN_RETURN = PIN_SIDE_DOWN;                         /* none */
+/* (PIN_RETURN == PIN_SIDE_DOWN reads as "none"; with the USB host
+ * PIN_SIDE_DOWN is the pad's R) */
 #else
 static const int PIN_RED = 14, PIN_GREEN = 15, PIN_BLUE = 16, PIN_YELLOW = 17;
 static const int PIN_SELECT = 19, PIN_START = 20, PIN_MENU = 18, PIN_CLICK = 21;
@@ -283,15 +298,21 @@ static void serial_poll(void) {
  *   Gamepad (the Adafruit SNES-style pad, 081F:E401, and pads with its
  *   report - X, Y axes in bytes 0-1, buttons in 5-6; a hat in byte 5's low
  *   nibble, where there is one):
- *     D-pad    joystick 1 / menus: move      A        fire / menus: OK
- *     B        fire / menus: back            X        OPTION
- *     Y        the on-screen keyboard        Select   SELECT
- *     Start    START                         L, R     MENU (tap: keyboard,
- *     Start + Select  MENU                             hold: the game list)
+ *     D-pad    joystick 1 / menus: move      Select   SELECT
+ *     Start    START                         Start + Select  MENU (tap:
+ *     A, B, X, Y, L, R: Game Settings' slots            keyboard, hold: the
+ *       Red, Green, Yellow, Blue, side L, side R -       game list)
+ *       mapped per game (by default A, B fire, X nothing, Y the on-screen
+ *       keyboard, L nothing, R RETURN)
+ *     menus: A OK, B back, X Game Settings (the game under the cursor)
+ *   A second pad is player 2: its D-pad joystick 2 (a 5200 game:
+ *   controller 2), its slots through the same map - fire to joystick 2,
+ *   the rest (keys, OPTION ...) as player 1's; its Start / Select START /
+ *   SELECT, not MENU. Pads are numbered as they connect.
  *   Keyboard (boot protocol): types into the Atari's keyboard (by character,
  *   as a US PC keyboard; Ctrl: CTRL), and
  *     arrows   joystick 1 (Ctrl + arrows: the Atari's cursor keys)
- *     Left Alt / Right Ctrl   fire           F1  HELP
+ *     Left Alt / Right Ctrl   fire (Red's slot)   F1  HELP
  *     F2 OPTION   F3 SELECT   F4 START       F5  RESET (warm)
  *     F12      MENU                          Home  CLEAR
  *     menus: arrows move, Enter OK, Esc / Backspace back
@@ -304,13 +325,18 @@ static void serial_poll(void) {
 
 static Adafruit_USBH_Host usb_host;
 /* written by core 1 (the reports), read by core 0 */
-static volatile uint32_t usb_pad = 0;                    /* A8U_* held */
-static volatile uint8_t  usb_kbd[8];                     /* the last keyboard report */
-static volatile bool     usb_pad_on = false, usb_kbd_on = false;
-static volatile uint16_t usb_vid = 0, usb_pid = 0;
-static volatile uint8_t  usb_raw[16], usb_raw_len = 0;  /* the pad's last report as it came */
-static volatile uint32_t usb_events = 0;                 /* mounts / unmounts: core 0 logs them */
-static uint8_t usb_pad_addr = 0, usb_kbd_addr = 0;
+struct UsbPad {
+    bool on;
+    uint8_t addr, idx;                                   /* its device, HID interface */
+    uint16_t vid, pid;
+    uint32_t buttons;                                    /* A8U_* held */
+    uint8_t raw[16], raw_len;                            /* its last report as it came */
+};
+static UsbPad usb_pads[2];                               /* player 1, player 2 (as they connect) */
+static uint8_t usb_kbd[8];                               /* the last keyboard report */
+static bool    usb_kbd_on = false;
+static uint8_t usb_kbd_addr = 0;
+static uint32_t usb_events = 0;                          /* mounts / unmounts: logged */
 
 /* The SNES-style pad's report (and the many cheap pads that share it). */
 static uint32_t usb_parse_pad(const uint8_t *r, uint16_t len) {
@@ -351,20 +377,24 @@ extern "C" void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, 
     } else if (proto == HID_ITF_PROTOCOL_MOUSE) {
         return;                                          /* not used */
     } else {
+        UsbPad *p = !usb_pads[0].on ? &usb_pads[0] : !usb_pads[1].on ? &usb_pads[1] : nullptr;
+        if (!p) return;                                  /* a third: not used */
         uint16_t vid = 0, pid = 0;
         tuh_vid_pid_get(dev, &vid, &pid);
-        usb_vid = vid;
-        usb_pid = pid;
-        usb_pad_addr = dev;
-        usb_pad_on = true;
+        *p = UsbPad();
+        p->vid = vid;
+        p->pid = pid;
+        p->addr = dev;
+        p->idx = idx;
+        p->on = true;
     }
     usb_events++;
     tuh_hid_receive_report(dev, idx);
 }
 
 extern "C" void a8_usb_hid_umount(uint8_t dev, uint8_t idx) {
-    (void)idx;
-    if (dev == usb_pad_addr && usb_pad_on) { usb_pad_on = false; usb_pad = 0; usb_raw_len = 0; }
+    for (UsbPad &p : usb_pads)
+        if (p.on && p.addr == dev && p.idx == idx) p = UsbPad();
     if (dev == usb_kbd_addr && usb_kbd_on) {
         usb_kbd_on = false;
         for (int i = 0; i < 8; i++) usb_kbd[i] = 0;
@@ -375,11 +405,14 @@ extern "C" void a8_usb_hid_umount(uint8_t dev, uint8_t idx) {
 extern "C" void tuh_hid_report_received_cb(uint8_t dev, uint8_t idx, uint8_t const *r, uint16_t len) {
     if (dev == usb_kbd_addr && usb_kbd_on && tuh_hid_interface_protocol(dev, idx) == HID_ITF_PROTOCOL_KEYBOARD) {
         for (int i = 0; i < 8; i++) usb_kbd[i] = i < len ? r[i] : 0;
-    } else if (dev == usb_pad_addr && usb_pad_on) {
-        uint16_t n = len < sizeof(usb_raw) ? len : sizeof(usb_raw);
-        for (uint16_t i = 0; i < n; i++) usb_raw[i] = r[i];
-        usb_raw_len = (uint8_t)n;
-        usb_pad = usb_parse_pad(r, len);
+    } else {
+        for (UsbPad &p : usb_pads) {
+            if (!p.on || p.addr != dev || p.idx != idx) continue;
+            uint16_t n = len < sizeof(p.raw) ? len : sizeof(p.raw);
+            for (uint16_t i = 0; i < n; i++) p.raw[i] = r[i];
+            p.raw_len = (uint8_t)n;
+            p.buttons = usb_parse_pad(r, len);
+        }
     }
     tuh_hid_receive_report(dev, idx);
 }
@@ -526,11 +559,11 @@ static uint32_t usb_kbd_buttons(void) {
         if (usb_kbd_has(0x50)) b |= A8U_LEFT;
         if (usb_kbd_has(0x4F)) b |= A8U_RIGHT;
     }
-    if (mod & 0x04 || mod & 0x10) b |= A8U_A;            /* Left Alt, Right Ctrl: fire */
-    if (usb_kbd_has(0x3B)) b |= A8U_X;                   /* F2 OPTION */
+    if (mod & 0x04 || mod & 0x10) b |= A8U_A;            /* Left Alt, Right Ctrl: fire (Red) */
+    if (usb_kbd_has(0x3B)) b |= A8U_OPTION;              /* F2 OPTION */
     if (usb_kbd_has(0x3C)) b |= A8U_SELECT;              /* F3 */
     if (usb_kbd_has(0x3D)) b |= A8U_START;               /* F4 */
-    if (usb_kbd_has(0x45)) b |= A8U_L;                   /* F12 MENU */
+    if (usb_kbd_has(0x45)) b |= A8U_MENU;                /* F12 MENU */
     return b;
 }
 
@@ -576,10 +609,28 @@ static uint32_t usb_buttons(void) {
     static uint32_t seen = 0;
     if (usb_events != seen) {                            /* (logged here: core 0 has the serial) */
         seen = usb_events;
-        Serial.printf("[usb] gamepad %s (%04x:%04x), keyboard %s%c", usb_pad_on ? "connected" : "none",
-                      usb_vid, usb_pid, usb_kbd_on ? "connected" : "none", 10);
+        for (int i = 0; i < 2; i++)
+            if (usb_pads[i].on) Serial.printf("[usb] gamepad %d: %04x:%04x%c", i + 1, usb_pads[i].vid,
+                                              usb_pads[i].pid, 10);
+        Serial.printf("[usb] gamepads %d, keyboard %s%c", usb_pads[0].on + usb_pads[1].on,
+                      usb_kbd_on ? "connected" : "none", 10);
     }
-    return usb_pad | usb_kbd_buttons();
+    return usb_pads[0].buttons | usb_kbd_buttons();
+}
+
+/* Player 2's pad: what it holds (A8U_*). */
+static uint32_t usb_pad2(void) { return usb_pads[1].on ? usb_pads[1].buttons : 0; }
+
+/* A pad's A8U_* as Game Settings' slots (A8_GB_* bits). */
+static uint32_t usb_slots(uint32_t b) {
+    uint32_t s = 0;
+    if (b & A8U_A) s |= 1u << A8_GB_RED;
+    if (b & A8U_B) s |= 1u << A8_GB_GREEN;
+    if (b & A8U_X) s |= 1u << A8_GB_YELLOW;
+    if (b & A8U_Y) s |= 1u << A8_GB_BLUE;
+    if (b & A8U_L) s |= 1u << A8_GB_SIDE_L;
+    if (b & A8U_R) s |= 1u << A8_GB_SIDE_R;
+    return s;
 }
 
 /* A virtual pin (or button 2 / 3's GPIO) held by the USB pad / keyboard. */
@@ -592,25 +643,32 @@ static bool usb_down(int p) {
     case VP_DOWN:   return b & A8U_DOWN;
     case VP_LEFT:   return b & A8U_LEFT;
     case VP_RIGHT:  return b & A8U_RIGHT;
-    case VP_FIRE:   return b & (A8U_A | A8U_B);
-    case VP_OPTION: return b & A8U_X;
-    case VP_BLUE:   return b & A8U_Y;
+    case VP_OPTION: return b & A8U_OPTION;               /* (the keyboard's F2) */
     case VP_SELECT: return (b & A8U_SELECT) && !combo;
+    case VP_GREEN:  return b & A8U_B;                    /* the slots: A is Red (button 1's) */
+    case VP_YELLOW: return b & A8U_X;
+    case VP_BLUE:   return b & A8U_Y;
+    case VP_SIDE_L: return b & A8U_L;
+    case VP_SIDE_R: return b & A8U_R;
     default: break;
     }
+    if (p == PIN_RED)   return b & A8U_A;
     if (p == PIN_START) return (b & A8U_START) && !combo;
-    if (p == PIN_MENU)  return combo || (b & (A8U_L | A8U_R));
+    if (p == PIN_MENU)  return combo || (b & A8U_MENU);
     return false;
 }
 
 void a8_input_usb_diag(A8UsbDiag *d) {
-    d->pad = usb_pad_on;
+    for (int n = 0; n < 2; n++) {
+        const UsbPad &p = usb_pads[n];
+        d->pad[n] = p.on;
+        d->vid[n] = p.vid;
+        d->pid[n] = p.pid;
+        d->buttons[n] = p.buttons;
+        d->raw_len[n] = p.raw_len;
+        for (int i = 0; i < 16; i++) d->raw[n][i] = p.raw[i];
+    }
     d->keyboard = usb_kbd_on;
-    d->vid = usb_vid;
-    d->pid = usb_pid;
-    d->buttons = usb_pad;
-    d->raw_len = usb_raw_len;
-    for (int i = 0; i < 16; i++) d->raw[i] = usb_raw[i];
     for (int i = 0; i < 8; i++) d->kbd[i] = usb_kbd[i];
     d->key = usb_kbd_akey(false);
 }
@@ -944,7 +1002,7 @@ bool a8_input_frame(void) {
         in.select = low(PIN_SELECT) || m.select;
         in.option = m.option;
 #ifdef PICO_FRUITJAM
-        if (vpin_down(VP_OPTION)) in.option = 1;
+        if (low(VP_OPTION)) in.option = 1;          /* (the serial key, the USB keyboard's F2) */
 #endif
         if (m.key >= 0) in.key = m.key;
         in.stick[1] |= m.j2;                  /* joystick 2 (twin-stick games) */
@@ -958,6 +1016,32 @@ bool a8_input_frame(void) {
     }
 
 #ifdef A8_USB_HOST
+    /* Player 2's USB pad: its D-pad joystick 2 (a 5200 game: controller 2),
+     * its slots through the game's map - fire to joystick 2, the rest
+     * (keys, the console keys) as player 1's; Start / Select START /
+     * SELECT (not MENU). */
+    if (const uint32_t p2 = usb_pad2()) {
+        const bool is5200 = a8_is_5200();
+        uint8_t d2 = 0;
+        if (p2 & A8U_UP) d2 |= A8_UP;
+        if (p2 & A8U_DOWN) d2 |= A8_DOWN;
+        if (p2 & A8U_LEFT) d2 |= A8_LEFT;
+        if (p2 & A8U_RIGHT) d2 |= A8_RIGHT;
+        in.stick[1] |= d2;
+        if (d2 && is5200) in.pot[2] = in.pot[3] = A8_POT_NONE;   /* the core reads the directions */
+        const uint32_t slots = usb_slots(p2);
+        for (int slot = 0; slot < A8_GB_COUNT; slot++) {
+            if (!(slots & (1u << slot))) continue;
+            uint8_t a = a8_settings_game_action(slot, is5200);
+            if (a == A8_ACT_FIRE || a == A8_ACT_TOP_FIRE) in.trig[1] = 1;
+            else if (a == A8_ACT_START) { if (is5200) in.key = AKEY_5200_START; else in.start = 1; }
+            else if (a == A8_ACT_SELECT) in.select = 1;
+            else if (a == A8_ACT_OPTION) in.option = 1;
+            else if (a < 0x40 && in.key < 0) in.key = a;          /* an AKEY_* key */
+        }
+        if (p2 & A8U_START) { if (is5200) in.key = AKEY_5200_START; else in.start = 1; }
+        if (p2 & A8U_SELECT) { if (is5200) in.key = AKEY_5200_PAUSE; else in.select = 1; }
+    }
     /* a USB keyboard's key (not while the on-screen one is open); F5: the
      * Atari's RESET, once a press */
     if (!a8_osk_is_open()) {
@@ -1125,19 +1209,22 @@ uint8_t a8_input_menu(void) {
     if ((int32_t)(up_until - now) > 0) b |= A8M_UP;
     uint8_t d = port_dirs(0);
     if (d & A8_UP)    b |= A8M_UP;
-    if ((d & A8_DOWN) || low(PIN_RED)) b |= A8M_DOWN;
+    if ((d & A8_DOWN) || digitalRead(PIN_RED) == LOW) b |= A8M_DOWN;   /* button 1 (a pad's A: OK) */
     if (d & A8_LEFT)  b |= A8M_LEFT;
     if (d & A8_RIGHT) b |= A8M_RIGHT;
     if (low(PIN_START) || port_fire(0)) b |= A8M_OK;
     if (low(PIN_SELECT)) b |= A8M_ALT;
-    if (low(PIN_GREEN)) b |= A8M_GREEN;
 #ifdef A8_USB_HOST
-    /* the pad's B and the keyboard's Esc / Backspace: back (B is fire too,
-     * so not OK here); Enter: OK */
+    /* the pad's A: OK; B and the keyboard's Esc / Backspace: back; X: Game
+     * Settings (Green on the other devices); Enter: OK */
     const uint32_t u = usb_buttons();
     const bool k_back = usb_kbd_on && (usb_kbd_has(0x29) || usb_kbd_has(0x2A));
+    if (u & A8U_A) b |= A8M_OK;
     if (((u & A8U_B) && !(u & A8U_A)) || k_back) { b &= ~A8M_OK; b |= A8M_BACK; }
+    if (u & A8U_X) b |= A8M_GREEN;
     if (usb_kbd_on && (usb_kbd_has(0x28) || usb_kbd_has(0x58))) b |= A8M_OK;
+#else
+    if (low(PIN_GREEN)) b |= A8M_GREEN;
 #endif
     return menu_sound(b);
 }
