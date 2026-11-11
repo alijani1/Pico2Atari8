@@ -23,8 +23,10 @@
  *
  * Scale (320x240 panel; a8_scale.h): core 1 rearranges the snapshot in
  * place before the overlays and the hashing - TV / TV SHARP / PIXEL squeeze
- * each line to 240 / 160 pixels, centred, with the line's border colour
- * (border8, taken with the snapshot) at the sides; STRETCH spreads lines
+ * each line to 240 / 160 pixels, centred, with black at the sides (it was
+ * each line's border colour, taken from the overscan's left edge - but
+ * that column isn't always border: garbled colour lines on the Quad);
+ * STRETCH spreads lines
  * 24-215 over all 240. TV's blend (the middle pixel of each 3) is made as
  * the line is turned into RGB565, not on overlay lines.
  *
@@ -71,7 +73,6 @@ static volatile uint32_t rows_sum = 0;                      /* rows sent per pus
 static uint32_t row_hash[SCR_H];                        /* what the panel shows */
 #ifndef PICO_TINY_SCREEN
 const char *const a8_screen_scale_names[A8_SCREEN_SCALES] = { "NORMAL", "TV", "TV SHARP", "PIXEL", "STRETCH" };
-static uint8_t border8[SCR_H];                          /* each line's border colour (Scale) */
 static uint16_t pal_plain[256];                         /* RGB565, not byte-swapped: TV's blend */
 static int blend_y0 = 0, blend_y1 = 0;                  /* TV: blend lines y0 .. y1-1 */
 #endif
@@ -376,10 +377,6 @@ extern "C" void a8_display_frame(void) {
     const uint8_t *src = (const uint8_t *)Screen_atari + SRC_X;
     for (int y = 0; y < SCR_H; y++)
         memcpy(frame8 + y * SCR_W, src + y * Screen_WIDTH, SCR_W);
-#ifndef PICO_TINY_SCREEN
-    for (int y = 0; y < SCR_H; y++)              /* the left edge of the overscan */
-        border8[y] = ((const uint8_t *)Screen_atari)[y * Screen_WIDTH];
-#endif
     frame_ready = true;
 }
 
@@ -450,6 +447,7 @@ static void __not_in_flash_func(push_rows)(int y0, int n) {
 }
 
 /* Scale (a8_scale.h): rearrange the snapshot in place. */
+static const uint8_t SIDE_BAND = 0x00;          /* Atari palette: black */
 static uint8_t scale_tmp[SCR_W];
 static void __not_in_flash_func(scale_frame)(int mode) {
     if (mode == A8_BIG_TV || mode == A8_BIG_TV_SHARP || mode == A8_BIG_PIXEL) {
@@ -457,8 +455,8 @@ static void __not_in_flash_func(scale_frame)(int mode) {
         for (int y = 0; y < SCR_H; y++) {
             uint8_t *r = frame8 + y * SCR_W;
             memcpy(scale_tmp, r, SCR_W);
-            memset(r, border8[y], x0);
-            memset(r + x0 + w, border8[y], SCR_W - x0 - w);
+            memset(r, SIDE_BAND, x0);    /* black side bands */
+            memset(r + x0 + w, SIDE_BAND, SCR_W - x0 - w);
             if (mode == A8_BIG_PIXEL)
                 for (int i = 0; i < w; i++) r[x0 + i] = scale_tmp[2 * i];
             else                         /* 4 source pixels -> 3: 0, 1, 2 (TV: 1 = blend of 1, 2) */

@@ -49,7 +49,7 @@ extern const char *const a8_scale_names[A8_SCALE_MODES];
  *   STRETCH   320 wide, the 192-line playfield (lines 24-215) stretched to
  *             all 240 lines (the border above / below is cut)
  *
- * The side bands of TV / PIXEL are the border colour of that line. */
+ * The side bands of TV / PIXEL are black. */
 #ifdef PICO_TINY_SCREEN
 #define A8_SCREEN_SCALES A8_SCALE_MODES
 #define a8_screen_scale_names a8_scale_names
