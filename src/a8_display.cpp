@@ -1093,7 +1093,33 @@ void a8_display_core1_loop(void) {
  * (In this file, not files of their own: even an empty extra object file
  * reorders the linker's veneers in the other builds.) */
 #include "drivers/dvhstx/dvhstx.cpp"
+/* 800x600 @ 60 Hz by the VESA book: the driver's has a front porch of 44
+ * (lines of 1060 pixels, not 1056). With that, the first display tried
+ * showed 7 thin evenly spaced black vertical bars (when it showed 800x600 at
+ * all - it takes the mode only sometimes, and with 40 not at all); a second
+ * display shows it clean with 40 (2026-11-11).
+ * TODO: the driver's 44 on that second display, to know whether the bars
+ * were the porch or the first display.
+ * The driver's table entry is renamed out of the way and this one takes its
+ * name. */
+#define dvi_timing_800x600p_60hz dvi_timing_800x600p_60hz_driver
 #include "drivers/dvhstx/dvi.cpp"
+#undef dvi_timing_800x600p_60hz
+const struct dvi_timing dvi_timing_800x600p_60hz = {
+    .h_sync_polarity = false,
+    .h_front_porch   = 40,
+    .h_sync_width    = 128,
+    .h_back_porch    = 88,
+    .h_active_pixels = 800,
+
+    .v_sync_polarity = false,
+    .v_front_porch   = 1,
+    .v_sync_width    = 4,
+    .v_back_porch    = 23,
+    .v_active_lines  = 600,
+
+    .bit_clk_khz     = 400000
+};
 #include "drivers/dvhstx/font_cp437.c"
 #ifdef A8_HDMI_AUDIO
 #undef NUM_CHANS                         /* dvhstx.cpp's 3; the audio code's is 4 */
