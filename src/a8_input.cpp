@@ -388,7 +388,10 @@ static uint32_t usb_parse_pad(const uint8_t *r, uint16_t len) {
 
 /* The report descriptor's short items: the Generic Desktop page's X (0x30),
  * Y (0x31) and Hat switch (0x39), and the Button page's 1-16, in the first
- * report (ID) that has any of them; input fields only. */
+ * report (ID) that has any of them; input fields only, and only inside a
+ * Generic Desktop Joystick (0x04) or GamePad (0x05) application collection
+ * - a mouse's X / Y and buttons (0e8f:3013's second interface has a mouse
+ * and a keyboard collection) are not a pad. */
 static void hid_parse_layout(const uint8_t *d, uint16_t len, PadLayout &L) {
     L = PadLayout();
     for (uint16_t &b : L.btn_bit) b = 0xFFFF;
@@ -400,6 +403,7 @@ static void hid_parse_layout(const uint8_t *d, uint16_t len, PadLayout &L) {
     struct { uint8_t id; uint16_t bits; } offs[8];       /* each report's bits so far */
     uint8_t noffs = 0;
     int chosen = -1;
+    int depth = 0, pad_depth = 0;                        /* collections; the pad one's depth */
     for (uint16_t i = 0; i < len;) {
         const uint8_t p = d[i++];
         if (p == 0xFE) {                                 /* a long item: skipped */
@@ -432,7 +436,15 @@ static void hid_parse_layout(const uint8_t *d, uint16_t len, PadLayout &L) {
             else if (tag == 1) { umin = (uint16_t)u; urange = true; }
             else if (tag == 2) umax = (uint16_t)u;
         } else if (type == 0) {                          /* main */
-            if (tag == 8) {                              /* Input */
+            if (tag == 0xA) {                            /* Collection */
+                depth++;
+                const uint16_t usage = nus ? usages[0] : 0;
+                if (!pad_depth && u == 0x01 && page == 0x01 && (usage == 0x04 || usage == 0x05))
+                    pad_depth = depth;                   /* an application: Joystick / GamePad */
+            } else if (tag == 0xC) {                     /* End Collection */
+                if (depth == pad_depth) pad_depth = 0;
+                if (depth > 0) depth--;
+            } else if (tag == 8) {                       /* Input (taken inside a pad's collection) */
                 int o = -1;
                 for (int k = 0; k < noffs; k++) if (offs[k].id == rid) o = k;
                 if (o < 0 && noffs < 8) { o = noffs++; offs[o].id = rid; offs[o].bits = 0; }
@@ -441,7 +453,7 @@ static void hid_parse_layout(const uint8_t *d, uint16_t len, PadLayout &L) {
                 for (uint16_t f = 0; f < rcount; f++) {
                     const uint16_t bit = offs[o].bits;
                     offs[o].bits += rsize;
-                    if (!data_var || (chosen >= 0 && chosen != rid)) continue;
+                    if (!data_var || !pad_depth || (chosen >= 0 && chosen != rid)) continue;
                     uint16_t usage = urange ? (uint16_t)(umin + f)
                                    : nus ? usages[f < nus ? f : nus - 1] : 0;
                     if (urange && usage > umax) continue;
@@ -546,7 +558,8 @@ extern "C" void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, 
          * it is the SNES-style pad: a pad's other interfaces (0e8f:3013 has a
          * second one) were taken for a second pad with the SNES layout -
          * one pad took both players, and its garbage held the menus' UP */
-        PadLayout lay;
+        PadLayout lay{};                                 /* (zeroed: no descriptor - over the host's
+                                                            256 bytes - is no layout, not stack junk) */
         if (desc && desc_len) hid_parse_layout(desc, desc_len, lay);
         const bool snes = vid == 0x081F && pid == 0xE401;
         /* a pad needs a left stick (X) or a D-pad (hat): an interface with
