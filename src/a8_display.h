@@ -22,8 +22,14 @@ uint32_t a8_display_push_us(uint32_t *avg_rows);
 #ifdef A8_HDMI
 /* HDMI set-up line on the serial monitor (at start). */
 void a8_display_report(void);
-/* Dump the canvas's top-right corner (serial monitor key #). */
-void a8_display_dump(void);
+#ifdef A8_HDMI_AUDIO
+/* Sound over HDMI on / off (restarts the output); false if the mode has
+ * no room for it. On: whether it is; gaps: silence packets the driver had
+ * to send (the queue ran dry). */
+bool a8_display_set_hdmi_audio(bool on);
+bool a8_display_hdmi_audio(void);
+uint32_t a8_display_hdmi_audio_gaps(void);
+#endif
 /* Step to the next HDMI video mode (serial monitor key V). */
 void a8_display_next_hdmi_mode(void);
 #endif

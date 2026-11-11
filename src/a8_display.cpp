@@ -630,6 +630,59 @@ static volatile int ov_top = 0, ov_bottom = SCR_H;      /* rows < ov_top or >= o
 static volatile bool hdmi_wanted = false, hdmi_started = false, hdmi_ok = false;
 static volatile bool composing = false;                 /* core 1 is in hdmi_compose */
 static volatile bool ov_redraw = true;                  /* frame8 was reused: redraw the overlays */
+
+#ifdef A8_HDMI_AUDIO
+/* ---- sound over HDMI ------------------------------------------------------
+ * The driver sends 16-bit stereo in data islands in the blanking (its
+ * dvhstx_audio.cpp and pico_hdmi's packet code, compiled at the end of this
+ * file and in a8_stubs.c), from a queue of 256 encoded packets (36 KB, in
+ * RAM: A8_HDMI_AUDIO builds only). 44100 Hz = exactly 2 x the emulator's
+ * 22050: each sample is sent twice, the first of the two the mean of it
+ * and the one before. Core 1 encodes: pico_audio.cpp's ring (filled and
+ * paced as for I2S) -> 2 samples -> one packet of 4 frames -> the queue,
+ * kept HDMI_AUDIO_TARGET packets deep (18 ms). The packet code runs from
+ * RAM (the driver places it there). DMA channel 3 is the driver's audio
+ * channel: reserved here from start-up, so the I2S stream can't take it,
+ * and released to the driver when it starts with sound. */
+extern "C" {
+#include "drivers/dvhstx/audio_config.h"
+#include "pico_hdmi/hstx_packet.h"
+#include "pico_hdmi/hstx_data_island_queue.h"
+}
+#include "hardware/dma.h"
+#include "pico_audio.h"
+static const uint32_t HDMI_AUDIO_RATE = 44100;
+static const uint32_t HDMI_AUDIO_TARGET = 200;          /* packets queued (4 frames each) */
+static const uint HDMI_AUDIO_DMA = pimoroni::DVHSTX::NUM_AUDIO_CHANS - 1;
+#ifndef A8_SOUND_HDMI
+#define A8_SOUND_HDMI 0                                 /* 1: sound over HDMI from start-up */
+#endif
+static volatile bool hdmi_audio_wanted = A8_SOUND_HDMI, hdmi_audio_on = false;
+static int hdmi_audio_frame = 0;                        /* the packets' frame counter (channel status) */
+static int16_t hdmi_audio_prev = 0;
+
+/* Core 1: top the queue up from the sound ring. */
+static void __no_inline_not_in_flash_func(hdmi_audio_feed)(void) {
+    const bool in_hsync = hstx_di_queue_get_hsync_active();
+    while (hstx_di_queue_get_level() < HDMI_AUDIO_TARGET) {
+        int16_t in[2];
+        if (pico_audio_hdmi_take(in, 2) < 2) return;      /* nothing due: the driver sends silence */
+        audio_sample_t f[4];
+        int16_t a = in[0], b = in[1];
+        f[0].left = f[0].right = (int16_t)((hdmi_audio_prev + a) / 2);
+        f[1].left = f[1].right = a;
+        f[2].left = f[2].right = (int16_t)((a + b) / 2);
+        f[3].left = f[3].right = b;
+        hdmi_audio_prev = b;
+        hstx_packet_t packet;
+        int next = hstx_packet_set_audio_samples_cs_rate(&packet, f, 4, hdmi_audio_frame, HDMI_AUDIO_RATE);
+        hstx_data_island_t island;
+        hstx_encode_data_island(&island, &packet, false, in_hsync);
+        if (!hstx_di_queue_push(&island)) return;        /* (below the target: has room) */
+        hdmi_audio_frame = next;
+    }
+}
+#endif
 static const uint8_t HDMI_BLACK = 0x00;                 /* Atari palette: black (side bands) */
 
 /* The video mode: the picture is 640x480 (320x240 doubled), centred in the
@@ -753,6 +806,9 @@ void a8_display_init(void) {
         return;
     }
     canvas.set_screen_size(SCR_W, SCR_H);    /* fillScreen(): all of it (A8Canvas) */
+#ifdef A8_HDMI_AUDIO
+    if (!A8_SOUND_HDMI) dma_channel_claim(HDMI_AUDIO_DMA);   /* kept for HDMI sound (see there) */
+#endif
     canvas.fillSprite(TFT_BLACK);
     for (int y = 0; y < SCR_H; y++) hdmi_src_row[y] = (uint8_t)(24 + y * 192 / SCR_H);
     hdmi_pal_332();
@@ -803,7 +859,9 @@ void a8_display_refresh(void) { a8_display_frame(); }
  * keys at a time into a strip that is then copied in whole: the lines are
  * read from frame8 meanwhile, and draw_osk (clear, then the keys) showed
  * half-drawn keys for a frame when the cursor moved. */
-static uint8_t osk_strip[OSK_CELL_H * SCR_W];
+/* (in PSRAM: written only when the keyboard changes, then copied to frame8
+ * - never read by the line interrupt; SRAM is short with HDMI sound) */
+PSRAM static uint8_t osk_strip[OSK_CELL_H * SCR_W];
 
 static void osk_strip_glyph(int x, int y, const uint8_t *g, int scale, uint8_t colour) {
     for (int r = 0; r < 7; r++)
@@ -929,24 +987,17 @@ static void hdmi_compose(void) {
     push_count++;
 }
 
-/* The serial monitor's # key: the canvas bytes of the top-right corner
- * (rows 0-27, x 224-319; RGB332), to find what draws noise there.
- * TODO: remove once found. */
-void a8_display_dump(void) {
-    Serial.printf("[display] frame8 %p, rows 0-27, x 224-319 (RGB332 hex), game %d%c",
-                  frame8, (int)hdmi_game, 10);
-    for (int y = 0; y < 28; y++) {
-        char line[2 * 96 + 1];
-        for (int x = 0; x < 96; x++) {
-            static const char HEXD[] = "0123456789abcdef";
-            uint8_t v = frame8[y * SCR_W + 224 + x];
-            line[2 * x] = HEXD[v >> 4];
-            line[2 * x + 1] = HEXD[v & 15];
-        }
-        line[2 * 96] = 0;
-        Serial.printf("%2d %s%c", y, line, 10);
-    }
+#ifdef A8_HDMI_AUDIO
+/* Sound over HDMI on / off (core 1 restarts the output with or without
+ * it). False if the mode had no room for it. */
+bool a8_display_set_hdmi_audio(bool on) {
+    hdmi_audio_wanted = on;
+    for (uint32_t t0 = millis(); hdmi_audio_on != on && millis() - t0 < 1000; ) delay(1);
+    return hdmi_audio_on == on;
 }
+bool a8_display_hdmi_audio(void) { return hdmi_audio_on; }
+uint32_t a8_display_hdmi_audio_gaps(void) { return hstx_di_queue_silence_count; }
+#endif
 
 /* The serial monitor's V key: the next video mode (core 1 switches). */
 void a8_display_next_hdmi_mode(void) {
@@ -970,22 +1021,56 @@ void a8_display_report(void) {
 /* Core 1, all the time (main.cpp loop1): starts the output when asked, then
  * in a game the overlays once a frame. */
 void a8_display_core1_loop(void) {
-    if (hdmi_wanted && (!hdmi_started || hdmi_vmode_wanted != hdmi_vmode)) {
+#ifdef A8_HDMI_AUDIO
+    const bool audio_change = hdmi_started && hdmi_audio_wanted != hdmi_audio_on;
+#else
+    const bool audio_change = false;
+#endif
+    if (hdmi_wanted && (!hdmi_started || hdmi_vmode_wanted != hdmi_vmode || audio_change)) {
         /* the Fruit Jam's HSTX pins (its variant): CK+ 13, D0+ 15, D1+ 17, D2+ 19 */
         static const pimoroni::DVHSTXPinout pins = { PIN_CKP, { PIN_D0P, PIN_D1P, PIN_D2P } };
         if (hdmi_started) hdmi.reset();
         const HdmiMode &m = HDMI_MODES[hdmi_vmode_wanted];
         hdmi.set_scanline_callback(hdmi_line);
+#ifdef A8_HDMI_AUDIO
+        bool with_audio = hdmi_audio_wanted;
+        if (with_audio) {
+            if (dma_channel_is_claimed(HDMI_AUDIO_DMA)) dma_channel_unclaim(HDMI_AUDIO_DMA);
+            hdmi_audio_frame = 0;
+            hdmi_audio_prev = 0;
+        }
+        hdmi.enable_audio(with_audio ? HDMI_AUDIO_RATE : 0);
         hdmi_ok = hdmi.init(m.w, m.h, pimoroni::DVHSTX::MODE_RGB565, false, pins);
+        if (!hdmi_ok && with_audio) {           /* a mode with no room for sound: picture only */
+            Serial.printf("[display] HDMI sound doesn't fit %s: picture only%c", m.name, 10);
+            with_audio = false;
+            hdmi.enable_audio(0);
+            hdmi_ok = hdmi.init(m.w, m.h, pimoroni::DVHSTX::MODE_RGB565, false, pins);
+        }
+        if (!with_audio && !dma_channel_is_claimed(HDMI_AUDIO_DMA)) dma_channel_claim(HDMI_AUDIO_DMA);
+        hdmi_audio_on = with_audio;
+        hdmi_audio_wanted = with_audio;
+#else
+        hdmi_ok = hdmi.init(m.w, m.h, pimoroni::DVHSTX::MODE_RGB565, false, pins);
+#endif
         if (hdmi_ok) {
             out_words = hdmi.get_width() / 2;
             out_lines = hdmi.get_height();
         }
         hdmi_vmode = hdmi_vmode_wanted;
         hdmi_started = true;
-        Serial.printf("[display] HDMI mode %d of %d: %s, %s (%d x %d)%c", hdmi_vmode + 1, HDMI_NMODES,
-                      m.name, hdmi_ok ? "running" : "FAILED", out_words * 2, out_lines, 10);
+        Serial.printf("[display] HDMI mode %d of %d: %s, %s (%d x %d)%s%c", hdmi_vmode + 1, HDMI_NMODES,
+                      m.name, hdmi_ok ? "running" : "FAILED", out_words * 2, out_lines,
+#ifdef A8_HDMI_AUDIO
+                      hdmi_audio_on ? ", sound 44100 Hz" : ", no sound",
+#else
+                      "",
+#endif
+                      10);
     }
+#ifdef A8_HDMI_AUDIO
+    if (hdmi_audio_on) hdmi_audio_feed();
+#endif
     composing = true;
     __dmb();
     if (running) {
@@ -1010,4 +1095,8 @@ void a8_display_core1_loop(void) {
 #include "drivers/dvhstx/dvhstx.cpp"
 #include "drivers/dvhstx/dvi.cpp"
 #include "drivers/dvhstx/font_cp437.c"
+#ifdef A8_HDMI_AUDIO
+#undef NUM_CHANS                         /* dvhstx.cpp's 3; the audio code's is 4 */
+#include "drivers/dvhstx/dvhstx_audio.cpp"
+#endif
 #endif  /* A8_HDMI */

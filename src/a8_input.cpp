@@ -216,6 +216,7 @@ static int16_t axis_pot(const JoyAxis &a, int v) {
  *   Enter              START (button 2; game list: OK)
  *   Esc / m            MENU held (button 3: back / the game list)
  *   Tab / e            SELECT      o  OPTION      k  the on-screen keyboard
+ *   V                  the next HDMI mode     O  sound: Fruit Jam / HDMI
  * Anything else goes to the sound's bench keys (pico_audio_key). */
 static uint32_t vpin_until[VPIN_END];      /* indexed by pin: down until this millis() */
 
@@ -239,7 +240,9 @@ static void serial_key(int c) {
     case 'k':           vpin_press(VP_BLUE, TAP); break;
 #ifdef A8_HDMI
     case 'V':           a8_display_next_hdmi_mode(); break;
-    case '#':           a8_display_dump(); break;
+#ifdef A8_HDMI_AUDIO
+    case 'O':           pico_audio_toggle_hdmi(); break;
+#endif
 #endif
     default:            pico_audio_key(c); break;
     }

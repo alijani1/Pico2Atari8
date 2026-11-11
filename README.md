@@ -263,6 +263,14 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
 - **Output:** headphones while some are plugged in, else the speaker
   (`A8_TLV_OUTPUT` in platformio.ini fixes it: 1 headphones, 2 speaker,
   3 both).
+- **Sound over HDMI** (`A8_HDMI_AUDIO`, on in the env): serial key `O`
+  switches the sound between the Fruit Jam's codec and the display's
+  speakers (`A8_SOUND_HDMI=1`: HDMI from start-up). 44100 Hz, exactly
+  twice the emulator's rate (each sample sent twice, the first the mean
+  with the one before). Core 1 encodes the HDMI audio packets from a RAM
+  ring that paces the emulator as the I2S one does; only one output plays
+  at a time (two would drift: two clocks). The packet queue takes 36 KB of
+  SRAM, so the game list and the keyboard's strip buffer live in PSRAM.
 
 | Control | Game list | In a game |
 |---|---|---|
@@ -273,7 +281,7 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
 The **serial monitor** is a controller too: arrows or `w` `a` `s` `d`
 (joystick 1), space (fire), Enter (START / OK), Esc or `m` (MENU held),
 Tab or `e` (SELECT), `o` (OPTION), `k` (on-screen keyboard), `V`
-(the next HDMI mode). A terminal sends
+(the next HDMI mode), `O` (sound: Fruit Jam / HDMI). A terminal sends
 presses, not releases, so a key holds for a moment and its repeat keeps it
 held. Sound keys: `+` / `-` volume, `A` `H` `S` `B` output (auto,
 headphones, speaker, both), `I` audio report.

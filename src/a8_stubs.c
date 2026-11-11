@@ -13,6 +13,15 @@
 #include "mzpokeysnd.h"
 #include "acidtest.h"
 
+#ifdef A8_HDMI_AUDIO
+/* (Not atari800:) the HDMI sound's packet encoder and queue, pico_hdmi's C
+ * code as Adafruit-DVI-HSTX vendors it - C, so here, in a C file that is
+ * built anyway (an extra object file reorders the other builds' veneers).
+ * a8_display.cpp has the rest of the HDMI driver. */
+#include "drivers/dvhstx/audio_packet.c"
+#include "drivers/dvhstx/audio_queue.c"
+#endif
+
 int Devices_enable_h_patch = FALSE;
 int Devices_enable_p_patch = FALSE;
 int Devices_enable_r_patch = FALSE;

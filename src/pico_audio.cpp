@@ -32,6 +32,9 @@
  * headphones while some are plugged in, else the speaker (A8_TLV_OUTPUT
  * forces 1 headphones, 2 speaker, 3 both; serial keys, main.cpp). */
 #include <PicoTlv320Impl.hpp>          /* the driver's code: in this one file */
+#ifdef A8_HDMI_AUDIO
+#include "a8_display.h"                  /* sound over HDMI (a8_display.cpp) */
+#endif
 
 #ifndef A8_I2S_BCLK_PIN
 #define A8_I2S_BCLK_PIN 26             /* WS = 27 (BCLK + 1) */
@@ -68,6 +71,19 @@ static volatile int g_gain       = 10000;   // pct², 0..10000
 static volatile uint32_t g_underruns = 0;      /* pushes that found the ring had run dry */
 static volatile uint32_t g_stretched = 0;      /* samples played twice (ring under half) */
 static volatile int      g_min_queued = 1 << 30;
+
+#ifdef A8_HDMI_AUDIO
+/* Sound over HDMI instead (serial key O, or A8_SOUND_HDMI from start-up):
+ * the same samples go into this ring instead of the I2S one, and core 1
+ * (a8_display.cpp) takes them two at a time into HDMI audio packets at
+ * 44100 Hz. The emulator is paced by this ring as by the I2S one. I2S is
+ * stopped and the codec muted meanwhile: two outputs would run off two
+ * clocks (the crystal, the HDMI pixel clock) and drift apart. */
+static const int HDMI_RING = 512;                      /* 23 ms; the packet queue adds 18 */
+static int16_t   g_hring[HDMI_RING];
+static volatile uint32_t g_hhead = 0, g_htail = 0;     /* core 0 writes, core 1 reads */
+static volatile bool g_hdmi = false;
+#endif
 
 static void i2s_start(int rate) {
     g_i2s.setBCLK(A8_I2S_BCLK_PIN);
@@ -123,6 +139,15 @@ extern "C" void pico_audio_init(int sample_rate) {
     g_codec.setOutput(o);
     g_codec.setMute(!g_amp_on);
     Serial.printf("[audio] output: %s (%s)\n", output_name(o), g_output_mode ? "fixed" : "auto");
+#ifdef A8_HDMI_AUDIO
+    if (a8_display_hdmi_audio()) {       /* A8_SOUND_HDMI: HDMI has the sound from the start */
+        g_codec.setMute(true);
+        g_i2s.end();
+        g_hhead = g_htail = 0;
+        g_hdmi = true;
+        Serial.printf("[audio] sound: HDMI (44100 Hz)%c", 10);
+    }
+#endif
 }
 
 /* Flash writes: I2S off (its DMA can't ride out interrupts off, as PWM's),
@@ -130,6 +155,9 @@ extern "C" void pico_audio_init(int sample_rate) {
  * and its PLL locks again once BCLK is back. */
 extern "C" void pico_audio_suspend(void) {
     if (!g_started) return;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) return;                  /* I2S is stopped (HDMI has the sound) */
+#endif
     if (g_codec.ready()) {
         g_codec.setMute(true);
         delay(10);                       /* soft-step mute: up to ~128 samples (6 ms) */
@@ -138,6 +166,9 @@ extern "C" void pico_audio_suspend(void) {
 }
 extern "C" void pico_audio_resume(void) {
     if (!g_started) return;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) return;
+#endif
     i2s_start(g_sample_rate);
     if (g_codec.ready() && g_amp_on) {
         delay(10);                       /* PLL lock (typically 10 ms) */
@@ -158,8 +189,80 @@ static const int RING_SAMPLES = 8 * 128;               /* setBuffers(8, 128): a 
 static int32_t  g_dc_x1 = 0, g_dc_y1 = 0;              /* DC blocker: last in, last out (x256) */
 static uint32_t g_stretch_acc = 0;                     /* 16.16: due extra samples */
 
+#ifdef A8_HDMI_AUDIO
+/* The same as below, into the HDMI ring (amp off: silence). */
+static size_t __not_in_flash_func(push_hdmi)(const int16_t *samples, size_t nsamp) {
+    size_t written = 0;
+    uint32_t head = g_hhead;
+    int queued = (int)(head - g_htail);
+    int room = HDMI_RING - queued;
+    if (queued < g_min_queued) g_min_queued = queued;
+    uint32_t step = queued < HDMI_RING / 2
+        ? (uint32_t)(HDMI_RING / 2 - queued) * (65536 / 2) / (HDMI_RING / 2)
+        : 0;
+    const int32_t gain = g_amp_on ? g_gain : 0;
+    while (written < nsamp && room > 0) {
+        int32_t x = samples[written];
+        g_dc_y1 += ((x - g_dc_x1) << 8) - (g_dc_y1 >> 10);   /* y = x - x1 + (1 - 1/1024) y1 */
+        g_dc_x1 = x;
+        int32_t s = (g_dc_y1 >> 8) * gain / 10000;
+        if (s >  32767) s =  32767;
+        if (s < -32768) s = -32768;
+        g_hring[head++ % HDMI_RING] = (int16_t)s;
+        room--;
+        written++;
+        g_stretch_acc += step;
+        if (g_stretch_acc >= 65536) {
+            g_stretch_acc -= 65536;
+            if (room > 0) { g_hring[head++ % HDMI_RING] = (int16_t)s; room--; g_stretched++; }
+        }
+    }
+    __dmb();                             /* the samples before the index (core 1 reads) */
+    g_hhead = head;
+    return written * 2;
+}
+
+/* Core 1 (a8_display.cpp): up to n samples out of the HDMI ring. */
+extern "C" size_t __not_in_flash_func(pico_audio_hdmi_take)(int16_t *dst, size_t n) {
+    uint32_t tail = g_htail, avail = g_hhead - tail;
+    __dmb();
+    if (avail < n) return 0;
+    for (size_t i = 0; i < n; i++) dst[i] = g_hring[tail++ % HDMI_RING];
+    g_htail = tail;
+    return n;
+}
+
+/* Sound to HDMI or back to the Fruit Jam's codec. */
+extern "C" void pico_audio_set_hdmi(int on_) {
+    const bool on = on_ != 0;
+    if (on == g_hdmi || !g_started) return;
+    if (on) {
+        if (!a8_display_set_hdmi_audio(true)) {
+            Serial.printf("[audio] HDMI sound: not in this HDMI mode%c", 10);
+            return;
+        }
+        if (g_codec.ready()) { g_codec.setMute(true); delay(10); }
+        g_i2s.end();
+        g_hhead = g_htail = 0;
+        g_hdmi = true;
+    } else {
+        g_hdmi = false;                  /* nothing more into the ring */
+        a8_display_set_hdmi_audio(false);
+        i2s_start(g_sample_rate);
+        if (g_codec.ready() && g_amp_on) { delay(10); g_codec.setMute(false); }
+    }
+    g_min_queued = 1 << 30;
+    g_stretched = 0;
+    Serial.printf("[audio] sound: %s%c", g_hdmi ? "HDMI (44100 Hz)" : "Fruit Jam", 10);
+}
+extern "C" void pico_audio_toggle_hdmi(void) { pico_audio_set_hdmi(!g_hdmi); }
+#endif
+
 extern "C" size_t __not_in_flash_func(pico_audio_push_s16)(const void *data, size_t bytes) {
     if (!g_started || bytes < 2) return 0;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) return push_hdmi((const int16_t *)data, bytes / 2);
+#endif
     if (g_i2s.getUnderflow()) g_underruns++;           /* the DMA found no buffer: silence played */
     const int16_t *samples = (const int16_t *)data;
     size_t nsamp = bytes / 2, written = 0;
@@ -214,6 +317,9 @@ extern "C" void pico_audio_poll(void) {
     static uint32_t last = 0;
     uint32_t now = millis();
     if (!g_codec.ready() || g_output_mode || now - last < 250) return;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) return;                  /* the codec is muted meanwhile */
+#endif
     last = now;
     PicoTlv320::Headset h = g_codec.headset();
     if (h == PicoTlv320::HEADSET_UNKNOWN) return;
@@ -257,6 +363,18 @@ extern "C" void pico_audio_report(void) {
     g_min_queued = 1 << 30;
     g_underruns = 0;
     g_stretched = 0;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) {
+        static uint32_t last_gaps = 0;
+        uint32_t gaps = a8_display_hdmi_audio_gaps();
+        Serial.printf("[audio] HDMI 44100 Hz, ring low %d of %d samples, %lu stretched, "
+                      "%lu gaps (silence packets), volume %d %%%s%c",
+                      minq > HDMI_RING ? -1 : minq, HDMI_RING, (unsigned long)str,
+                      (unsigned long)(gaps - last_gaps), g_volume_pct, g_amp_on ? "" : " (muted)", 10);
+        last_gaps = gaps;
+        return;
+    }
+#endif
     Serial.printf("[audio] %d Hz, ring low %d of %d samples, %lu stretched, %lu under-runs, "
                   "volume %d %%, %s%s\n",
                   g_sample_rate, minq > RING_SAMPLES ? -1 : minq, RING_SAMPLES,

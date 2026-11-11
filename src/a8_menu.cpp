@@ -64,7 +64,14 @@ static const char *kind_of(const char *path) {
 static bool picked_alt = false, picked_osb = false;
 bool a8_menu_picked_alt(void) { return picked_alt; }
 bool a8_menu_picked_osb(void) { return picked_osb; }
+#ifdef PICO_FRUITJAM
+/* (in its PSRAM: the list is only used here, never by the emulator, and the
+ * Fruit Jam's SRAM is short with HDMI sound - 36 KB for its packet queue;
+ * PSRAM isn't zeroed at start, but every entry is written before use) */
+PSRAM static Game games[MAX_GAMES + 2];
+#else
 static Game games[MAX_GAMES + 2];
+#endif
 static int found = 0;                  /* games on the drive; then Settings, then the drive */
 static int game_count = 0;
 
