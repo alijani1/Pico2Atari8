@@ -347,12 +347,15 @@ struct UsbPad {
     uint16_t vid, pid;
     uint32_t buttons;                                    /* A8U_* held */
     uint16_t numbers;                                    /* buttons 1-16 held (bit n - 1) */
+    uint32_t adirs;                                      /* A8U_* directions of its X / Y axes */
+    int32_t ax, ay;                                      /* its X / Y as reported (lay.x / lay.y ranges) */
     uint8_t raw[16], raw_len;                            /* its last report as it came */
     bool fixed;                                          /* the SNES-style pad's known report */
     PadLayout lay;
 };
 static UsbPad usb_pads[2];                               /* player 1, player 2 (as they connect) */
 static uint8_t usb_kbd[8];                               /* the last keyboard report */
+static bool    usb_in_game = false;                      /* a8_input_frame: yes, a8_input_menu: no */
 static bool    usb_kbd_on = false;
 static uint8_t usb_kbd_addr = 0;
 static uint32_t usb_events = 0;                          /* mounts / unmounts: logged */
@@ -474,22 +477,28 @@ static int32_t hid_field(const uint8_t *r, uint16_t len, const HidField &f) {
 
 /* Any pad, by its layout: false if the report isn't the one with the pad. */
 static bool usb_parse_layout(const PadLayout &L, const uint8_t *r, uint16_t len, uint32_t *buttons,
-                             uint16_t *numbers) {
+                             uint16_t *numbers, uint32_t *adirs, int32_t *ax, int32_t *ay) {
     if (L.id) {
         if (!len || r[0] != L.id) return false;
         r++;
         len--;
     }
     uint32_t b = 0;
+    /* the X / Y axes (an analog stick): their value as reported, and as
+     * directions (past a quarter of the range) - apart from the buttons */
     const HidField *axes[2] = { &L.x, &L.y };
+    int32_t *vals[2] = { ax, ay };
+    uint32_t ad = 0;
     for (int a = 0; a < 2; a++) {
         const HidField &f = *axes[a];
         int32_t v = hid_field(r, len, f);
         if (v == INT32_MIN || f.lmax <= f.lmin) continue;
+        *vals[a] = v;
         const int32_t c = f.lmin + (f.lmax - f.lmin) / 2, q = (f.lmax - f.lmin) / 4;
-        if (v < c - q) b |= a ? A8U_UP : A8U_LEFT;
-        if (v > c + q) b |= a ? A8U_DOWN : A8U_RIGHT;
+        if (v < c - q) ad |= a ? A8U_UP : A8U_LEFT;
+        if (v > c + q) ad |= a ? A8U_DOWN : A8U_RIGHT;
     }
+    *adirs = ad;
     const int32_t h = hid_field(r, len, L.hat);
     if (h != INT32_MIN) {
         static const uint32_t HAT[8] = { A8U_UP, A8U_UP | A8U_RIGHT, A8U_RIGHT, A8U_DOWN | A8U_RIGHT,
@@ -577,9 +586,16 @@ extern "C" void tuh_hid_report_received_cb(uint8_t dev, uint8_t idx, uint8_t con
                 p.buttons = usb_parse_pad(r, len);
                 p.numbers = 0;
             } else {
-                uint32_t b;
+                uint32_t b, ad;
                 uint16_t num;
-                if (usb_parse_layout(p.lay, r, len, &b, &num)) { p.buttons = b; p.numbers = num; }
+                int32_t x = p.ax, y = p.ay;
+                if (usb_parse_layout(p.lay, r, len, &b, &num, &ad, &x, &y)) {
+                    p.buttons = b;
+                    p.numbers = num;
+                    p.adirs = ad;
+                    p.ax = x;
+                    p.ay = y;
+                }
             }
         }
     }
@@ -784,7 +800,58 @@ static uint32_t usb_buttons(void) {
         Serial.printf("[usb] gamepads %d, keyboard %s%c", usb_pads[0].on + usb_pads[1].on,
                       usb_kbd_on ? "connected" : "none", 10);
     }
-    return usb_pads[0].buttons | usb_kbd_buttons();
+    return usb_pads[0].buttons | (usb_in_game ? 0 : usb_pads[0].adirs) | usb_kbd_buttons();
+}
+
+/* ---- a pad's analog stick in a game, by the range it reports ---------------
+ * As the Joy-Con on the other devices (and the same formulas): a 5200
+ * game's controller stick (pots 6 .. 114 .. 220), a paddle (Game Settings >
+ * Thumbstick: Paddle; 1 .. 228, Paddle center, Settings > Paddle
+ * sensitivity), else joystick directions (a 30 % dead zone) - but the
+ * centre and travel are the device's own logical range (its report
+ * descriptor), not learnt. Pad n (0, 1); false / 0: no analog stick. */
+static bool usb_analog(int n) {
+    const UsbPad &p = usb_pads[n];
+    return p.on && !p.fixed && p.lay.x.size && p.lay.x.lmax > p.lay.x.lmin;
+}
+
+/* An axis as -1000 .. +1000 of its range (0: centre). */
+static int usb_axis_norm(const HidField &f, int32_t v) {
+    if (!f.size || f.lmax <= f.lmin) return 0;
+    const int32_t c2 = f.lmin + f.lmax;                  /* twice the centre */
+    long n = ((long)v * 2 - c2) * 1000 / (f.lmax - f.lmin);
+    return n < -1000 ? -1000 : n > 1000 ? 1000 : (int)n;
+}
+
+static bool usb_pots(int n, int16_t *px, int16_t *py) {
+    if (!usb_analog(n)) return false;
+    const UsbPad &p = usb_pads[n];
+    const int x = usb_axis_norm(p.lay.x, p.ax), y = usb_axis_norm(p.lay.y, p.ay);
+    *px = (int16_t)(x > 0 ? POT_CENTRE + x * (POT_MAX - POT_CENTRE) / 1000
+                          : POT_CENTRE + x * (POT_CENTRE - POT_MIN) / 1000);
+    *py = (int16_t)(y > 0 ? POT_CENTRE + y * (POT_MAX - POT_CENTRE) / 1000
+                          : POT_CENTRE + y * (POT_CENTRE - POT_MIN) / 1000);
+    return true;
+}
+
+static int16_t usb_paddle(int n) {
+    static const int GAIN_PCT[A8_PADDLES_LEVELS] = { 100, 100, 100, 125, 167 };   /* (joycon_paddle's) */
+    const UsbPad &p = usb_pads[n];
+    const int x = usb_axis_norm(p.lay.x, p.ax);
+    int v = 114 - a8_settings_game_paddle_ofs() - x * 113 * GAIN_PCT[a8_settings.paddles] / 100 / 1000;
+    return (int16_t)(v < 1 ? 1 : v > 228 ? 228 : v);
+}
+
+static uint8_t usb_stick_dirs(int n) {
+    if (!usb_analog(n)) return 0;
+    const UsbPad &p = usb_pads[n];
+    const int x = usb_axis_norm(p.lay.x, p.ax), y = usb_axis_norm(p.lay.y, p.ay);
+    uint8_t d = 0;
+    if (x < -300) d |= A8_LEFT;
+    if (x > 300)  d |= A8_RIGHT;
+    if (y < -300) d |= A8_UP;
+    if (y > 300)  d |= A8_DOWN;
+    return d;
 }
 
 /* Player 2's pad: what it holds (A8U_*). */
@@ -1025,7 +1092,12 @@ bool a8_input_has_slot(int slot) {
     return slot >= 0 && slot < A8_GB_COUNT && SLOT_PINS[slot] >= 0;
 }
 
-bool a8_input_has_joycon(void) { return PIN_JOY_X >= 0; }
+bool a8_input_has_joycon(void) {
+#ifdef A8_USB_HOST
+    if (usb_analog(0)) return true;          /* a USB pad's analog stick stands in */
+#endif
+    return PIN_JOY_X >= 0;
+}
 
 bool a8_input_osk_paused(void) {
     return a8_osk_is_open() && !osk_running && a8_settings.keyboard != A8_KBD_KEEP_RUNNING;
@@ -1037,6 +1109,7 @@ bool a8_input_frame(void) {
 #endif
 #ifdef A8_USB_HOST
     a8_input_usb_task();
+    usb_in_game = true;                      /* a pad's analog stick: the analog paths */
 #endif
     a8_input_t in;
     memset(&in, 0, sizeof(in));
@@ -1086,6 +1159,12 @@ bool a8_input_frame(void) {
         in.stick[0] |= five_way();
         int16_t jx, jy;
         nav = in.stick[0] | joycon_read(&jx, &jy);
+#ifdef A8_USB_HOST
+        const bool usb_stick = usb_pots(0, &jx, &jy);   /* pad 1's analog stick, as the Joy-Con */
+        if (usb_stick) nav |= usb_stick_dirs(0);
+#else
+        const bool usb_stick = false;
+#endif
         bool pushed = jx < 114 - 16 || jx > 114 + 16 || jy < 114 - 16 || jy > 114 + 16;
         bool c1_rests = (in.pot[0] == A8_POT_NONE || in.pot[0] == 114) &&
                         (in.pot[1] == A8_POT_NONE || in.pot[1] == 114);
@@ -1093,7 +1172,7 @@ bool a8_input_frame(void) {
         static bool joy_steers = true;
         if (pushed) joy_steers = true;
         else if (other_steers) joy_steers = false;
-        if (joy_steers && PIN_JOY_X >= 0) {
+        if (joy_steers && (PIN_JOY_X >= 0 || usb_stick)) {
             in.pot[0] = jx;
             in.pot[1] = jy;
         }
@@ -1154,6 +1233,9 @@ bool a8_input_frame(void) {
         if (paddles_present(0)) joy_paddle = false;     /* the real ones */
 #endif
         uint8_t joy = joycon_read() | five_way();
+#ifdef A8_USB_HOST
+        joy |= usb_stick_dirs(0);                    /* pad 1's analog stick, as the Joy-Con */
+#endif
         nav = in.stick[0] | joy;
         /* Red / click: fire; Green: OPTION; Yellow: SPACE; right side
          * (2.1 defaults: Green fire, Yellow nothing) -
@@ -1162,7 +1244,11 @@ bool a8_input_frame(void) {
         Mapped m = mapped_buttons(false, combo);
         bool fire = m.fire;
         if (joy_paddle && !a8_osk_is_open()) {
+#ifdef A8_USB_HOST
+            in.pot[0] = usb_analog(0) ? usb_paddle(0) : joycon_paddle();
+#else
             in.pot[0] = joycon_paddle();
+#endif
             if (fire) in.stick[0] |= A8_LEFT;           /* paddle 1's button */
         } else {
             in.stick[0] |= joy;
@@ -1190,20 +1276,34 @@ bool a8_input_frame(void) {
      * its slots through the game's map - fire to joystick 2, the rest
      * (keys, the console keys) as player 1's; Start / Select START /
      * SELECT (not MENU). */
-    if (const uint32_t p2 = usb_pad2()) {
+    /* Its analog stick (by its range, as pad 1's): a 5200 game's controller
+     * 2 stick; with Game Settings > Thumbstick: Paddle, paddle 2 (port 1's
+     * second paddle - its button the RIGHT line, as a real pair's); else
+     * joystick 2's directions. */
+    if (usb_pads[1].on) {
+        const uint32_t p2 = usb_pad2();
         const bool is5200 = a8_is_5200();
+        const bool paddle2 = !is5200 && a8_settings_game_paddle() && usb_analog(1) && !a8_osk_is_open();
         uint8_t d2 = 0;
         if (p2 & A8U_UP) d2 |= A8_UP;
         if (p2 & A8U_DOWN) d2 |= A8_DOWN;
         if (p2 & A8U_LEFT) d2 |= A8_LEFT;
         if (p2 & A8U_RIGHT) d2 |= A8_RIGHT;
+        int16_t x2, y2;
+        if (is5200 && usb_pots(1, &x2, &y2)) {
+            const bool pushed2 = x2 < 114 - 16 || x2 > 114 + 16 || y2 < 114 - 16 || y2 > 114 + 16;
+            if (pushed2 || !d2) { in.pot[2] = x2; in.pot[3] = y2; }
+        }
+        if (paddle2) in.pot[1] = usb_paddle(1);
+        else d2 |= usb_stick_dirs(1);
         in.stick[1] |= d2;
-        if (d2 && is5200) in.pot[2] = in.pot[3] = A8_POT_NONE;   /* the core reads the directions */
+        if (d2 && is5200 && in.pot[2] == A8_POT_NONE) in.pot[2] = in.pot[3] = A8_POT_NONE;
         const uint32_t slots = usb_slots(p2);
         for (int slot = 0; slot < A8_GB_COUNT; slot++) {
             if (!(slots & (1u << slot))) continue;
             uint8_t a = a8_settings_game_action(slot, is5200);
-            if (a == A8_ACT_FIRE || a == A8_ACT_TOP_FIRE) in.trig[1] = 1;
+            if ((a == A8_ACT_FIRE || a == A8_ACT_TOP_FIRE) && paddle2) in.stick[0] |= A8_RIGHT;   /* paddle 2's button */
+            else if (a == A8_ACT_FIRE || a == A8_ACT_TOP_FIRE) in.trig[1] = 1;
             else if (a == A8_ACT_START) { if (is5200) in.key = AKEY_5200_START; else in.start = 1; }
             else if (a == A8_ACT_SELECT) in.select = 1;
             else if (a == A8_ACT_OPTION) in.option = 1;
@@ -1364,6 +1464,7 @@ uint8_t a8_input_menu(void) {
     serial_poll();
 #ifdef A8_USB_HOST
     a8_input_usb_task();
+    usb_in_game = false;                     /* a pad's analog stick: directions here */
 #endif
     uint8_t b = 0;
     static bool m_down = false;

@@ -315,6 +315,12 @@ the host is silent and didn't wake properly, so it reconnects instead
 A second pad is player 2: its D-pad is joystick 2 (a 5200 game: controller
 2), its buttons go through the same per-game map (fire to joystick 2, keys
 and console keys as player 1's), its Start / Select are START / SELECT.
+A pad's analog stick works as the Joy-Con does on the other devices, by the
+range the pad reports (not learnt): a 5200 game's analog controller (pad 1:
+controller 1, pad 2: controller 2); with Game Settings > Thumbstick:
+Paddle, paddle 1 (pad 1) and paddle 2 (pad 2, its button on the RIGHT
+line), with Paddle center and Settings > Paddle sensitivity; otherwise
+joystick directions. In the menus it moves the cursor.
 Pads are numbered in the order they connect. Any HID gamepad or joystick
 works: its report descriptor says where its X / Y axes, hat and buttons
 are; buttons are taken as most cheap pads number them (1 X, 2 A, 3 B, 4 Y,
