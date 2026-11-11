@@ -784,6 +784,52 @@ extern "C" void a8_display_frame(void) {
 
 void a8_display_refresh(void) { a8_display_frame(); }
 
+/* The on-screen keyboard for HDMI, as draw_osk draws it, but one row of
+ * keys at a time into a strip that is then copied in whole: the lines are
+ * read from frame8 meanwhile, and draw_osk (clear, then the keys) showed
+ * half-drawn keys for a frame when the cursor moved. */
+static uint8_t osk_strip[OSK_CELL_H * SCR_W];
+
+static void osk_strip_glyph(int x, int y, const uint8_t *g, int scale, uint8_t colour) {
+    for (int r = 0; r < 7; r++)
+        for (int c = 0; c < 5; c++)
+            if (g[r] & (0x10 >> c))
+                for (int dy = 0; dy < scale; dy++)
+                    memset(osk_strip + (y + r * scale + dy) * SCR_W + x + c * scale, colour, scale);
+}
+
+static void hdmi_draw_osk(void) {
+    const int rows = a8_osk_rows(), OSK_Y = SCR_H - rows * OSK_CELL_H - 2;
+    /* the frame above and below the keys: black, as it already is when
+     * redrawn, so writing it again shows nothing */
+    for (int y = OSK_Y - 2; y < OSK_Y; y++) memset(frame8 + y * SCR_W, OSK_FRAME, SCR_W);
+    for (int y = OSK_Y + rows * OSK_CELL_H; y < SCR_H; y++) memset(frame8 + y * SCR_W, OSK_FRAME, SCR_W);
+    int cr, ci;
+    a8_osk_cursor(&cr, &ci);
+    for (int r = 0; r < rows; r++) {
+        memset(osk_strip, OSK_FRAME, sizeof(osk_strip));
+        int n;
+        const A8Key *keys = a8_osk_row(r, &n);
+        int col = 0;
+        for (int i = 0; i < n; i++) {
+            int x0 = col * OSK_CELL_W + 1, w = keys[i].span * OSK_CELL_W - 2;
+            int y0 = 1, h = OSK_CELL_H - 2;                 /* in the strip */
+            uint8_t face = (r == cr && i == ci) ? OSK_CURSOR : OSK_KEY;
+            for (int y = y0; y < y0 + h; y++) memset(osk_strip + y * SCR_W + x0, face, w);
+            const char *t = keys[i].label;
+            int len = (int)strlen(t), scale = len == 1 ? 2 : 1;
+            int tw = len * 6 * scale - scale, th = 7 * scale;
+            int tx = x0 + (w - tw) / 2, ty = y0 + (h - th) / 2;
+            for (int k = 0; k < len; k++) {
+                const uint8_t *g = glyph(t[k]);
+                if (g) osk_strip_glyph(tx + k * 6 * scale, ty, g, scale, OSK_TEXT);
+            }
+            col += keys[i].span;
+        }
+        memcpy(frame8 + (OSK_Y + r * OSK_CELL_H) * SCR_W, osk_strip, sizeof(osk_strip));
+    }
+}
+
 /* What the on-screen keyboard shows: its layout, keys and cursor. */
 static uint32_t osk_signature(void) {
     uint32_t h = 2166136261u;
@@ -853,7 +899,7 @@ static void hdmi_compose(void) {
     /* the keyboard: only when it changed (or its band just appeared) */
     if (osk) {
         uint32_t sig = osk_signature();
-        if (sig != osk_sig || bottom != last_bottom) { draw_osk(); osk_sig = sig; }
+        if (sig != osk_sig || bottom != last_bottom) { hdmi_draw_osk(); osk_sig = sig; }
     } else {
         osk_sig = 0;
     }
