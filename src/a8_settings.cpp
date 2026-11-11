@@ -577,9 +577,12 @@ static void draw_row(int i, bool sel) {
 
 #ifdef A8_HDMI
 /* The footer: what the keys do (on Screen mode: FIRE tries the one picked). */
+/* (A mode picked: also, in the small font between the list and the footer,
+ * the way back should a kept mode show nothing - read while it still shows.) */
 static void draw_footer(int sel) {
     TFT_eSPI &tft = a8_tft();
-    tft.fillRect(0, 220, PANEL_W, 20, COL_BG);
+    const int list_end = LIST_Y + ROWS * ROW_H;            /* 212: the hint's line, to 220 */
+    tft.fillRect(0, list_end, PANEL_W, 240 - list_end, COL_BG);
     tft.setTextFont(FONT);
     tft.setTextColor(COL_HINT, COL_BG);
     tft.setCursor(8, 222);
@@ -588,6 +591,10 @@ static void draw_footer(int sel) {
     else {
         tft.setTextColor(COL_PENDING, COL_BG);
         tft.print("FIRE: try this mode    MENU: back");
+        tft.setTextFont(1);
+        tft.setTextColor(COL_HINT, COL_BG);
+        tft.setCursor(8, list_end);
+        tft.print("Black screen later? Hold button 3 at power-on.");   /* (6 px: 276) */
     }
 }
 
@@ -618,8 +625,12 @@ static bool try_screen_mode(void) {
                 char t[40];
                 snprintf(t, sizeof(t), "FIRE: keep    back in %d s", left);
                 tft.setTextColor(COL_TITLE, COL_SEL_BG);
-                tft.setCursor(bx + 14, by + 40);
+                tft.setCursor(bx + 14, by + 34);
                 tft.print(t);
+                tft.setTextFont(1);
+                tft.setTextColor(COL_TEXT, COL_SEL_BG);
+                tft.setCursor(bx + 14, by + 56);
+                tft.print("Later: button 3 at power-on = 800x480");
             }
             uint8_t b = a8_input_menu();
             if (b & A8M_OK) { keep = true; break; }
