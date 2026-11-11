@@ -524,8 +524,9 @@ static bool usb_parse_layout(const PadLayout &L, const uint8_t *r, uint16_t len,
 extern "C" void tuh_mount_cb(uint8_t dev) {
     uint16_t vid = 0, pid = 0;
     tuh_vid_pid_get(dev, &vid, &pid);
-    Serial.printf("[usb] device %04x:%04x connected%c", vid, pid, 10);
+    Serial.printf("[usb] device %u (%04x:%04x) connected%c", dev, vid, pid, 10);
 }
+extern "C" void tuh_umount_cb(uint8_t dev) { Serial.printf("[usb] device %u disconnected%c", dev, 10); }
 
 /* (TinyUSB's header declares the HID mount / unmount callbacks weak, which
  * made these definitions weak too - and the linker took Adafruit's empty
@@ -539,18 +540,28 @@ extern "C" void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, 
     } else if (proto == HID_ITF_PROTOCOL_MOUSE) {
         return;                                          /* not used */
     } else {
-        UsbPad *p = !usb_pads[0].on ? &usb_pads[0] : !usb_pads[1].on ? &usb_pads[1] : nullptr;
-        if (!p) return;                                  /* a third: not used */
         uint16_t vid = 0, pid = 0;
         tuh_vid_pid_get(dev, &vid, &pid);
+        /* a pad only if its descriptor shows one (axes, hat or buttons), or
+         * it is the SNES-style pad: a pad's other interfaces (0e8f:3013 has a
+         * second one) were taken for a second pad with the SNES layout -
+         * one pad took both players, and its garbage held the menus' UP */
+        PadLayout lay;
+        if (desc && desc_len) hid_parse_layout(desc, desc_len, lay);
+        const bool snes = vid == 0x081F && pid == 0xE401;
+        if (!lay.ok && !snes) {
+            Serial.printf("[usb] %04x:%04x HID interface %u: not a pad (ignored)%c", vid, pid, idx, 10);
+            return;
+        }
+        UsbPad *p = !usb_pads[0].on ? &usb_pads[0] : !usb_pads[1].on ? &usb_pads[1] : nullptr;
+        if (!p) return;                                  /* a third: not used */
         *p = UsbPad();
         p->vid = vid;
         p->pid = pid;
         p->addr = dev;
         p->idx = idx;
-        p->fixed = vid == 0x081F && pid == 0xE401;       /* the SNES-style pad: as it was */
-        if (desc && desc_len) hid_parse_layout(desc, desc_len, p->lay);
-        if (!p->lay.ok) p->fixed = true;                 /* no layout: try the SNES-style one */
+        p->fixed = snes;                                 /* the SNES-style pad: as it was */
+        p->lay = lay;
         int nb = 0;
         for (uint16_t bit : p->lay.btn_bit) nb += bit != 0xFFFF;
         Serial.printf("[usb] gamepad %d: %04x:%04x, %s: report %u, X %s, Y %s, hat %s, %d buttons%c",
