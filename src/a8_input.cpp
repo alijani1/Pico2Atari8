@@ -8,7 +8,8 @@
  *   Red               fire 1
  *   Blue              on-screen keyboard: opens / closes (fire types the
  *                     key; Settings > Keyboard)
- *   Green / Yellow    OPTION / SPACE
+ *   Green / Yellow    OPTION / SPACE (2.1: Green = fire, Yellow = nothing -
+ *                     the defaults; Game Settings maps every button)
  *   START / SELECT    START / SELECT (GPIO 20 / 19, as in the arcade)
  *   MENU              hold 1 s in a game: back to the game list
  *   Side buttons      game list: up / down; in a game, right = RETURN
@@ -37,6 +38,7 @@
  *   Red               fire 1
  *   Black / White     START / SELECT
  *   Green / Yellow    OPTION / SPACE;  Blue  on-screen keyboard
+ *                     (2.1 defaults: Green fire, Yellow nothing)
  *   MENU              tap in a game: the next Scale mode; hold 1 s: back
  *                     to the game list
  *
@@ -44,7 +46,7 @@
  *
  *   Joy-Con stick     controller 1's analog stick (POKEY pots 0/1)
  *   Red / click       bottom fire;  Green  top fire
- *   START / SELECT    START / PAUSE;  Yellow  *
+ *   START / SELECT    START / PAUSE;  Yellow  * (2.1: nothing by default)
  *   Blue              the keypad on screen: 0-9 * # START PAUSE RESET
  *   5200 controllers  (Duo) the real thing: analog sticks, bottom (A) and
  *                     top (B) fire, keypads (START PAUSE RESET too). The
@@ -412,7 +414,8 @@ bool a8_input_frame(void) {
             }
         }
         /* Red / click (Duo: the 5-way's press): bottom fire; Green: top
-         * fire; Yellow: * - unless the game's Game Settings say otherwise */
+         * fire; Yellow: * - unless the game's Game Settings say otherwise
+         * (2.1 defaults: Yellow nothing) */
         Mapped m = mapped_buttons(true, false);
         if (m.fire) in.trig[0] = 1;
         if (m.top) in.shift = 1;
@@ -455,6 +458,7 @@ bool a8_input_frame(void) {
         uint8_t joy = joycon_read() | five_way();
         nav = in.stick[0] | joy;
         /* Red / click: fire; Green: OPTION; Yellow: SPACE; right side
+         * (2.1 defaults: Green fire, Yellow nothing) -
          * button: RETURN (Duo: the 5-way's press is fire) - unless the
          * game's Game Settings say otherwise */
         Mapped m = mapped_buttons(false, combo);

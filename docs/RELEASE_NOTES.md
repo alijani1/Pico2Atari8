@@ -28,6 +28,12 @@
 - The Yellow + click message now reads **PADDLE** / **JOYSTICK** (it was cut
   short before).
 
+**New button defaults**
+- **Green is a second fire button and Yellow does nothing** out of the box
+  (they were OPTION and SPACE - in a 5200 game, `*` - and easy to press by
+  accident mid-game). OPTION and SPACE are on the on-screen keyboard, `*`
+  on the 5200 keypad, and Game Settings can map them to any button.
+
 **Keyboard on MENU, Blue mappable, twin-stick games**
 - **Tap MENU** in a game for the on-screen keyboard (hold it, as before, to
   leave the game). **Blue** opens it too by default, but is now a mappable

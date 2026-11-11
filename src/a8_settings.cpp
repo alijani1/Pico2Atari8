@@ -105,12 +105,15 @@ static uint32_t cfgs_check(uint32_t magic, const void *g, uint32_t bytes, uint32
     return c;
 }
 
-/* What each button does when the game has no setting of its own. */
+/* What each button does when the game has no setting of its own. Green is
+ * a second fire and Yellow does nothing: they used to be OPTION / SPACE
+ * (5200: *), easy to hit by accident in the middle of a game - OPTION and
+ * SPACE are on the on-screen keyboard, * on the keypad. */
 static const uint8_t DEFAULT_800[A8_GB_COUNT] = {
-    A8_ACT_FIRE, A8_ACT_OPTION, 0x21 /* AKEY_SPACE */, A8_ACT_FIRE, A8_ACT_NONE, 0x0c /* AKEY_RETURN */,
+    A8_ACT_FIRE, A8_ACT_FIRE, A8_ACT_NONE, A8_ACT_FIRE, A8_ACT_NONE, 0x0c /* AKEY_RETURN */,
     A8_ACT_KEYBOARD };
 static const uint8_t DEFAULT_5200[A8_GB_COUNT] = {
-    A8_ACT_FIRE, A8_ACT_TOP_FIRE, 0x27 /* AKEY_5200_ASTERISK */, A8_ACT_FIRE, A8_ACT_NONE, A8_ACT_NONE,
+    A8_ACT_FIRE, A8_ACT_TOP_FIRE, A8_ACT_NONE, A8_ACT_FIRE, A8_ACT_NONE, A8_ACT_NONE,
     A8_ACT_KEYBOARD };
 
 static bool cur_is_default(void);

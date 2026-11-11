@@ -112,7 +112,7 @@ guessed from where its code jumps to. Rename a game `.a52` to make sure.
 | Red / Joy-Con click | bottom fire |
 | Green | top fire |
 | START / SELECT | START / PAUSE |
-| Yellow | `*` |
+| Yellow | nothing (Game Settings can make it `*` or any key) |
 | Blue | the controller keypad on screen: 0-9 `*` `#` START PAUSE RESET (as the keyboard: the game pauses, fire presses a key) |
 | MENU | hold 1 s: back to the game list |
 | 5200 controllers (Duo) | controllers 1 and 2: analog stick, Fire A = bottom, Fire B = top, keypad 0-9 `*` `#` START PAUSE RESET. The Joy-Con stands in for controller 1's stick while it's moved. In a 400/800/XL game they're joysticks (Fire A or B = fire, keypad digits = number keys, START = START) |
@@ -140,8 +140,8 @@ Pico2Arcade, comes with the Quad release, and shares its ARCADE ROMS drive.
 | Red | play | fire 1 |
 | Blue | | on-screen keyboard (by default; Game Settings can change it) |
 | MENU | | tap: on-screen keyboard, open / close - the game pauses, fire types a key (Settings > Keyboard); its gear key opens Game Settings. Hold 1 s: back to the game list |
-| Yellow | | SPACE (Game Settings can change it) |
-| Green | this game's Game Settings | OPTION (Game Settings can change it) |
+| Yellow | | nothing (Game Settings can change it; SPACE is on the keyboard) |
+| Green | this game's Game Settings | fire 1, like Red (Game Settings can change it; OPTION is on the keyboard) |
 | START / SELECT | START = play; SELECT = play on the other machine (400/800: four joysticks, OS-B) | START / SELECT |
 | Side buttons | up / down | right: RETURN, left: nothing (Game Settings can change both) |
 | MENU | back to the Quad | hold 1 s: back to the game list |
@@ -185,7 +185,7 @@ while the next is shrunk. The PC harness renders the same thing:
 | 5-way | also joystick 1 (press: fire; RETURN is on the on-screen keyboard) |
 | Red | fire |
 | Black / White | START / SELECT |
-| Green / Yellow | OPTION / SPACE |
+| Green / Yellow | fire / nothing (Game Settings) |
 | Blue | on-screen keyboard |
 | MENU | tap: next Scale mode; hold 1 s: back to the game list |
 
