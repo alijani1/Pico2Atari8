@@ -643,7 +643,13 @@ static volatile bool ov_redraw = true;                  /* frame8 was reused: re
  * kept HDMI_AUDIO_TARGET packets deep (18 ms). The packet code runs from
  * RAM (the driver places it there). DMA channel 3 is the driver's audio
  * channel: reserved here from start-up, so the I2S stream can't take it,
- * and released to the driver when it starts with sound. */
+ * and released to the driver when it starts with sound.
+ * The output always starts with sound (an HDMI signal, data islands and
+ * all), silent while the sound goes to the Fruit Jam's codec: switching
+ * the sound then only changes where pico_audio.cpp puts the samples. It
+ * used to restart the output with / without sound (DVI <-> HDMI), and a
+ * display lost the picture over it (2026-11-11). Only a mode with no room
+ * for sound runs without (picture only). */
 extern "C" {
 #include "drivers/dvhstx/audio_config.h"
 #include "pico_hdmi/hstx_packet.h"
@@ -654,10 +660,8 @@ extern "C" {
 static const uint32_t HDMI_AUDIO_RATE = 44100;
 static const uint32_t HDMI_AUDIO_TARGET = 200;          /* packets queued (4 frames each) */
 static const uint HDMI_AUDIO_DMA = pimoroni::DVHSTX::NUM_AUDIO_CHANS - 1;
-#ifndef A8_SOUND_HDMI
-#define A8_SOUND_HDMI 0                                 /* 1: sound over HDMI from start-up */
-#endif
-static volatile bool hdmi_audio_wanted = A8_SOUND_HDMI, hdmi_audio_on = false;
+/* (A8_SOUND_HDMI, sound to HDMI from start-up: pico_audio.cpp's now) */
+static volatile bool hdmi_audio_wanted = true, hdmi_audio_on = false;
 static int hdmi_audio_frame = 0;                        /* the packets' frame counter (channel status) */
 static int16_t hdmi_audio_prev = 0;
 

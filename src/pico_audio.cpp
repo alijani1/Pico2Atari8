@@ -83,6 +83,13 @@ static const int HDMI_RING = 512;                      /* 23 ms; the packet queu
 static int16_t   g_hring[HDMI_RING];
 static volatile uint32_t g_hhead = 0, g_htail = 0;     /* core 0 writes, core 1 reads */
 static volatile bool g_hdmi = false;
+/* Before pico_audio_init: where the sound is to go (Settings > Sound
+ * output); the HDMI output carries sound packets all along (a8_display.cpp),
+ * so switching never restarts it. */
+#ifndef A8_SOUND_HDMI
+#define A8_SOUND_HDMI 0                  /* 1: sound over HDMI from start-up */
+#endif
+static bool g_hdmi_wanted = A8_SOUND_HDMI;
 #endif
 
 static void i2s_start(int rate) {
@@ -140,7 +147,7 @@ extern "C" void pico_audio_init(int sample_rate) {
     g_codec.setMute(!g_amp_on);
     Serial.printf("[audio] output: %s (%s)\n", output_name(o), g_output_mode ? "fixed" : "auto");
 #ifdef A8_HDMI_AUDIO
-    if (a8_display_hdmi_audio()) {       /* A8_SOUND_HDMI: HDMI has the sound from the start */
+    if (g_hdmi_wanted && a8_display_hdmi_audio()) {   /* HDMI has the sound from the start */
         g_codec.setMute(true);
         g_i2s.end();
         g_hhead = g_htail = 0;
@@ -237,7 +244,7 @@ extern "C" void pico_audio_set_hdmi(int on_) {
     const bool on = on_ != 0;
     if (on == g_hdmi || !g_started) return;
     if (on) {
-        if (!a8_display_set_hdmi_audio(true)) {
+        if (!a8_display_hdmi_audio()) {  /* (the output carries sound: nothing to restart) */
             Serial.printf("[audio] HDMI sound: not in this HDMI mode%c", 10);
             return;
         }
@@ -246,8 +253,7 @@ extern "C" void pico_audio_set_hdmi(int on_) {
         g_hhead = g_htail = 0;
         g_hdmi = true;
     } else {
-        g_hdmi = false;                  /* nothing more into the ring */
-        a8_display_set_hdmi_audio(false);
+        g_hdmi = false;                  /* nothing more into the ring: HDMI sends silence */
         i2s_start(g_sample_rate);
         if (g_codec.ready() && g_amp_on) { delay(10); g_codec.setMute(false); }
     }
@@ -341,8 +347,7 @@ extern "C" void pico_audio_set_output(int mode) {
 
 /* Settings > Sound output (a8_settings.cpp): 0 - 3 the codec's outputs as
  * pico_audio_set_output, 4 HDMI. Before pico_audio_init (the menu, no
- * sound yet) it is kept for it - HDMI's is the display's (it starts with
- * or without sound). */
+ * sound yet) it is kept for it. */
 extern "C" void pico_audio_set_sound_output(int o) {
 #ifdef A8_HDMI_AUDIO
     if (o < 0 || o > 4) o = 0;
@@ -352,12 +357,12 @@ extern "C" void pico_audio_set_sound_output(int o) {
     if (o < 4 && o != g_output_mode) pico_audio_set_output(o);
 #ifdef A8_HDMI_AUDIO
     if (g_started) pico_audio_set_hdmi(o == 4);
-    else a8_display_set_hdmi_audio(o == 4);
+    else if (o != 4 || a8_display_hdmi_audio()) g_hdmi_wanted = o == 4;   /* (no room: stays) */
 #endif
 }
 extern "C" int pico_audio_get_sound_output(void) {
 #ifdef A8_HDMI_AUDIO
-    if (g_started ? g_hdmi : a8_display_hdmi_audio()) return 4;
+    if (g_started ? g_hdmi : g_hdmi_wanted) return 4;
 #endif
     return g_output_mode;
 }
