@@ -1488,7 +1488,14 @@ uint8_t a8_input_menu(void) {
 #ifdef A8_USB_HOST
     /* the pad's A: OK; B and the keyboard's Esc / Backspace: back; X: Game
      * Settings (Green on the other devices); Enter: OK */
-    const uint32_t u = usb_buttons();
+    /* (player 2's pad too: D-pad / stick, A, B, X, Start as player 1's) */
+    const uint32_t u2 = usb_pads[1].on ? (usb_pads[1].buttons | usb_pads[1].adirs) : 0;
+    const uint32_t u = usb_buttons() | (u2 & ~(A8U_START | A8U_SELECT));
+    if (u2 & A8U_UP)    b |= A8M_UP;
+    if (u2 & A8U_DOWN)  b |= A8M_DOWN;
+    if (u2 & A8U_LEFT)  b |= A8M_LEFT;
+    if (u2 & A8U_RIGHT) b |= A8M_RIGHT;
+    if (u2 & A8U_START) b |= A8M_OK;
     const bool k_back = usb_kbd_on && (usb_kbd_has(0x29) || usb_kbd_has(0x2A));
     if (u & A8U_A) b |= A8M_OK;
     if (((u & A8U_B) && !(u & A8U_A)) || k_back) { b &= ~A8M_OK; b |= A8M_BACK; }
@@ -1549,6 +1556,12 @@ void a8_input_joycon_diag(int raw[2], int centre[2], int lo[2], int hi[2], int16
 }
 
 bool a8_input_button(int which) {
+#ifdef A8_USB_HOST
+    /* (a screen polling only this - Controller test - must keep the USB
+     * reports coming, or a pad's last one, "held", never changes: waiting
+     * for MENU's release hung there) */
+    a8_input_usb_task();
+#endif
     static const int PINS[A8B_COUNT] = { PIN_RED, PIN_GREEN, PIN_BLUE, PIN_YELLOW,
                                          PIN_START, PIN_SELECT, PIN_CLICK, PIN_MENU,
                                          PIN_SIDE_UP, PIN_SIDE_DOWN };
