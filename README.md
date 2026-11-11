@@ -64,7 +64,7 @@ and on, like the switch on a real drive: let the game load, type DRV
 | Default machine | 800XL (default) / 400/800 - SELECT in the list starts the other |
 | TV system | NTSC (default) / PAL |
 | Paddle sensitivity | (Quad) how much of a paddle's turn spans the game's whole range: Very low = all of it, Low 75 %, Medium 50 % (default, about what Atari games expect), High 40 %, Very high 30 % |
-| Scale | the picture. 320x240 (Quad, Duo 5200): Normal (1:1, default) / TV (240 wide, centred: Atari pixels as wide as on a TV, softened) / TV sharp (the same, unblended) / Pixel (160 wide: one screen pixel per Atari pixel; hi-res text loses detail) / Stretch (the 192-line playfield over all 240 lines). 160x80 (Duo): Smooth / Sharp / Drop / Crop. Per game: Game Settings > Scale; in play: a button mapped to Next scale (wraps) |
+| Scale | the picture. 320x240 (Quad, Duo 5200): Normal (1:1) / TV (240 wide, centred: Atari pixels as wide as on a TV, softened) / TV sharp (the same, unblended) / Pixel (160 wide: one screen pixel per Atari pixel; hi-res text loses detail) / Stretch (the 192-line playfield over all 240 lines; the default). 160x80 (Duo): Smooth / Sharp / Drop / Crop. Per game: Game Settings > Scale; in play: a button mapped to Next scale (wraps) |
 | Controller test | every control live: the 5200 controllers' sticks (as the pot value the game gets, plus the raw counts and the range learnt), Fire A / B and keys; the Quad's joystick ports, paddles on ports 1–2 (pot value, raw counts, range, buttons) and side buttons; the Joy-Con; the device buttons. MENU goes back |
 
 ## Game Settings

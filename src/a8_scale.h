@@ -40,22 +40,24 @@ extern const char *const a8_scale_names[A8_SCALE_MODES];
  * panel (Quad, Duo 5200; a8_display.cpp, on core 1, in the snapshot):
  *
  *   NORMAL    the middle 320 x 240, 1:1 - an Atari colour clock (160 a
- *             line) is 2 pixels wide (default)
+ *             line) is 2 pixels wide
  *   TV        240 wide, centred: a colour clock 1.5 pixels (as wide as on
  *             a TV, ~1.7), the middle pixel of each 3 blended
  *   TV SHARP  the same, no blending (colour clocks 2, 1, 2, 1 ... wide)
  *   PIXEL     160 wide, centred: a colour clock is 1 pixel (hi-res detail,
  *             80-column text, loses every second pixel)
  *   STRETCH   320 wide, the 192-line playfield (lines 24-215) stretched to
- *             all 240 lines (the border above / below is cut)
+ *             all 240 lines (the border above / below is cut) (default)
  *
  * The side bands of TV / PIXEL are black. */
 #ifdef PICO_TINY_SCREEN
 #define A8_SCREEN_SCALES A8_SCALE_MODES
 #define a8_screen_scale_names a8_scale_names
+#define A8_SCREEN_SCALE_DEFAULT A8_SCALE_SMOOTH
 #else
 enum { A8_BIG_NORMAL = 0, A8_BIG_TV, A8_BIG_TV_SHARP, A8_BIG_PIXEL, A8_BIG_STRETCH, A8_BIG_SCALES };
 #define A8_SCREEN_SCALES A8_BIG_SCALES
+#define A8_SCREEN_SCALE_DEFAULT A8_BIG_STRETCH   /* the user's choice (2026-11-11) */
 extern const char *const a8_screen_scale_names[A8_SCREEN_SCALES];
 #endif
 

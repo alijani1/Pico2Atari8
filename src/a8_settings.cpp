@@ -39,7 +39,7 @@ struct Stored {
     uint32_t check;
 };
 
-A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false, A8_PADDLES_MEDIUM, A8_SCALE_SMOOTH };
+A8Settings a8_settings = { A8_KBD_ONE_KEY, false, false, false, A8_PADDLES_MEDIUM, A8_SCREEN_SCALE_DEFAULT };
 
 static const char *const KEYBOARD_NAMES[A8_KBD_MODES] = { "Pause+Auto Resume", "Auto-pause", "Keep running" };
 static const char *const PADDLES_NAMES[A8_PADDLES_LEVELS] = { "Very low", "Low", "Medium", "High", "Very high" };
@@ -179,7 +179,11 @@ void a8_settings_load(void) {
     a8_settings.machine_800 = s.machine_800 != 0;
     a8_settings.pal = s.pal != 0;
     a8_settings.paddles = s.paddles < A8_PADDLES_LEVELS ? s.paddles : A8_PADDLES_MEDIUM;
-    a8_settings.scale = s.spare[0] < A8_SCREEN_SCALES ? s.spare[0] : 0;   /* 0: Smooth / Normal */
+    /* stored counted from this screen's default (0 = the default): 2.0 kept
+     * 0 here on every device, and the 320x240 screens' default is Stretch,
+     * the last mode, not the first (the 160x80 one's is Smooth, 0) */
+    a8_settings.scale = s.spare[0] < A8_SCREEN_SCALES
+                      ? (s.spare[0] + A8_SCREEN_SCALE_DEFAULT) % A8_SCREEN_SCALES : A8_SCREEN_SCALE_DEFAULT;
     Serial.printf("[settings] keyboard %s, fps %s, machine %s, %s, paddles %s\n",
                   KEYBOARD_NAMES[a8_settings.keyboard],
                   a8_settings.fps ? "on" : "off", a8_settings.machine_800 ? "400/800" : "800XL",
@@ -198,7 +202,7 @@ static void save(void) {
     s.pal = a8_settings.pal;
     s.paddles = (uint8_t)a8_settings.paddles;
     memset(s.spare, 0, sizeof(s.spare));
-    s.spare[0] = (uint8_t)a8_settings.scale;
+    s.spare[0] = (uint8_t)((a8_settings.scale - A8_SCREEN_SCALE_DEFAULT + A8_SCREEN_SCALES) % A8_SCREEN_SCALES);
     s.check = checksum(s);
     memcpy(sector, &s, sizeof(s));
     /* the saved records, but the current game's as it is now (at the end:

@@ -48,7 +48,8 @@
 - **Scale on the Quad and Duo 5200** (Settings > Scale, and per game):
   **Normal** (as before), **TV** (240 wide: Atari pixels as wide as on a
   TV, softened), **TV sharp**, **Pixel** (160 wide: one screen pixel per
-  Atari pixel) and **Stretch** (the playfield over the full height). The
+  Atari pixel) and **Stretch** (the playfield over the full height) - now
+  the default. The
   on-screen keyboard and messages stay full size in every mode.
 - **RST** on the on-screen keyboard: the Atari's RESET key (SPACE is a
   little narrower to fit it).
