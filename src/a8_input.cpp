@@ -320,10 +320,10 @@ static void serial_poll(void) {
  *   A 5200 game: digits are the keypad, * and # (Shift 8 / Shift 3, or the
  *   number pad's), F3 PAUSE, F4 START, F5 RESET.
  * Other pads: their HID report descriptor says where the X / Y axes, the
- * hat and buttons 1-16 are (any HID gamepad or joystick); the buttons as
- * most cheap pads number them (the SNES-style pad's own): 1 X, 2 A, 3 B,
- * 4 Y, 5 / 7 L, 6 / 8 R, 9 Select, 10 Start - all but Start / Select can
- * be mapped per game anyway. Settings > Controller test shows a pad's raw
+ * hat and buttons 1-16 are (any HID gamepad or joystick); button 1 is the
+ * main one (B's slot, the main fire), then 2 A, 3 X, 4 Y, 5 / 7 L, 6 / 8 R,
+ * 9 Select, 10 Start - all but Start / Select can be mapped per game
+ * anyway. Settings > Controller test shows a pad's raw
  * report and the numbers of the buttons held. Not HID (an Xbox-style
  * XInput pad): it connects, but nothing reads it (the log says which
  * devices connected). */
@@ -519,8 +519,11 @@ static bool usb_parse_layout(const PadLayout &L, const uint8_t *r, uint16_t len,
         const int32_t k = h - L.hat.lmin;                /* 8, 15 ...: centred */
         if (k >= 0 && k < 8) b |= HAT[k];
     }
-    /* the buttons as most cheap pads (and the SNES-style one) number them */
-    static const uint32_t NUM[16] = { A8U_X, A8U_A, A8U_B, A8U_Y, A8U_L, A8U_R, A8U_L, A8U_R,
+    /* the buttons by number: 1 the main one (a joystick's trigger; the Quad
+     * in controller mode sends Red as button 1) - B's slot, the first, the
+     * main fire; then A, X, Y, L, R, L, R, Select, Start. (It was the cheap
+     * pads' 1 X, 2 A, 3 B ...: the Quad's Red landed on X's slot, OPTION.) */
+    static const uint32_t NUM[16] = { A8U_B, A8U_A, A8U_X, A8U_Y, A8U_L, A8U_R, A8U_L, A8U_R,
                                       A8U_SELECT, A8U_START, 0, 0, 0, 0, 0, 0 };
     uint16_t n = 0;
     for (int i = 0; i < 16; i++) {

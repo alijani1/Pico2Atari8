@@ -323,8 +323,9 @@ line), with Paddle center and Settings > Paddle sensitivity; otherwise
 joystick directions. In the menus it moves the cursor.
 Pads are numbered in the order they connect. Any HID gamepad or joystick
 works: its report descriptor says where its X / Y axes, hat and buttons
-are; buttons are taken as most cheap pads number them (1 X, 2 A, 3 B, 4 Y,
-5 / 7 L, 6 / 8 R, 9 Select, 10 Start). Controller test shows the numbers
+are; button 1 is the main one (B's slot: the main fire - a joystick's
+trigger, the Quad's Red in controller mode), then 2 A, 3 X, 4 Y, 5 / 7 L,
+6 / 8 R, 9 Select, 10 Start. Controller test shows the numbers
 of the buttons held. An Xbox-style (XInput) pad isn't HID: the log shows
 it connected, but it isn't read.
 
