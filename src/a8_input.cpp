@@ -351,6 +351,7 @@ struct UsbPad {
     uint32_t adirs;                                      /* A8U_* directions of its X / Y axes */
     int32_t ax, ay;                                      /* its X / Y as reported (lay.x / lay.y ranges) */
     uint8_t raw[16], raw_len;                            /* its last report as it came */
+    uint32_t failing_since;                              /* its reports failing (0: they aren't) */
     bool fixed;                                          /* the SNES-style pad's known report */
     PadLayout lay;
 };
@@ -609,6 +610,14 @@ extern "C" void tuh_hid_report_received_cb(uint8_t dev, uint8_t idx, uint8_t con
     } else {
         for (UsbPad &p : usb_pads) {
             if (!p.on || p.addr != dev || p.idx != idx) continue;
+            /* a failed request comes back empty (an idle pad NAKs instead:
+             * no callback); failing on and on - it's gone (see
+             * a8_input_usb_task) */
+            if (len == 0) {
+                if (!p.failing_since) p.failing_since = millis() | 1;
+                continue;
+            }
+            p.failing_since = 0;
             uint16_t n = len < sizeof(p.raw) ? len : sizeof(p.raw);
             for (uint16_t i = 0; i < n; i++) p.raw[i] = r[i];
             p.raw_len = (uint8_t)n;
@@ -697,13 +706,30 @@ void a8_input_usb_flash_written(void) {
     usb_power_off_at = millis();
 }
 
+/* A pad unplugged from the Fruit Jam's hub wasn't always noticed: the hub
+ * reports a removal on its status endpoint, and TinyUSB's hub driver can
+ * stop polling that (a failed re-arm, an enumeration that never ends) -
+ * then no removal or new device was seen again. A pad that's gone fails
+ * every request, so a pad whose reports fail for USB_GONE_MS on end is
+ * taken as unplugged and the ports are power-cycled, as after a flash
+ * write: the hub and the devices still there are set up afresh. */
+static const uint32_t USB_GONE_MS = 500;
+
 /* Core 0: the host stack's task (its callbacks run here), from the input
  * polling - the menus' (a8_input_menu) and the game's (a8_input_frame). */
 void a8_input_usb_task(void) {
     if (usb_power_off && millis() - usb_power_off_at >= USB_POWER_OFF_MS) {
         digitalWrite(PIN_5V_EN, PIN_5V_EN_STATE);
         usb_power_off = false;
-        Serial.printf("[usb] ports powered again (after a flash write)%c", 10);
+        Serial.printf("[usb] ports powered again%c", 10);
+    }
+    for (int n = 0; n < 2 && !usb_power_off; n++) {
+        UsbPad &p = usb_pads[n];
+        if (p.on && p.failing_since && millis() - p.failing_since >= USB_GONE_MS) {
+            Serial.printf("[usb] gamepad %d stopped answering (unplugged?): the ports are reset%c", n + 1, 10);
+            p.failing_since = 0;
+            a8_input_usb_flash_written();       /* (the same power-cycle) */
+        }
     }
     if (usb_started) usb_host.task();
 }
