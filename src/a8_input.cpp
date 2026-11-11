@@ -318,19 +318,38 @@ static void serial_poll(void) {
  *     menus: arrows move, Enter OK, Esc / Backspace back
  *   A 5200 game: digits are the keypad, * and # (Shift 8 / Shift 3, or the
  *   number pad's), F3 PAUSE, F4 START, F5 RESET.
- * TODO: other pads' layouts (a table by VID:PID, or the report descriptor);
- * Settings > Controller test shows a pad's raw report to find them. */
+ * Other pads: their HID report descriptor says where the X / Y axes, the
+ * hat and buttons 1-16 are (any HID gamepad or joystick); the buttons as
+ * most cheap pads number them (the SNES-style pad's own): 1 X, 2 A, 3 B,
+ * 4 Y, 5 / 7 L, 6 / 8 R, 9 Select, 10 Start - all but Start / Select can
+ * be mapped per game anyway. Settings > Controller test shows a pad's raw
+ * report and the numbers of the buttons held. Not HID (an Xbox-style
+ * XInput pad): it connects, but nothing reads it (the log says which
+ * devices connected). */
 #include "Adafruit_TinyUSB.h"
 #include "pio_usb.h"
 
 static Adafruit_USBH_Host usb_host;
 /* written by core 1 (the reports), read by core 0 */
+/* A field of a HID report: where it is (bits, after the report ID), its
+ * size and range; size 0: none. */
+struct HidField { uint16_t bit; uint8_t size; int32_t lmin, lmax; };
+/* A pad's report, from its report descriptor (hid_parse_layout). */
+struct PadLayout {
+    bool ok;
+    uint8_t id;                                          /* its report ID (0: none) */
+    HidField x, y, hat;
+    uint16_t btn_bit[16];                                /* button n + 1's bit; 0xFFFF: none */
+};
 struct UsbPad {
     bool on;
     uint8_t addr, idx;                                   /* its device, HID interface */
     uint16_t vid, pid;
     uint32_t buttons;                                    /* A8U_* held */
+    uint16_t numbers;                                    /* buttons 1-16 held (bit n - 1) */
     uint8_t raw[16], raw_len;                            /* its last report as it came */
+    bool fixed;                                          /* the SNES-style pad's known report */
+    PadLayout lay;
 };
 static UsbPad usb_pads[2];                               /* player 1, player 2 (as they connect) */
 static uint8_t usb_kbd[8];                               /* the last keyboard report */
@@ -364,12 +383,146 @@ static uint32_t usb_parse_pad(const uint8_t *r, uint16_t len) {
     return b;
 }
 
+/* The report descriptor's short items: the Generic Desktop page's X (0x30),
+ * Y (0x31) and Hat switch (0x39), and the Button page's 1-16, in the first
+ * report (ID) that has any of them; input fields only. */
+static void hid_parse_layout(const uint8_t *d, uint16_t len, PadLayout &L) {
+    L = PadLayout();
+    for (uint16_t &b : L.btn_bit) b = 0xFFFF;
+    uint16_t page = 0, usages[16], umin = 0, umax = 0;
+    uint8_t nus = 0, rsize = 0, rid = 0;
+    uint16_t rcount = 0;
+    int32_t lmin = 0, lmax = 0;
+    bool urange = false;
+    struct { uint8_t id; uint16_t bits; } offs[8];       /* each report's bits so far */
+    uint8_t noffs = 0;
+    int chosen = -1;
+    for (uint16_t i = 0; i < len;) {
+        const uint8_t p = d[i++];
+        if (p == 0xFE) {                                 /* a long item: skipped */
+            if (i + 1 >= len) break;
+            i += 2 + d[i];
+            continue;
+        }
+        uint8_t sz = p & 3;
+        if (sz == 3) sz = 4;
+        const uint8_t type = (p >> 2) & 3, tag = p >> 4;
+        if (i + sz > len) break;
+        uint32_t u = 0;
+        for (uint8_t k = 0; k < sz; k++) u |= (uint32_t)d[i + k] << (8 * k);
+        int32_t s = (int32_t)u;
+        if (sz == 1) s = (int8_t)u;
+        else if (sz == 2) s = (int16_t)u;
+        i += sz;
+        if (type == 1) {                                 /* global */
+            switch (tag) {
+            case 0: page = (uint16_t)u; break;
+            case 1: lmin = s; break;
+            case 2: lmax = lmin >= 0 ? (int32_t)u : s; break;   /* (0..255 is often 1 byte) */
+            case 7: rsize = (uint8_t)u; break;
+            case 8: rid = (uint8_t)u; break;
+            case 9: rcount = (uint16_t)u; break;
+            default: break;
+            }
+        } else if (type == 2) {                          /* local */
+            if (tag == 0 && nus < 16) usages[nus++] = (uint16_t)u;
+            else if (tag == 1) { umin = (uint16_t)u; urange = true; }
+            else if (tag == 2) umax = (uint16_t)u;
+        } else if (type == 0) {                          /* main */
+            if (tag == 8) {                              /* Input */
+                int o = -1;
+                for (int k = 0; k < noffs; k++) if (offs[k].id == rid) o = k;
+                if (o < 0 && noffs < 8) { o = noffs++; offs[o].id = rid; offs[o].bits = 0; }
+                if (o < 0) break;
+                const bool data_var = !(u & 1) && (u & 2);
+                for (uint16_t f = 0; f < rcount; f++) {
+                    const uint16_t bit = offs[o].bits;
+                    offs[o].bits += rsize;
+                    if (!data_var || (chosen >= 0 && chosen != rid)) continue;
+                    uint16_t usage = urange ? (uint16_t)(umin + f)
+                                   : nus ? usages[f < nus ? f : nus - 1] : 0;
+                    if (urange && usage > umax) continue;
+                    const HidField fld = { bit, rsize, lmin, lmax };
+                    bool used = false;
+                    if (page == 0x01 && usage == 0x30 && !L.x.size) { L.x = fld; used = true; }
+                    else if (page == 0x01 && usage == 0x31 && !L.y.size) { L.y = fld; used = true; }
+                    else if (page == 0x01 && usage == 0x39 && !L.hat.size) { L.hat = fld; used = true; }
+                    else if (page == 0x09 && usage >= 1 && usage <= 16 && L.btn_bit[usage - 1] == 0xFFFF) {
+                        L.btn_bit[usage - 1] = bit;
+                        used = true;
+                    }
+                    if (used) { chosen = rid; L.id = rid; L.ok = true; }
+                }
+            }
+            nus = 0;                                     /* a main item ends the local ones */
+            urange = false;
+        }
+    }
+}
+
+/* A field's value in a report (after its ID), or INT32_MIN if not in it. */
+static int32_t hid_field(const uint8_t *r, uint16_t len, const HidField &f) {
+    if (!f.size || f.size > 32 || f.bit + f.size > len * 8) return INT32_MIN;
+    uint32_t v = 0;
+    for (uint8_t b = 0; b < f.size; b++) {
+        const uint16_t bit = f.bit + b;
+        if ((r[bit >> 3] >> (bit & 7)) & 1) v |= 1u << b;
+    }
+    if (f.lmin < 0 && f.size < 32 && ((v >> (f.size - 1)) & 1)) v |= ~0u << f.size;   /* signed */
+    return (int32_t)v;
+}
+
+/* Any pad, by its layout: false if the report isn't the one with the pad. */
+static bool usb_parse_layout(const PadLayout &L, const uint8_t *r, uint16_t len, uint32_t *buttons,
+                             uint16_t *numbers) {
+    if (L.id) {
+        if (!len || r[0] != L.id) return false;
+        r++;
+        len--;
+    }
+    uint32_t b = 0;
+    const HidField *axes[2] = { &L.x, &L.y };
+    for (int a = 0; a < 2; a++) {
+        const HidField &f = *axes[a];
+        int32_t v = hid_field(r, len, f);
+        if (v == INT32_MIN || f.lmax <= f.lmin) continue;
+        const int32_t c = f.lmin + (f.lmax - f.lmin) / 2, q = (f.lmax - f.lmin) / 4;
+        if (v < c - q) b |= a ? A8U_UP : A8U_LEFT;
+        if (v > c + q) b |= a ? A8U_DOWN : A8U_RIGHT;
+    }
+    const int32_t h = hid_field(r, len, L.hat);
+    if (h != INT32_MIN) {
+        static const uint32_t HAT[8] = { A8U_UP, A8U_UP | A8U_RIGHT, A8U_RIGHT, A8U_DOWN | A8U_RIGHT,
+                                         A8U_DOWN, A8U_DOWN | A8U_LEFT, A8U_LEFT, A8U_UP | A8U_LEFT };
+        const int32_t k = h - L.hat.lmin;                /* 8, 15 ...: centred */
+        if (k >= 0 && k < 8) b |= HAT[k];
+    }
+    /* the buttons as most cheap pads (and the SNES-style one) number them */
+    static const uint32_t NUM[16] = { A8U_X, A8U_A, A8U_B, A8U_Y, A8U_L, A8U_R, A8U_L, A8U_R,
+                                      A8U_SELECT, A8U_START, 0, 0, 0, 0, 0, 0 };
+    uint16_t n = 0;
+    for (int i = 0; i < 16; i++) {
+        const uint16_t bit = L.btn_bit[i];
+        if (bit == 0xFFFF || bit >= len * 8) continue;
+        if ((r[bit >> 3] >> (bit & 7)) & 1) { n |= 1u << i; b |= NUM[i]; }
+    }
+    *buttons = b;
+    *numbers = n;
+    return true;
+}
+
+/* Every device that connects (a pad that isn't HID shows only here). */
+extern "C" void tuh_mount_cb(uint8_t dev) {
+    uint16_t vid = 0, pid = 0;
+    tuh_vid_pid_get(dev, &vid, &pid);
+    Serial.printf("[usb] device %04x:%04x connected%c", vid, pid, 10);
+}
+
 /* (TinyUSB's header declares the HID mount / unmount callbacks weak, which
  * made these definitions weak too - and the linker took Adafruit's empty
  * ones: the pad was set up but never asked for a report. a8_stubs.c, which
  * doesn't include that header, defines them and calls these.) */
 extern "C" void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, uint16_t desc_len) {
-    (void)desc; (void)desc_len;
     uint8_t proto = tuh_hid_interface_protocol(dev, idx);
     if (proto == HID_ITF_PROTOCOL_KEYBOARD) {
         usb_kbd_addr = dev;
@@ -386,6 +539,15 @@ extern "C" void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, 
         p->pid = pid;
         p->addr = dev;
         p->idx = idx;
+        p->fixed = vid == 0x081F && pid == 0xE401;       /* the SNES-style pad: as it was */
+        if (desc && desc_len) hid_parse_layout(desc, desc_len, p->lay);
+        if (!p->lay.ok) p->fixed = true;                 /* no layout: try the SNES-style one */
+        int nb = 0;
+        for (uint16_t bit : p->lay.btn_bit) nb += bit != 0xFFFF;
+        Serial.printf("[usb] gamepad %d: %04x:%04x, %s: report %u, X %s, Y %s, hat %s, %d buttons%c",
+                      (int)(p - usb_pads) + 1, vid, pid, p->fixed ? "SNES-style layout" : "its layout",
+                      p->lay.id, p->lay.x.size ? "yes" : "no", p->lay.y.size ? "yes" : "no",
+                      p->lay.hat.size ? "yes" : "no", nb, 10);
         p->on = true;
     }
     usb_events++;
@@ -411,7 +573,14 @@ extern "C" void tuh_hid_report_received_cb(uint8_t dev, uint8_t idx, uint8_t con
             uint16_t n = len < sizeof(p.raw) ? len : sizeof(p.raw);
             for (uint16_t i = 0; i < n; i++) p.raw[i] = r[i];
             p.raw_len = (uint8_t)n;
-            p.buttons = usb_parse_pad(r, len);
+            if (p.fixed) {
+                p.buttons = usb_parse_pad(r, len);
+                p.numbers = 0;
+            } else {
+                uint32_t b;
+                uint16_t num;
+                if (usb_parse_layout(p.lay, r, len, &b, &num)) { p.buttons = b; p.numbers = num; }
+            }
         }
     }
     tuh_hid_receive_report(dev, idx);
@@ -665,6 +834,7 @@ void a8_input_usb_diag(A8UsbDiag *d) {
         d->vid[n] = p.vid;
         d->pid[n] = p.pid;
         d->buttons[n] = p.buttons;
+        d->numbers[n] = p.numbers;
         d->raw_len[n] = p.raw_len;
         for (int i = 0; i < 16; i++) d->raw[n][i] = p.raw[i];
     }

@@ -308,14 +308,19 @@ the host is silent and didn't wake properly, so it reconnects instead
 | USB gamepad (SNES-style) | Game | Menus |
 |---|---|---|
 | D-pad | joystick 1 | move |
-| A, B, X, Y, L, R | Game Settings' slots, mapped per game (default: A, B fire; X nothing; Y on-screen keyboard; L nothing; R RETURN) | A OK, B back, X Game Settings |
+| A, B, X, Y, L, R | Game Settings' slots, mapped per game (default: A, B fire; X OPTION; Y on-screen keyboard; L SPACE; R RETURN) | A OK, B back, X Game Settings |
 | Select / Start | SELECT / START | |
 | Start + Select | MENU (tap: keyboard, hold: the game list) | |
 
 A second pad is player 2: its D-pad is joystick 2 (a 5200 game: controller
 2), its buttons go through the same per-game map (fire to joystick 2, keys
 and console keys as player 1's), its Start / Select are START / SELECT.
-Pads are numbered in the order they connect.
+Pads are numbered in the order they connect. Any HID gamepad or joystick
+works: its report descriptor says where its X / Y axes, hat and buttons
+are; buttons are taken as most cheap pads number them (1 X, 2 A, 3 B, 4 Y,
+5 / 7 L, 6 / 8 R, 9 Select, 10 Start). Controller test shows the numbers
+of the buttons held. An Xbox-style (XInput) pad isn't HID: the log shows
+it connected, but it isn't read.
 
 A USB keyboard types into the Atari's keyboard (by character, US layout;
 Ctrl = CTRL); arrows are joystick 1 (Ctrl + arrows: the Atari's cursor

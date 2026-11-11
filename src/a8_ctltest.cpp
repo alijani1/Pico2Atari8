@@ -169,10 +169,12 @@ static void draw_usb(int y) {
     a8_input_usb_diag(&d);
     static const char *const N[12] = { "U", "D", "L", "R", "A", "B", "X", "Y", "L1", "R1", "SEL", "START" };
     for (int n = 0; n < 2; n++, y += 26) {
-        char hex[28] = "";
+        char hex[28] = "", num[20] = "";
         for (int i = 0; i < d.raw_len[n] && i < 8; i++) snprintf(hex + i * 3, 4, "%02x ", d.raw[n][i]);
-        if (d.pad[n]) text_at(4, y, COL_ON, "PAD %d %04x:%04x  %-26s", n + 1, d.vid[n], d.pid[n], hex);
-        else          text_at(4, y, COL_HINT, "PAD %d not plugged %-26s", n + 1, "");
+        for (int i = 0; i < 16; i++)                     /* the buttons held, by number */
+            if (d.numbers[n] & (1u << i)) snprintf(num + strlen(num), sizeof(num) - strlen(num), "%d ", i + 1);
+        if (d.pad[n]) text_at(4, y, COL_ON, "PAD %d %04x:%04x %-24s#%-12s", n + 1, d.vid[n], d.pid[n], hex, num);
+        else          text_at(4, y, COL_HINT, "PAD %d not plugged %-34s", n + 1, "");
         int x = 4;
         for (int i = 0; i < 12; i++) {
             lamp(x, y + 10, N[i], d.buttons[n] & (1u << i));

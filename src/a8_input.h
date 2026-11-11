@@ -50,6 +50,7 @@ struct A8UsbDiag {
     bool pad[2], keyboard;        /* player 1's, player 2's pad */
     uint16_t vid[2], pid[2];
     uint32_t buttons[2];          /* A8U_* */
+    uint16_t numbers[2];          /* its buttons 1-16 held (bit n - 1; read by its layout) */
     uint8_t raw[2][16], raw_len[2];   /* their last reports */
     uint8_t kbd[8];               /* the keyboard's last report */
     int key;                      /* the Atari key it types now, or -1 */

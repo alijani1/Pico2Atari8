@@ -119,9 +119,17 @@ static uint32_t cfgs_check(uint32_t magic, const void *g, uint32_t bytes, uint32
  * a second fire and Yellow does nothing: they used to be OPTION / SPACE
  * (5200: *), easy to hit by accident in the middle of a game - OPTION and
  * SPACE are on the on-screen keyboard, * on the keypad. */
+#ifdef PICO_FRUITJAM
+/* The Fruit Jam's USB pad (a8_input.cpp): X (the Yellow slot) OPTION and L
+ * (side L) SPACE - a pad has no keyboard keys of its own to reach them. */
+static const uint8_t DEFAULT_800[A8_GB_COUNT] = {
+    A8_ACT_FIRE, A8_ACT_FIRE, A8_ACT_OPTION, A8_ACT_FIRE, 0x21 /* AKEY_SPACE */, 0x0c /* AKEY_RETURN */,
+    A8_ACT_KEYBOARD };
+#else
 static const uint8_t DEFAULT_800[A8_GB_COUNT] = {
     A8_ACT_FIRE, A8_ACT_FIRE, A8_ACT_NONE, A8_ACT_FIRE, A8_ACT_NONE, 0x0c /* AKEY_RETURN */,
     A8_ACT_KEYBOARD };
+#endif
 static const uint8_t DEFAULT_5200[A8_GB_COUNT] = {
     A8_ACT_FIRE, A8_ACT_TOP_FIRE, A8_ACT_NONE, A8_ACT_FIRE, A8_ACT_NONE, A8_ACT_NONE,
     A8_ACT_KEYBOARD };
