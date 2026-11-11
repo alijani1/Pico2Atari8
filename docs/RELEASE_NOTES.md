@@ -42,8 +42,14 @@
   small screen) and **Stick 2 Up / Down / Left / Right** - map four buttons
   to joystick 2 (a 5200: controller 2) and play twin-stick games such as
   Robotron: 2084 on the device alone.
-- **Scale per game** (Duo Ultimate): Game Settings > Scale, Default or a
-  mode; a MENU tap used to change it - map Next scale to a button instead.
+- **Scale per game**: Game Settings > Scale, Default or a mode; a MENU tap
+  used to change it (Duo Ultimate) - map Next scale to a button instead; it
+  steps through the modes and wraps.
+- **Scale on the Quad and Duo 5200** (Settings > Scale, and per game):
+  **Normal** (as before), **TV** (240 wide: Atari pixels as wide as on a
+  TV, softened), **TV sharp**, **Pixel** (160 wide: one screen pixel per
+  Atari pixel) and **Stretch** (the playfield over the full height). The
+  on-screen keyboard and messages stay full size in every mode.
 - **RST** on the on-screen keyboard: the Atari's RESET key (SPACE is a
   little narrower to fit it).
 

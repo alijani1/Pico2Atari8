@@ -179,7 +179,7 @@ void a8_settings_load(void) {
     a8_settings.machine_800 = s.machine_800 != 0;
     a8_settings.pal = s.pal != 0;
     a8_settings.paddles = s.paddles < A8_PADDLES_LEVELS ? s.paddles : A8_PADDLES_MEDIUM;
-    a8_settings.scale = s.spare[0] < A8_SCALE_MODES ? s.spare[0] : A8_SCALE_SMOOTH;
+    a8_settings.scale = s.spare[0] < A8_SCREEN_SCALES ? s.spare[0] : 0;   /* 0: Smooth / Normal */
     Serial.printf("[settings] keyboard %s, fps %s, machine %s, %s, paddles %s\n",
                   KEYBOARD_NAMES[a8_settings.keyboard],
                   a8_settings.fps ? "on" : "off", a8_settings.machine_800 ? "400/800" : "800XL",
@@ -357,10 +357,10 @@ int a8_settings_scale_now(void) {
     return g ? g - 1 : a8_settings.scale;
 }
 
-int a8_settings_game_scale(void) { return cur.scale <= A8_SCALE_MODES ? cur.scale : 0; }
+int a8_settings_game_scale(void) { return cur.scale <= A8_SCREEN_SCALES ? cur.scale : 0; }
 
 void a8_settings_set_game_scale(int s) {
-    if (s < 0 || s > A8_SCALE_MODES || s == a8_settings_game_scale()) return;
+    if (s < 0 || s > A8_SCREEN_SCALES || s == a8_settings_game_scale()) return;
     cur.scale = (uint8_t)s;
     cur_changed();
 }
@@ -369,7 +369,7 @@ void a8_settings_set_game_scale(int s) {
  * use, at once; saved when the game ends. (It was a MENU tap, changing
  * Settings > Scale; a MENU tap is the keyboard now.) */
 void a8_settings_next_scale(void) {
-    a8_settings_set_game_scale((a8_settings_scale_now() + 1) % A8_SCALE_MODES + 1);
+    a8_settings_set_game_scale((a8_settings_scale_now() + 1) % A8_SCREEN_SCALES + 1);   /* wraps */
 }
 
 /* The display must be stopped: its frame buffer is the sector buffer. */
@@ -388,9 +388,10 @@ static const int ROW_LIST[] = { ROW_SCALE, ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, RO
                                 ROW_PADDLES, ROW_TEST, ROW_BACK };
 #elif defined(PICO_QUAD)
 static const int ROW_LIST[] = { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_PADDLES,
-                                ROW_TEST, ROW_BACK };
+                                ROW_SCALE, ROW_TEST, ROW_BACK };
 #else
-static const int ROW_LIST[] = { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_TEST, ROW_BACK };
+static const int ROW_LIST[] = { ROW_KEYBOARD, ROW_FPS, ROW_VOLUME, ROW_MACHINE, ROW_TV, ROW_SCALE,
+                                ROW_TEST, ROW_BACK };
 #endif
 static const int ROWS = sizeof(ROW_LIST) / sizeof(ROW_LIST[0]);
 #ifdef PICO_TINY_SCREEN
@@ -402,13 +403,17 @@ static const int ROW_H = 10, LIST_Y = 10, SHOWN = 7, PANEL_W = 160, FONT = 1, TE
 #else
 static const char *const NAMES[] = { "Keyboard", "FPS display", "Volume", "Default machine", "TV system",
                                      "Paddle sensitivity", "Scale", "Controller test", "Back" };
-static const int ROW_H = 22, LIST_Y = 34, SHOWN = ROWS, PANEL_W = 320, FONT = 2, TEXT_X = 16;
+static const int ROW_H = 20, LIST_Y = 34, SHOWN = ROWS, PANEL_W = 320, FONT = 2, TEXT_X = 16;   /* (22: 8 rows; 9 with Scale) */
 #endif
 static int first_shown = 0;              /* the list's top row (scrolls on the 160x80 panel) */
 static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2A69,
                       COL_TITLE = 0xFD20, COL_HINT = TFT_DARKGREY, COL_VALUE = 0x07FF;
 
-static const char *const SCALE_NAMES[A8_SCALE_MODES] = { "Smooth", "Sharp", "Drop", "Crop" };
+#ifdef PICO_TINY_SCREEN
+static const char *const SCALE_NAMES[A8_SCREEN_SCALES] = { "Smooth", "Sharp", "Drop", "Crop" };
+#else
+static const char *const SCALE_NAMES[A8_SCREEN_SCALES] = { "Normal", "TV", "TV sharp", "Pixel", "Stretch" };
+#endif
 
 static void value_text(int row, char *buf, size_t cap) {
     switch (row) {
@@ -433,13 +438,13 @@ static void draw_row(int i, bool sel) {
     tft.fillRect(0, y, PANEL_W, ROW_H, bg);
     tft.setTextFont(FONT);
     tft.setTextColor(COL_TEXT, bg);
-    tft.setCursor(TEXT_X, y + (FONT == 1 ? 1 : 5));
+    tft.setCursor(TEXT_X, y + (FONT == 1 ? 1 : 3));
     tft.print(NAMES[row]);
     char v[24];
     value_text(row, v, sizeof(v));
     if (v[0]) {
         tft.setTextColor(sel ? COL_TEXT : COL_VALUE, bg);
-        tft.setCursor(PANEL_W - TEXT_X - tft.textWidth(v), y + (FONT == 1 ? 1 : 5));
+        tft.setCursor(PANEL_W - TEXT_X - tft.textWidth(v), y + (FONT == 1 ? 1 : 3));
         tft.print(v);
     }
 }
@@ -485,7 +490,7 @@ static bool change(int row, int dir) {
     case ROW_FPS:      a8_settings.fps = !a8_settings.fps; return true;
     case ROW_MACHINE:  a8_settings.machine_800 = !a8_settings.machine_800; return true;
     case ROW_TV:       a8_settings.pal = !a8_settings.pal; return true;
-    case ROW_SCALE:    a8_settings.scale = (a8_settings.scale + dir + A8_SCALE_MODES) % A8_SCALE_MODES; return true;
+    case ROW_SCALE:    a8_settings.scale = (a8_settings.scale + dir + A8_SCREEN_SCALES) % A8_SCREEN_SCALES; return true;
     case ROW_PADDLES: {                      /* stops at the ends */
         int v = a8_settings.paddles + dir;
         if (v < 0 || v >= A8_PADDLES_LEVELS) return false;

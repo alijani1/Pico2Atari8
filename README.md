@@ -64,6 +64,7 @@ and on, like the switch on a real drive: let the game load, type DRV
 | Default machine | 800XL (default) / 400/800 - SELECT in the list starts the other |
 | TV system | NTSC (default) / PAL |
 | Paddle sensitivity | (Quad) how much of a paddle's turn spans the game's whole range: Very low = all of it, Low 75 %, Medium 50 % (default, about what Atari games expect), High 40 %, Very high 30 % |
+| Scale | the picture. 320x240 (Quad, Duo 5200): Normal (1:1, default) / TV (240 wide, centred: Atari pixels as wide as on a TV, softened) / TV sharp (the same, unblended) / Pixel (160 wide: one screen pixel per Atari pixel; hi-res text loses detail) / Stretch (the 192-line playfield over all 240 lines). 160x80 (Duo): Smooth / Sharp / Drop / Crop. Per game: Game Settings > Scale; in play: a button mapped to Next scale (wraps) |
 | Controller test | every control live: the 5200 controllers' sticks (as the pot value the game gets, plus the raw counts and the range learnt), Fire A / B and keys; the Quad's joystick ports, paddles on ports 1–2 (pot value, raw counts, range, buttons) and side buttons; the Joy-Con; the device buttons. MENU goes back |
 
 ## Game Settings
@@ -81,7 +82,7 @@ DRV; the game waits). Changes are remembered for that game (up to 300 games).
 | Thumbstick | Joystick / Paddle (400/800/XL games; Yellow + click in a game switches it too) |
 | Paddle center | -113 to +113 (400/800/XL games): where the thumbstick paddle rests, for games whose playfield centre isn't the paddle's middle; + = to the right. Left / right: 1 a step (5 when held); FIRE: back to 0 |
 | Horizontal center | -113 to +113 (5200 games): the same for controller 1's analog stick x (thumbstick or a 5200 controller), at rest too, for 5200 games whose centre is off; + = to the right |
-| Scale | (160x80 panel) Default / Smooth / Sharp / Drop / Crop: this game's picture Scale; Default = Settings > Scale. The Next scale action changes it in play |
+| Scale | Default / the screen's modes (Settings > Scale: Normal, TV, TV sharp, Pixel, Stretch on 320x240; Smooth, Sharp, Drop, Crop on 160x80): this game's picture Scale; Default = Settings > Scale. A button mapped to Next scale steps through them in play, and wraps |
 | Machine | Default / 800XL / 400/800 (400/800/XL games): the machine this game starts on; Default = Settings > Default machine. SELECT in the list still starts the other one |
 | Disk drive 1 | On / Off after load (disk games and zips): for the few disk games that won't start while a drive answers - the drive switches off by itself 1.5 s after the game stops reading the disk (DRIVE OFF shows). Changed during a game, it applies at once. Replaces the keyboard's DRV key |
 | Reset to defaults | the buttons and the thumbstick back to the table below |

@@ -37,12 +37,8 @@ extern "C" {
 }
 
 /* The common choices, in the order left / right steps through them. */
-/* (Next scale: only where there are Scale modes, the 160x80 panel.) */
-#ifdef PICO_TINY_SCREEN
+/* (Next scale: every screen has Scale modes now - the 320x240 one too.) */
 #define CHOICE_SCALE A8_ACT_SCALE,
-#else
-#define CHOICE_SCALE
-#endif
 static const uint8_t CHOICES_800[] = { A8_ACT_FIRE, A8_ACT_OPTION, A8_ACT_SELECT, A8_ACT_START,
                                        AKEY_SPACE, AKEY_RETURN, AKEY_ESCAPE, A8_ACT_KEYBOARD,
                                        CHOICE_SCALE
@@ -148,7 +144,7 @@ static void value_text(int row, char *buf, size_t cap, bool *changed) {
     }
     case ROW_SCALE: {
         int g = a8_settings_game_scale();
-        snprintf(buf, cap, "%s", g ? a8_scale_names[g - 1] : "Default");
+        snprintf(buf, cap, "%s", g ? a8_screen_scale_names[g - 1] : "Default");
         *changed = g != 0;
         return;
     }
@@ -378,9 +374,7 @@ void a8_gamecfg_screen(const char *name, bool is5200, bool in_game, bool has_dis
     if (!is5200 && a8_input_has_joycon()) { rows[n_rows++] = ROW_STICK; rows[n_rows++] = ROW_PADDLE_OFS; }
     if (is5200) rows[n_rows++] = ROW_PADDLE_OFS;          /* "Horizontal center" */
     if (!is5200) rows[n_rows++] = ROW_MACHINE;
-#ifdef PICO_TINY_SCREEN
-    rows[n_rows++] = ROW_SCALE;                           /* (Scale modes: this panel) */
-#endif
+    rows[n_rows++] = ROW_SCALE;                           /* (Scale modes: both panels now) */
     if (!is5200 && has_disk) rows[n_rows++] = ROW_DRIVE;
     rows[n_rows++] = ROW_RESET;
     rows[n_rows++] = ROW_BACK;
@@ -424,7 +418,7 @@ void a8_gamecfg_screen(const char *name, bool is5200, bool in_game, bool has_dis
             draw_row(sel, true);
         } else if (row == ROW_SCALE && (dir || (p & A8M_OK))) {
             int g = a8_settings_game_scale() + (dir < 0 ? -1 : 1);     /* Default, modes */
-            a8_settings_set_game_scale((g + A8_SCALE_MODES + 1) % (A8_SCALE_MODES + 1));
+            a8_settings_set_game_scale((g + A8_SCREEN_SCALES + 1) % (A8_SCREEN_SCALES + 1));
             draw_row(sel, true);
         } else if (row == ROW_MACHINE && (dir || (p & A8M_OK))) {
             int m = a8_settings_game_machine() + (dir < 0 ? -1 : 1);

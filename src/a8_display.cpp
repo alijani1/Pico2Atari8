@@ -21,6 +21,13 @@
  * the snapshot's top-right corner before hashing, so it travels with the
  * picture. On / off: Settings > FPS display (a8_display_set_fps).
  *
+ * Scale (320x240 panel; a8_scale.h): core 1 rearranges the snapshot in
+ * place before the overlays and the hashing - TV / TV SHARP / PIXEL squeeze
+ * each line to 240 / 160 pixels, centred, with the line's border colour
+ * (border8, taken with the snapshot) at the sides; STRETCH spreads lines
+ * 24-215 over all 240. TV's blend (the middle pixel of each 3) is made as
+ * the line is turned into RGB565, not on overlay lines.
+ *
  * 160x80 panel (PICO_TINY_SCREEN, the Duo Ultimate): core 1 shrinks the
  * same snapshot to 160x80 (a8_scale.c; Scale mode from the settings) 16
  * rows at a time, each band going out by DMA while the next is shrunk (as
@@ -62,6 +69,12 @@ static volatile uint32_t frames_shown = 0, frames_skipped = 0;
 static volatile uint32_t push_us_sum = 0, push_count = 0;   /* time per push */
 static volatile uint32_t rows_sum = 0;                      /* rows sent per push */
 static uint32_t row_hash[SCR_H];                        /* what the panel shows */
+#ifndef PICO_TINY_SCREEN
+const char *const a8_screen_scale_names[A8_SCREEN_SCALES] = { "NORMAL", "TV", "TV SHARP", "PIXEL", "STRETCH" };
+static uint8_t border8[SCR_H];                          /* each line's border colour (Scale) */
+static uint16_t pal_plain[256];                         /* RGB565, not byte-swapped: TV's blend */
+static int blend_y0 = 0, blend_y1 = 0;                  /* TV: blend lines y0 .. y1-1 */
+#endif
 static bool hashes_valid = false;
 
 /* ---- FPS overlay ----------------------------------------------------- */
@@ -335,6 +348,9 @@ void a8_display_palette(void) {
         uint16_t c = (uint16_t)(((rgb >> 8) & 0xF800) | ((rgb >> 5) & 0x07E0) | ((rgb >> 3) & 0x001F));
         pal565[i] = (uint16_t)((c >> 8) | (c << 8));
         plain[i] = c;
+#ifndef PICO_TINY_SCREEN
+        pal_plain[i] = c;
+#endif
     }
     a8_scale_palette(plain);
 }
@@ -360,6 +376,10 @@ extern "C" void a8_display_frame(void) {
     const uint8_t *src = (const uint8_t *)Screen_atari + SRC_X;
     for (int y = 0; y < SCR_H; y++)
         memcpy(frame8 + y * SCR_W, src + y * Screen_WIDTH, SCR_W);
+#ifndef PICO_TINY_SCREEN
+    for (int y = 0; y < SCR_H; y++)              /* the left edge of the overscan */
+        border8[y] = ((const uint8_t *)Screen_atari)[y * Screen_WIDTH];
+#endif
     frame_ready = true;
 }
 
@@ -410,15 +430,64 @@ static void __not_in_flash_func(push_rows)(int y0, int n) {
         uint16_t *dst = band565[band_buf];
         const uint8_t *src = frame8 + y * SCR_W;
         for (int i = 0; i < SCR_W * rows; i++) dst[i] = pal565[src[i]];
+        /* TV: the middle pixel of each 3 is the blend of its two source
+         * pixels (they are in it and its right neighbour, scale_frame) */
+        for (int r = 0; r < rows; r++) {
+            int yy = y + r;
+            if (yy < blend_y0 || yy >= blend_y1) continue;
+            const uint8_t *s = src + r * SCR_W;
+            uint16_t *d = dst + r * SCR_W;
+            for (int x = (SCR_W - 240) / 2 + 1; x < (SCR_W + 240) / 2; x += 3) {
+                uint32_t a = pal_plain[s[x]], b = pal_plain[s[x + 1]];
+                uint16_t c = (uint16_t)(((a & 0xF7DEu) + (b & 0xF7DEu)) >> 1);
+                d[x] = (uint16_t)((c >> 8) | (c << 8));
+            }
+        }
         tft.dmaWait();                   /* the other buffer is free again */
         tft.pushPixelsDMA(dst, SCR_W * rows);
         band_buf ^= 1;
     }
 }
 
+/* Scale (a8_scale.h): rearrange the snapshot in place. */
+static uint8_t scale_tmp[SCR_W];
+static void __not_in_flash_func(scale_frame)(int mode) {
+    if (mode == A8_BIG_TV || mode == A8_BIG_TV_SHARP || mode == A8_BIG_PIXEL) {
+        const int w = mode == A8_BIG_PIXEL ? 160 : 240, x0 = (SCR_W - w) / 2;
+        for (int y = 0; y < SCR_H; y++) {
+            uint8_t *r = frame8 + y * SCR_W;
+            memcpy(scale_tmp, r, SCR_W);
+            memset(r, border8[y], x0);
+            memset(r + x0 + w, border8[y], SCR_W - x0 - w);
+            if (mode == A8_BIG_PIXEL)
+                for (int i = 0; i < w; i++) r[x0 + i] = scale_tmp[2 * i];
+            else                         /* 4 source pixels -> 3: 0, 1, 2 (TV: 1 = blend of 1, 2) */
+                for (int i = 0; i < w; i++) r[x0 + i] = scale_tmp[i * 4 / 3];
+        }
+    } else if (mode == A8_BIG_STRETCH) {
+        /* line y shows line 24 + y * 192 / 240: in place, the top half top
+         * down and the bottom half bottom up (each source still unwritten) */
+        for (int y = 0; y < SCR_H / 2; y++) {
+            int sy = 24 + y * 192 / SCR_H;
+            if (sy != y) memcpy(frame8 + y * SCR_W, frame8 + sy * SCR_W, SCR_W);
+        }
+        for (int y = SCR_H - 1; y >= SCR_H / 2; y--) {
+            int sy = 24 + y * 192 / SCR_H;
+            if (sy != y) memcpy(frame8 + y * SCR_W, frame8 + sy * SCR_W, SCR_W);
+        }
+    }
+}
+
 static void __not_in_flash_func(push_frame)(void) {
     uint32_t t0 = time_us_32();
     uint32_t sent = 0;
+    const int mode = a8_settings_scale_now();   /* the game's own, or Settings > Scale */
+    scale_frame(mode);                          /* before the overlays: they stay as they are */
+    blend_y0 = blend_y1 = 0;
+    if (mode == A8_BIG_TV) {                    /* not where an overlay is drawn */
+        blend_y0 = (fps_on || toast_until) ? OV_H + 2 : 0;
+        blend_y1 = a8_osk_is_open() ? SCR_H - a8_osk_rows() * OSK_CELL_H - 4 : SCR_H;
+    }
     if (fps_on) draw_fps();
     if (toast_until && (int32_t)(toast_until - millis()) > 0) draw_toast();
     if (a8_osk_is_open()) draw_osk();

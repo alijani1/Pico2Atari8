@@ -501,7 +501,7 @@ bool a8_input_frame(void) {
     static bool scale_was = true;
     if (scale_level && !scale_was) {
         a8_settings_next_scale();
-        a8_display_toast(a8_scale_names[a8_settings_scale_now()]);
+        a8_display_toast(a8_screen_scale_names[a8_settings_scale_now()]);
     }
     scale_was = scale_level;
 
