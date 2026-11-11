@@ -276,9 +276,8 @@ static void serial_poll(void) {
 /* ---- the USB host ports (Fruit Jam) --------------------------------------
  * A USB gamepad and / or keyboard on the Fruit Jam's USB-A ports: TinyUSB's
  * host stack over Pico-PIO-USB (D+ GPIO 1, D- 2; 5 V switched by GPIO 11),
- * run on core 1 (a8_input_usb_task, from loop1) as Adafruit's examples do;
- * its 1 ms frame timer is core 1's too. Its reports land here (core 1) and
- * are read by core 0 as held buttons - the same virtual pins the serial
+ * run on core 0 (a8_input_usb_task, from the input polling - see there);
+ * its reports land here and are read as held buttons - the same virtual pins the serial
  * monitor taps, but held exactly as long as the button or key is (not
  * through the serial port: memory, read every frame).
  *   Gamepad (the Adafruit SNES-style pad, 081F:E401, and pads with its
@@ -381,39 +380,55 @@ extern "C" void tuh_hid_report_received_cb(uint8_t dev, uint8_t idx, uint8_t con
     tuh_hid_receive_report(dev, idx);
 }
 
-/* TinyUSB waits in its device set-up (debounce 150 ms, resets 50 ms,
- * retries 100 ms): its own wait spins, and on core 1 that stopped the HDMI
- * output's work - the sound fed into its packets (so the emulator, paced
- * by that sound, stalled) and the overlays. Here core 1 keeps doing it while
- * the host waits (core 0, should it ever wait here: as before). */
-extern "C" void tusb_time_delay_ms_api(uint32_t ms) {
-    const uint32_t t0 = millis();
-    while (millis() - t0 < ms) {
-#ifdef A8_HDMI
-        if (get_core_num() == 1) a8_display_core1_loop();
-#endif
-    }
-}
+/* The host stack runs on core 0, as in Adafruit's own Fruit Jam code
+ * (Adafruit_Arcade_Machines, src/boards/fruitjam/usb_host_fruitjam.cpp).
+ * It ran on core 1 at first, beside the HDMI output, and hung core 1 a
+ * fraction of a second after start-up (the on-board hub is always there):
+ * Pico-PIO-USB sends each packet from its 1 ms frame timer by starting the
+ * DMA and then clearing the "done" flag, and an interrupt in between that
+ * outlasts the packet wipes the flag - the transfer then waits for ever,
+ * inside the timer interrupt. Core 1's HDMI scanline interrupt is the
+ * highest priority there (it must be), so it did exactly that, and with
+ * core 1 went the HDMI sound feed (and the emulator, paced by that sound).
+ * Here the frame timer (TIMER0 alarm 2: Pico-PIO-USB's alarm pool, made on
+ * the core that starts the host) gets the highest priority on core 0, so
+ * nothing interrupts a transfer; core 1 has only the HDMI output again.
+ * TinyUSB's waits while it sets a device up (debounce 150 ms, resets,
+ * retries) spin on core 0: the menu / game holds for them, only then.
+ * PIO 2 and DMA channel 11: clear of the HDMI driver's channels 0-3 and the
+ * I2S's PIO. */
+#include "hardware/irq.h"
+#include "hardware/timer.h"
+static bool usb_started = false;
 
-/* Core 1 (loop1): the host stack. The first call starts it - before the
- * HDMI output and the sound (PIO 2 and DMA channel 11, clear of the HDMI
- * driver's channels 0-3 and the I2S's PIO). */
-void a8_input_usb_task(void) {
-    static bool started = false;
-    if (!started) {
-        started = true;
+/* Core 0, once (a8_input_init). */
+static void usb_start(void) {
+    {
         pinMode(PIN_5V_EN, OUTPUT);
         digitalWrite(PIN_5V_EN, PIN_5V_EN_STATE);       /* the ports' 5 V */
         pio_usb_configuration_t cfg = PIO_USB_DEFAULT_CONFIG;
         cfg.pin_dp = PIN_USB_HOST_DP;                     /* D- = D+ + 1 */
-        cfg.pio_tx_num = 2;
-        cfg.pio_rx_num = 2;
-        cfg.tx_ch = 11;
+#ifndef A8_USB_PIO
+#define A8_USB_PIO 2                         /* (build-time: the PIO block, DMA channel) */
+#endif
+#ifndef A8_USB_DMA
+#define A8_USB_DMA 11
+#endif
+        cfg.pio_tx_num = A8_USB_PIO;
+        cfg.pio_rx_num = A8_USB_PIO;
+        cfg.tx_ch = A8_USB_DMA;
+        Serial.printf("[usb] host on PIO %d, DMA channel %d%c", A8_USB_PIO, A8_USB_DMA, 10);
         usb_host.configure_pio_usb(1, &cfg);
         usb_host.begin(1);
-        return;
+        irq_set_priority(timer_hardware_alarm_get_irq_num(timer0_hw, 2), PICO_HIGHEST_IRQ_PRIORITY);
+        usb_started = true;
     }
-    usb_host.task();
+}
+
+/* Core 0: the host stack's task (its callbacks run here), from the input
+ * polling - the menus' (a8_input_menu) and the game's (a8_input_frame). */
+void a8_input_usb_task(void) {
+    if (usb_started) usb_host.task();
 }
 
 /* Keyboard: HID usage -> the Atari key, unshifted / with Shift (US layout;
@@ -529,6 +544,21 @@ static int usb_kbd_akey(bool is5200) {
 
 /* Core 0: everything held on the USB ports (the pad and the keyboard). */
 static uint32_t usb_buttons(void) {
+    {   /* DIAG (temporary): is core 1's loop running, the USB frame timer? */
+        static uint32_t last = 0, sof0 = 0;
+        uint32_t now = millis();
+        if (now - last >= 2000) {
+            uint32_t f = pio_usb_host_get_frame_number();
+            Serial.printf("[usb] diag: USB frames %lu in %lu ms, HDMI sound %s%c",
+                          (unsigned long)(f - sof0), (unsigned long)(now - last),
+#ifdef A8_HDMI_AUDIO
+                          a8_display_hdmi_audio() ? "on" : "off", 10);
+#else
+                          "not built", 10);
+#endif
+            last = now; sof0 = f;
+        }
+    }
     static uint32_t seen = 0;
     if (usb_events != seen) {                            /* (logged here: core 0 has the serial) */
         seen = usb_events;
@@ -597,6 +627,9 @@ static uint8_t five_way(void) {
 
 
 void a8_input_init(void) {
+#ifdef A8_USB_HOST
+    usb_start();                           /* the USB host ports (core 0) */
+#endif
 #ifdef PICO_DUO
     /* The Duo's DB9 pins 7 and 8 are switched (GameAdapterRGBPico main.cpp,
      * docs/PIN7_PIN8_CONTROL_DESIGN.md); put them in Atari mode, pin 7 =
@@ -759,6 +792,9 @@ bool a8_input_osk_paused(void) {
 bool a8_input_frame(void) {
 #ifdef PICO_FRUITJAM
     serial_poll();
+#endif
+#ifdef A8_USB_HOST
+    a8_input_usb_task();
 #endif
     a8_input_t in;
     memset(&in, 0, sizeof(in));
@@ -1058,6 +1094,9 @@ static uint8_t menu_sound(uint8_t b) {
  * serial monitor's keys. */
 uint8_t a8_input_menu(void) {
     serial_poll();
+#ifdef A8_USB_HOST
+    a8_input_usb_task();
+#endif
     uint8_t b = 0;
     static bool m_down = false;
     static uint32_t m_since = 0, up_until = 0;

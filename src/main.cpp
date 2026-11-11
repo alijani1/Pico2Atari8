@@ -414,9 +414,6 @@ void loop() {
  * progress - it keeps coming if core 0 hangs or faults. */
 void setup1() {}
 void loop1() {
-#ifdef A8_USB_HOST
-    a8_input_usb_task();                 /* the USB host ports (the first call starts them) */
-#endif
 #ifdef A8_HDMI
     a8_display_core1_loop();             /* starts the HDMI output, then the overlays */
 #else
