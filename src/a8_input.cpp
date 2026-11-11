@@ -272,9 +272,300 @@ static void serial_poll(void) {
     if (esc == 1 && millis() - esc_at > 30) { esc = 0; serial_key(27); }
 }
 
+#ifdef A8_USB_HOST
+/* ---- the USB host ports (Fruit Jam) --------------------------------------
+ * A USB gamepad and / or keyboard on the Fruit Jam's USB-A ports: TinyUSB's
+ * host stack over Pico-PIO-USB (D+ GPIO 1, D- 2; 5 V switched by GPIO 11),
+ * run on core 1 (a8_input_usb_task, from loop1) as Adafruit's examples do;
+ * its 1 ms frame timer is core 1's too. Its reports land here (core 1) and
+ * are read by core 0 as held buttons - the same virtual pins the serial
+ * monitor taps, but held exactly as long as the button or key is (not
+ * through the serial port: memory, read every frame).
+ *   Gamepad (the Adafruit SNES-style pad, 081F:E401, and pads with its
+ *   report - X, Y axes in bytes 0-1, buttons in 5-6; a hat in byte 5's low
+ *   nibble, where there is one):
+ *     D-pad    joystick 1 / menus: move      A        fire / menus: OK
+ *     B        fire / menus: back            X        OPTION
+ *     Y        the on-screen keyboard        Select   SELECT
+ *     Start    START                         L, R     MENU (tap: keyboard,
+ *     Start + Select  MENU                             hold: the game list)
+ *   Keyboard (boot protocol): types into the Atari's keyboard (by character,
+ *   as a US PC keyboard; Ctrl: CTRL), and
+ *     arrows   joystick 1 (Ctrl + arrows: the Atari's cursor keys)
+ *     Left Alt / Right Ctrl   fire           F1  HELP
+ *     F2 OPTION   F3 SELECT   F4 START       F5  RESET (warm)
+ *     F12      MENU                          Home  CLEAR
+ *     menus: arrows move, Enter OK, Esc / Backspace back
+ *   A 5200 game: digits are the keypad, * and # (Shift 8 / Shift 3, or the
+ *   number pad's), F3 PAUSE, F4 START, F5 RESET.
+ * TODO: other pads' layouts (a table by VID:PID, or the report descriptor);
+ * Settings > Controller test shows a pad's raw report to find them. */
+#include "Adafruit_TinyUSB.h"
+#include "pio_usb.h"
+
+static Adafruit_USBH_Host usb_host;
+/* written by core 1 (the reports), read by core 0 */
+static volatile uint32_t usb_pad = 0;                    /* A8U_* held */
+static volatile uint8_t  usb_kbd[8];                     /* the last keyboard report */
+static volatile bool     usb_pad_on = false, usb_kbd_on = false;
+static volatile uint16_t usb_vid = 0, usb_pid = 0;
+static volatile uint8_t  usb_raw[16], usb_raw_len = 0;  /* the pad's last report as it came */
+static volatile uint32_t usb_events = 0;                 /* mounts / unmounts: core 0 logs them */
+static uint8_t usb_pad_addr = 0, usb_kbd_addr = 0;
+
+/* The SNES-style pad's report (and the many cheap pads that share it). */
+static uint32_t usb_parse_pad(const uint8_t *r, uint16_t len) {
+    uint32_t b = 0;
+    if (len >= 2) {
+        if (r[0] < 0x40) b |= A8U_LEFT;  else if (r[0] > 0xC0) b |= A8U_RIGHT;
+        if (r[1] < 0x40) b |= A8U_UP;    else if (r[1] > 0xC0) b |= A8U_DOWN;
+    }
+    if (len >= 6) {
+        static const uint32_t HAT[8] = { A8U_UP, A8U_UP | A8U_RIGHT, A8U_RIGHT, A8U_DOWN | A8U_RIGHT,
+                                         A8U_DOWN, A8U_DOWN | A8U_LEFT, A8U_LEFT, A8U_UP | A8U_LEFT };
+        uint8_t hat = r[5] & 0x0F;
+        if (hat < 8) b |= HAT[hat];
+        if (r[5] & 0x10) b |= A8U_X;
+        if (r[5] & 0x20) b |= A8U_A;
+        if (r[5] & 0x40) b |= A8U_B;
+        if (r[5] & 0x80) b |= A8U_Y;
+    }
+    if (len >= 7) {
+        if (r[6] & 0x01) b |= A8U_L;
+        if (r[6] & 0x02) b |= A8U_R;
+        if (r[6] & 0x10) b |= A8U_SELECT;
+        if (r[6] & 0x20) b |= A8U_START;
+    }
+    return b;
+}
+
+extern "C" void tuh_hid_mount_cb(uint8_t dev, uint8_t idx, uint8_t const *desc, uint16_t desc_len) {
+    (void)desc; (void)desc_len;
+    uint8_t proto = tuh_hid_interface_protocol(dev, idx);
+    if (proto == HID_ITF_PROTOCOL_KEYBOARD) {
+        usb_kbd_addr = dev;
+        usb_kbd_on = true;
+    } else if (proto == HID_ITF_PROTOCOL_MOUSE) {
+        return;                                          /* not used */
+    } else {
+        uint16_t vid = 0, pid = 0;
+        tuh_vid_pid_get(dev, &vid, &pid);
+        usb_vid = vid;
+        usb_pid = pid;
+        usb_pad_addr = dev;
+        usb_pad_on = true;
+    }
+    usb_events++;
+    tuh_hid_receive_report(dev, idx);
+}
+
+extern "C" void tuh_hid_umount_cb(uint8_t dev, uint8_t idx) {
+    (void)idx;
+    if (dev == usb_pad_addr && usb_pad_on) { usb_pad_on = false; usb_pad = 0; usb_raw_len = 0; }
+    if (dev == usb_kbd_addr && usb_kbd_on) {
+        usb_kbd_on = false;
+        for (int i = 0; i < 8; i++) usb_kbd[i] = 0;
+    }
+    usb_events++;
+}
+
+extern "C" void tuh_hid_report_received_cb(uint8_t dev, uint8_t idx, uint8_t const *r, uint16_t len) {
+    if (dev == usb_kbd_addr && usb_kbd_on && tuh_hid_interface_protocol(dev, idx) == HID_ITF_PROTOCOL_KEYBOARD) {
+        for (int i = 0; i < 8; i++) usb_kbd[i] = i < len ? r[i] : 0;
+    } else if (dev == usb_pad_addr && usb_pad_on) {
+        uint16_t n = len < sizeof(usb_raw) ? len : sizeof(usb_raw);
+        for (uint16_t i = 0; i < n; i++) usb_raw[i] = r[i];
+        usb_raw_len = (uint8_t)n;
+        usb_pad = usb_parse_pad(r, len);
+    }
+    tuh_hid_receive_report(dev, idx);
+}
+
+/* Core 1 (loop1): the host stack. The first call starts it - before the
+ * HDMI output and the sound (PIO 2 and DMA channel 11, clear of the HDMI
+ * driver's channels 0-3 and the I2S's PIO). */
+void a8_input_usb_task(void) {
+    static bool started = false;
+    if (!started) {
+        started = true;
+        pinMode(PIN_5V_EN, OUTPUT);
+        digitalWrite(PIN_5V_EN, PIN_5V_EN_STATE);       /* the ports' 5 V */
+        pio_usb_configuration_t cfg = PIO_USB_DEFAULT_CONFIG;
+        cfg.pin_dp = PIN_USB_HOST_DP;                     /* D- = D+ + 1 */
+        cfg.pio_tx_num = 2;
+        cfg.pio_rx_num = 2;
+        cfg.tx_ch = 11;
+        usb_host.configure_pio_usb(1, &cfg);
+        usb_host.begin(1);
+        return;
+    }
+    usb_host.task();
+}
+
+/* Keyboard: HID usage -> the Atari key, unshifted / with Shift (US layout;
+ * -1: none). */
+struct UsbKey { int16_t plain, shifted; };
+static UsbKey usb_key(uint8_t u) {
+    static const int8_t LETTERS[26] = { AKEY_a, AKEY_b, AKEY_c, AKEY_d, AKEY_e, AKEY_f, AKEY_g, AKEY_h,
+                                        AKEY_i, AKEY_j, AKEY_k, AKEY_l, AKEY_m, AKEY_n, AKEY_o, AKEY_p,
+                                        AKEY_q, AKEY_r, AKEY_s, AKEY_t, AKEY_u, AKEY_v, AKEY_w, AKEY_x,
+                                        AKEY_y, AKEY_z };
+    static const int16_t DIGITS[10][2] = {               /* 1..9, 0: as the PC's shifted symbols */
+        { AKEY_1, AKEY_SHFT | AKEY_1 }, { AKEY_2, AKEY_AT }, { AKEY_3, AKEY_SHFT | AKEY_3 },
+        { AKEY_4, AKEY_SHFT | AKEY_4 }, { AKEY_5, AKEY_SHFT | AKEY_5 }, { AKEY_6, AKEY_CARET },
+        { AKEY_7, AKEY_SHFT | AKEY_6 }, { AKEY_8, AKEY_ASTERISK }, { AKEY_9, AKEY_SHFT | AKEY_9 },
+        { AKEY_0, AKEY_SHFT | AKEY_0 } };
+    if (u >= 0x04 && u <= 0x1D) return { LETTERS[u - 0x04], (int16_t)(AKEY_SHFT | LETTERS[u - 0x04]) };
+    if (u >= 0x1E && u <= 0x27) return { DIGITS[u - 0x1E][0], DIGITS[u - 0x1E][1] };
+    if (u >= 0x59 && u <= 0x62) {                        /* the number pad's 1..9, 0 */
+        int16_t k = DIGITS[u - 0x59][0];
+        return { k, k };
+    }
+    switch (u) {
+    case 0x28: case 0x58: return { AKEY_RETURN, AKEY_RETURN };
+    case 0x29: return { AKEY_ESCAPE, AKEY_ESCAPE };
+    case 0x2A: return { AKEY_BACKSPACE, AKEY_BACKSPACE };
+    case 0x2B: return { AKEY_TAB, AKEY_SHFT | AKEY_TAB };
+    case 0x2C: return { AKEY_SPACE, AKEY_SPACE };
+    case 0x2D: return { AKEY_MINUS, AKEY_UNDERSCORE };
+    case 0x2E: return { AKEY_EQUAL, AKEY_PLUS };
+    case 0x2F: return { AKEY_BRACKETLEFT, AKEY_BRACKETLEFT };
+    case 0x30: return { AKEY_BRACKETRIGHT, AKEY_BRACKETRIGHT };
+    case 0x31: return { AKEY_BACKSLASH, AKEY_BAR };
+    case 0x33: return { AKEY_SEMICOLON, AKEY_COLON };
+    case 0x34: return { AKEY_QUOTE, AKEY_DBLQUOTE };
+    case 0x35: return { AKEY_ATARI, AKEY_ATARI };        /* ` : the inverse-video key */
+    case 0x36: return { AKEY_COMMA, AKEY_LESS };
+    case 0x37: return { AKEY_FULLSTOP, AKEY_GREATER };
+    case 0x38: return { AKEY_SLASH, AKEY_SHFT | AKEY_SLASH };
+    case 0x39: return { AKEY_CAPSTOGGLE, AKEY_CAPSTOGGLE };
+    case 0x3A: return { AKEY_HELP, AKEY_HELP };          /* F1 */
+    case 0x49: return { AKEY_INSERT_CHAR, AKEY_INSERT_CHAR };
+    case 0x4A: return { AKEY_CLEAR, AKEY_CLEAR };        /* Home */
+    case 0x4C: return { AKEY_DELETE_CHAR, AKEY_DELETE_CHAR };
+    case 0x54: return { AKEY_SLASH, AKEY_SLASH };        /* the number pad's / * - + . */
+    case 0x55: return { AKEY_ASTERISK, AKEY_ASTERISK };
+    case 0x56: return { AKEY_MINUS, AKEY_MINUS };
+    case 0x57: return { AKEY_PLUS, AKEY_PLUS };
+    case 0x63: return { AKEY_FULLSTOP, AKEY_FULLSTOP };
+    default:   return { -1, -1 };
+    }
+}
+
+static bool usb_kbd_has(uint8_t usage) {
+    for (int i = 2; i < 8; i++) if (usb_kbd[i] == usage) return true;
+    return false;
+}
+
+/* The keyboard's buttons (A8U_*): arrows, fire, the console keys, MENU. */
+static uint32_t usb_kbd_buttons(void) {
+    if (!usb_kbd_on) return 0;
+    const uint8_t mod = usb_kbd[0];
+    uint32_t b = 0;
+    if (!(mod & 0x11)) {                                 /* not with Ctrl: the cursor keys */
+        if (usb_kbd_has(0x52)) b |= A8U_UP;
+        if (usb_kbd_has(0x51)) b |= A8U_DOWN;
+        if (usb_kbd_has(0x50)) b |= A8U_LEFT;
+        if (usb_kbd_has(0x4F)) b |= A8U_RIGHT;
+    }
+    if (mod & 0x04 || mod & 0x10) b |= A8U_A;            /* Left Alt, Right Ctrl: fire */
+    if (usb_kbd_has(0x3B)) b |= A8U_X;                   /* F2 OPTION */
+    if (usb_kbd_has(0x3C)) b |= A8U_SELECT;              /* F3 */
+    if (usb_kbd_has(0x3D)) b |= A8U_START;               /* F4 */
+    if (usb_kbd_has(0x45)) b |= A8U_L;                   /* F12 MENU */
+    return b;
+}
+
+/* The key typed (an AKEY_* code with SHIFT / CTRL), or -1. 5200: the keypad. */
+static int usb_kbd_akey(bool is5200) {
+    if (!usb_kbd_on) return -1;
+    const uint8_t mod = usb_kbd[0];
+    const bool shift = mod & 0x22, ctrl = mod & 0x01;    /* (Right Ctrl is fire) */
+    for (int i = 2; i < 8; i++) {
+        uint8_t u = usb_kbd[i];
+        if (!u) continue;
+        if (is5200) {
+            static const int16_t PAD[10] = { AKEY_5200_1, AKEY_5200_2, AKEY_5200_3, AKEY_5200_4, AKEY_5200_5,
+                                             AKEY_5200_6, AKEY_5200_7, AKEY_5200_8, AKEY_5200_9, AKEY_5200_0 };
+            if (u >= 0x1E && u <= 0x27) {
+                if (shift && u == 0x25) return AKEY_5200_ASTERISK;   /* Shift 8 */
+                if (shift && u == 0x20) return AKEY_5200_HASH;       /* Shift 3 */
+                return PAD[u - 0x1E];
+            }
+            if (u >= 0x59 && u <= 0x62) return PAD[u - 0x59];
+            if (u == 0x55) return AKEY_5200_ASTERISK;
+            if (u == 0x3C) return AKEY_5200_PAUSE;                  /* F3 */
+            if (u == 0x3E) return AKEY_5200_RESET;                  /* F5 */
+            continue;
+        }
+        if (ctrl) {                                      /* the Atari's cursor keys */
+            if (u == 0x52) return AKEY_CTRL | AKEY_MINUS;
+            if (u == 0x51) return AKEY_CTRL | AKEY_EQUAL;
+            if (u == 0x50) return AKEY_CTRL | AKEY_PLUS;
+            if (u == 0x4F) return AKEY_CTRL | AKEY_ASTERISK;
+        }
+        UsbKey k = usb_key(u);
+        if (k.plain < 0) continue;
+        int code = shift ? k.shifted : k.plain;
+        if (ctrl) code = (code & ~AKEY_SHFT) | AKEY_CTRL | (shift ? AKEY_SHFT : 0);
+        return code;
+    }
+    return -1;
+}
+
+/* Core 0: everything held on the USB ports (the pad and the keyboard). */
+static uint32_t usb_buttons(void) {
+    static uint32_t seen = 0;
+    if (usb_events != seen) {                            /* (logged here: core 0 has the serial) */
+        seen = usb_events;
+        Serial.printf("[usb] gamepad %s (%04x:%04x), keyboard %s%c", usb_pad_on ? "connected" : "none",
+                      usb_vid, usb_pid, usb_kbd_on ? "connected" : "none", 10);
+    }
+    return usb_pad | usb_kbd_buttons();
+}
+
+/* A virtual pin (or button 2 / 3's GPIO) held by the USB pad / keyboard. */
+static bool usb_down(int p) {
+    const uint32_t b = usb_buttons();
+    if (!b) return false;
+    const bool combo = (b & A8U_START) && (b & A8U_SELECT);   /* MENU */
+    switch (p) {
+    case VP_UP:     return b & A8U_UP;
+    case VP_DOWN:   return b & A8U_DOWN;
+    case VP_LEFT:   return b & A8U_LEFT;
+    case VP_RIGHT:  return b & A8U_RIGHT;
+    case VP_FIRE:   return b & (A8U_A | A8U_B);
+    case VP_OPTION: return b & A8U_X;
+    case VP_BLUE:   return b & A8U_Y;
+    case VP_SELECT: return (b & A8U_SELECT) && !combo;
+    default: break;
+    }
+    if (p == PIN_START) return (b & A8U_START) && !combo;
+    if (p == PIN_MENU)  return combo || (b & (A8U_L | A8U_R));
+    return false;
+}
+
+void a8_input_usb_diag(A8UsbDiag *d) {
+    d->pad = usb_pad_on;
+    d->keyboard = usb_kbd_on;
+    d->vid = usb_vid;
+    d->pid = usb_pid;
+    d->buttons = usb_pad;
+    d->raw_len = usb_raw_len;
+    for (int i = 0; i < 16; i++) d->raw[i] = usb_raw[i];
+    for (int i = 0; i < 8; i++) d->kbd[i] = usb_kbd[i];
+    d->key = usb_kbd_akey(false);
+}
+#endif
+
 /* A real button (GPIO) or a key standing in for it. */
+/* (or the USB pad / keyboard: A8_USB_HOST) */
 static inline bool low(int p) {
+#ifdef A8_USB_HOST
+    return p >= 0 && ((p < VPIN_BASE && digitalRead(p) == LOW) || vpin_down(p) || usb_down(p));
+#else
     return p >= 0 && ((p < VPIN_BASE && digitalRead(p) == LOW) || vpin_down(p));
+#endif
 }
 #else
 static inline bool low(int p) { return p >= 0 && digitalRead(p) == LOW; }
@@ -602,6 +893,18 @@ bool a8_input_frame(void) {
         /* (Both are now the defaults of Game Settings' slots, mapped above.) */
     }
 
+#ifdef A8_USB_HOST
+    /* a USB keyboard's key (not while the on-screen one is open); F5: the
+     * Atari's RESET, once a press */
+    if (!a8_osk_is_open()) {
+        int k = usb_kbd_akey(a8_is_5200());
+        if (k >= 0) in.key = k;
+        static bool f5_was = false;
+        bool f5 = usb_kbd_on && usb_kbd_has(0x3E) && !a8_is_5200();
+        if (f5 && !f5_was) { a8_request_warmstart(); a8_display_toast("RESET"); }
+        f5_was = f5;
+    }
+#endif
     /* Blue: the on-screen keyboard, open / close on each press. (It used to
      * be RETURN on a tap as well, and a short first press typed a RETURN
      * before the keyboard opened.) */
@@ -761,6 +1064,14 @@ uint8_t a8_input_menu(void) {
     if (low(PIN_START) || port_fire(0)) b |= A8M_OK;
     if (low(PIN_SELECT)) b |= A8M_ALT;
     if (low(PIN_GREEN)) b |= A8M_GREEN;
+#ifdef A8_USB_HOST
+    /* the pad's B and the keyboard's Esc / Backspace: back (B is fire too,
+     * so not OK here); Enter: OK */
+    const uint32_t u = usb_buttons();
+    const bool k_back = usb_kbd_on && (usb_kbd_has(0x29) || usb_kbd_has(0x2A));
+    if (((u & A8U_B) && !(u & A8U_A)) || k_back) { b &= ~A8M_OK; b |= A8M_BACK; }
+    if (usb_kbd_on && (usb_kbd_has(0x28) || usb_kbd_has(0x58))) b |= A8M_OK;
+#endif
     return menu_sound(b);
 }
 #else

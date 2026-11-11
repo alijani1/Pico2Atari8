@@ -57,7 +57,13 @@ extern "C" void a8_idle(void) { tight_loop_contents(); }
 
 /* ---- the emulator's stack ------------------------------------------- */
 
+#if defined(PICO_FRUITJAM) && defined(A8_USB_HOST)
+/* 16 KB: the USB host's buffers took the RAM (a game was seen using 7 KB;
+ * the start-up log reports the use - "emulator stack N bytes used") */
+static const uint32_t EMU_STACK_WORDS = 4096;
+#else
 static const uint32_t EMU_STACK_WORDS = 8192;           /* 32 KB */
+#endif
 static const uint32_t STACK_FILL = 0xA8A8A8A8u;
 static uint32_t emu_stack[EMU_STACK_WORDS] __attribute__((aligned(8)));
 
@@ -408,6 +414,9 @@ void loop() {
  * progress - it keeps coming if core 0 hangs or faults. */
 void setup1() {}
 void loop1() {
+#ifdef A8_USB_HOST
+    a8_input_usb_task();                 /* the USB host ports (the first call starts them) */
+#endif
 #ifdef A8_HDMI
     a8_display_core1_loop();             /* starts the HDMI output, then the overlays */
 #else

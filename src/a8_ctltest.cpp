@@ -161,6 +161,36 @@ static void draw_paddles(int n, int bar_at[2]) {
 }
 #endif
 
+#ifdef A8_USB_HOST
+/* The Fruit Jam's USB ports: the pad (its USB IDs, what it holds, its raw
+ * report - to map another pad), the keyboard (its keys, the Atari key). */
+static void draw_usb(int y) {
+    A8UsbDiag d;
+    a8_input_usb_diag(&d);
+    if (d.pad) text_at(4, y, COL_ON, "USB GAMEPAD %04x:%04x      ", d.vid, d.pid);
+    else       text_at(4, y, COL_HINT, "USB GAMEPAD not plugged     ");
+    static const char *const N[12] = { "U", "D", "L", "R", "A", "B", "X", "Y", "L1", "R1", "SEL", "START" };
+    int x = 4;
+    for (int i = 0; i < 12; i++) {
+        lamp(x, y + 12, N[i], d.buttons & (1u << i));
+        x += (int)strlen(N[i]) * 6 + 10;
+    }
+    char hex[52] = "";
+    for (int i = 0; i < d.raw_len && i < 16; i++) snprintf(hex + i * 3, 4, "%02x ", d.raw[i]);
+    text_at(4, y + 28, COL_HINT, "raw %-48s", d.pad ? hex : "");
+    if (d.keyboard) {
+        char k[28] = "";
+        for (int i = 2; i < 8; i++) if (d.kbd[i]) snprintf(k + strlen(k), sizeof(k) - strlen(k), "%02x ", d.kbd[i]);
+        char a[8];
+        if (d.key >= 0) snprintf(a, sizeof(a), "%02x", d.key & 0xFF);
+        else snprintf(a, sizeof(a), "-");
+        text_at(4, y + 42, COL_ON, "USB KEYBOARD mod %02x keys %-15s atari %-3s", d.kbd[0], k, a);
+    } else {
+        text_at(4, y + 42, COL_HINT, "USB KEYBOARD not plugged                              ");
+    }
+}
+#endif
+
 #ifdef PICO_TINY_SCREEN
 /* A small lamp: 9 px tall, lit while held. */
 static void tiny_lamp(int x, int y, const char *label, bool on) {
@@ -268,6 +298,10 @@ void a8_ctltest_screen(void) {
         lamp(46, 198, "SIDE L", a8_input_button(A8B_SIDE_L));
         lamp(96, 198, "SIDE R", a8_input_button(A8B_SIDE_R));
 #endif
+#endif
+#ifdef A8_USB_HOST
+        a8_input_menu();                                 /* (feeds the menus' sound) */
+        draw_usb(90);
 #endif
         draw_joycon(joy, 178);
         draw_buttons(212);

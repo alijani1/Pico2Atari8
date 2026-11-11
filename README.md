@@ -295,6 +295,28 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
 | Button 2 | OK | START |
 | Button 3 | tap: up; hold: back | tap: on-screen keyboard; hold 1 s: the game list |
 
+**USB gamepad / keyboard** (`A8_USB_HOST`): the USB-A ports take a gamepad
+and a keyboard (TinyUSB host over Pico-PIO-USB, a copy in
+`extern/pico-pio-usb`, run on core 1). Not through the serial monitor:
+held exactly as long as the button or key is.
+
+| USB gamepad (SNES-style) | Game | Menus |
+|---|---|---|
+| D-pad | joystick 1 | move |
+| A / B | fire | OK / back |
+| X | OPTION | |
+| Y | on-screen keyboard | |
+| Select / Start | SELECT / START | |
+| L, R, or Start + Select | MENU (tap: keyboard, hold: the game list) | back (held) |
+
+A USB keyboard types into the Atari's keyboard (by character, US layout;
+Ctrl = CTRL); arrows are joystick 1 (Ctrl + arrows: the Atari's cursor
+keys), Left Alt / Right Ctrl fire, F1 HELP, F2 / F3 / F4 OPTION / SELECT /
+START, F5 RESET, F12 MENU, Home CLEAR; in the menus arrows, Enter and Esc.
+A 5200 game: digits are the keypad, `*` / `#`, F3 PAUSE, F4 START, F5
+RESET. Settings > Controller test shows both, with the pad's raw report
+(to map another pad's layout).
+
 The **serial monitor** is a controller too: arrows or `w` `a` `s` `d`
 (joystick 1), space (fire), Enter (START / OK), Esc or `m` (MENU held),
 Tab or `e` (SELECT), `o` (OPTION), `k` (on-screen keyboard), `V`

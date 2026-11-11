@@ -22,6 +22,16 @@
 #include "drivers/dvhstx/audio_queue.c"
 #endif
 
+#ifdef A8_USB_HOST
+/* (Not atari800 either:) Pico-PIO-USB, the Fruit Jam's USB host ports'
+ * driver (extern/pico-pio-usb, on the include path) - here for the same
+ * reason. a8_input.cpp has the rest. */
+#include "pio_usb.c"
+#include "pio_usb_host.c"
+#include "pio_usb_device.c"
+#include "usb_crc.c"
+#endif
+
 int Devices_enable_h_patch = FALSE;
 int Devices_enable_p_patch = FALSE;
 int Devices_enable_r_patch = FALSE;

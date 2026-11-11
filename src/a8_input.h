@@ -36,6 +36,23 @@ enum { A8B_RED, A8B_GREEN, A8B_BLUE, A8B_YELLOW, A8B_START, A8B_SELECT, A8B_CLIC
        A8B_COUNT };
 void    a8_input_joycon_diag(int raw[2], int centre[2], int lo[2], int hi[2], int16_t pot[2]);
 bool    a8_input_button(int which);
+#ifdef A8_USB_HOST
+/* The Fruit Jam's USB host ports (a8_input.cpp): the task, from core 1's
+ * loop (the first call starts the host); and for Controller test, what is
+ * plugged in and held. */
+void    a8_input_usb_task(void);
+enum { A8U_UP = 1, A8U_DOWN = 2, A8U_LEFT = 4, A8U_RIGHT = 8, A8U_A = 16, A8U_B = 32, A8U_X = 64,
+       A8U_Y = 128, A8U_L = 256, A8U_R = 512, A8U_SELECT = 1024, A8U_START = 2048 };
+struct A8UsbDiag {
+    bool pad, keyboard;
+    uint16_t vid, pid;            /* the pad's */
+    uint32_t buttons;             /* the pad's A8U_* */
+    uint8_t raw[16], raw_len;     /* its last report */
+    uint8_t kbd[8];               /* the keyboard's last report */
+    int key;                      /* the Atari key it types now, or -1 */
+};
+void    a8_input_usb_diag(A8UsbDiag *d);
+#endif
 uint8_t a8_input_port_dirs(int n, bool *fire);
 int     a8_input_num_ports(void);
 /* The Duo Ultimate's 5-way (A8_UP ... directions; *press = its press);
