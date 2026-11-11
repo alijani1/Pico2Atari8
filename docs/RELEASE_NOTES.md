@@ -20,6 +20,13 @@
 - The Yellow + click message now reads **PADDLE** / **JOYSTICK** (it was cut
   short before).
 
+**Steady full speed**
+- **The 6502 CPU emulation now runs from RAM.** Run from flash it shared a
+  16 KB cache with the rest of the emulator, which didn't fit, so speed
+  depended on where the code happened to land: unrelated changes could drop
+  a game from 60 to 53 fps. It now holds 60 regardless. The RAM comes from
+  unused file-browser buffers, so there is more free memory than in 2.0.
+
 ## 2.0 (31 October 2026)
 
 The first numbered release: Atari 400/800/XL and 5200 emulation (atari800)

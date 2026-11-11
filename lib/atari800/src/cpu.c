@@ -454,9 +454,18 @@ static const int cycles[256] =
 };
 
 /* 6502 emulation routine */
+/* Pico2Atari8: run from RAM (.time_critical.*, copied there at boot by the
+ * RP2350 runtime), not from flash. From flash, the emulator's per-frame
+ * code - this 12 KB loop, ANTIC/GTIA drawing, POKEY, the memory handlers,
+ * and core 1's display loop - doesn't fit the 16 KB XIP cache, so its speed
+ * hung on which pieces happened to share cache sets: any change elsewhere
+ * that moved code by a few KB swung a game between 60 and 53-55 fps
+ * (Game Settings, 2.1). With the 6502 loop in RAM it stays at 60 wherever
+ * the rest lands (checked with the code shifted by 3 KB). */
 #ifndef NO_GOTO
 __extension__ /* suppress -ansi -pedantic warnings */
 #endif
+__attribute__((section(".time_critical.CPU_GO"), noinline))
 void CPU_GO(int limit)
 {
 #ifdef NO_GOTO

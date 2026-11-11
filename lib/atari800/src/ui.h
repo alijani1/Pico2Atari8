@@ -44,7 +44,11 @@ extern UWORD UI_crash_address;
 extern UWORD UI_crash_afterCIM;
 #endif
 
-#define UI_MAX_DIRECTORIES 8
+/* Pico2Atari8: 1, not 8 - there is no file browser (the UI isn't built;
+ * a8_platform.c only defines these for cfg.c, which bounds-checks against
+ * this). 8 x 2 x FILENAME_MAX (1 KB) was 16 KB of RAM for nothing; it pays
+ * for CPU_GO in RAM (cpu.c). */
+#define UI_MAX_DIRECTORIES 1
 
 extern char UI_atari_files_dir[UI_MAX_DIRECTORIES][FILENAME_MAX];
 extern char UI_saved_files_dir[UI_MAX_DIRECTORIES][FILENAME_MAX];

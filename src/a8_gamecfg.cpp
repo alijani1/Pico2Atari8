@@ -226,7 +226,7 @@ static void pk_draw_key(int r, int i, bool sel) {
     tft.setTextFont(FONT);
     tft.setTextColor(COL_TEXT, face);
     const char *t = pk[r][i].label;
-    tft.setCursor(x + (w - tft.textWidth(t)) / 2, y + (h - tft.fontHeight()) / 2 + 1);
+    tft.setCursor(x + (w - tft.textWidth(t)) / 2, y + (h - (FONT == 1 ? 8 : 16)) / 2 + 1);
     tft.print(t);
 }
 
