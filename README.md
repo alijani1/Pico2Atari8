@@ -80,6 +80,7 @@ game waits). Changes are remembered for that game (up to 300 games).
 | Left / Right side button (Quad) | as above |
 | Thumbstick | Joystick / Paddle (400/800/XL games; Yellow + click in a game switches it too) |
 | Paddle center | -113 to +113 (400/800/XL games): where the thumbstick paddle rests, for games whose playfield centre isn't the paddle's middle; + = to the right. Left / right: 1 a step (5 when held); FIRE: back to 0 |
+| Horizontal center | -113 to +113 (5200 games): the same for controller 1's analog stick x (thumbstick or a 5200 controller), at rest too, for 5200 games whose centre is off; + = to the right |
 | Machine | Default / 800XL / 400/800 (400/800/XL games): the machine this game starts on; Default = Settings > Default machine. SELECT in the list still starts the other one |
 | Disk drive 1 | On / Off after load (disk games and zips): for the few disk games that won't start while a drive answers - the drive switches off by itself 1.5 s after the game stops reading the disk (DRIVE OFF shows). Changed during a game, it applies at once. Replaces the keyboard's DRV key |
 | Reset to defaults | the buttons and the thumbstick back to the table below |

@@ -382,6 +382,20 @@ bool a8_input_frame(void) {
             in.pot[0] = jx != A8_POT_NONE ? jx : 114;
             in.pot[1] = jy != A8_POT_NONE ? jy : 114;
         }
+        /* Game Settings > Horizontal center: controller 1's stick x, moved
+         * (+ = right) - at rest too, where the core would read 114. Not
+         * while a direction is held without an analog value (the Duo's
+         * 5-way): the core reads those only when both pots are at 114. */
+        int hofs = a8_settings_game_paddle_ofs();
+        if (hofs) {
+            if (in.pot[0] != A8_POT_NONE) {
+                int x = in.pot[0] + hofs;
+                in.pot[0] = (int16_t)(x < POT_MIN ? POT_MIN : x > POT_MAX ? POT_MAX : x);
+            } else if (!(in.stick[0] & (A8_UP | A8_DOWN | A8_LEFT | A8_RIGHT))) {
+                int x = 114 + hofs;
+                in.pot[0] = (int16_t)(x < POT_MIN ? POT_MIN : x > POT_MAX ? POT_MAX : x);
+            }
+        }
         /* Red / click (Duo: the 5-way's press): bottom fire; Green: top
          * fire; Yellow: * - unless the game's Game Settings say otherwise */
         Mapped m = mapped_buttons(true, false);

@@ -9,6 +9,8 @@
  *                            Yellow + click in a game switches it too)
  *   Paddle center            -113 .. +113: where the Joy-Con paddle rests
  *                            (400/800/XL games, a Joy-Con)
+ *   Horizontal center        the same for a 5200 game: controller 1's
+ *                            stick x (Joy-Con or a 5200 controller)
  *   Machine                  Default / 800XL / 400/800 (400/800/XL games;
  *                            from the game's next start)
  *   Disk drive 1             On / Off after load (disk games; was the
@@ -139,7 +141,7 @@ static const char *row_name(int row) {
     if (row < A8_GB_COUNT) return SLOT_NAMES[row];
     switch (row) {
     case ROW_STICK: return "Thumbstick";
-    case ROW_PADDLE_OFS: return "Paddle center";
+    case ROW_PADDLE_OFS: return g5200 ? "Horizontal center" : "Paddle center";
     case ROW_MACHINE: return "Machine";
     case ROW_DRIVE: return "Disk drive 1";
     case ROW_RESET: return "Reset to defaults";
@@ -346,6 +348,7 @@ void a8_gamecfg_screen(const char *name, bool is5200, bool in_game, bool has_dis
     n_rows = 0;
     for (int s = 0; s < A8_GB_COUNT; s++) if (a8_input_has_slot(s)) rows[n_rows++] = s;
     if (!is5200 && a8_input_has_joycon()) { rows[n_rows++] = ROW_STICK; rows[n_rows++] = ROW_PADDLE_OFS; }
+    if (is5200) rows[n_rows++] = ROW_PADDLE_OFS;          /* "Horizontal center" */
     if (!is5200) rows[n_rows++] = ROW_MACHINE;
     if (!is5200 && has_disk) rows[n_rows++] = ROW_DRIVE;
     rows[n_rows++] = ROW_RESET;

@@ -20,7 +20,8 @@
   drive answers, the drive switches itself off 1.5 seconds after the game
   stops reading the disk.
 - **Paddle center (-113 to +113)** per game: moves where the thumbstick
-  paddle rests, for paddle games whose centre is off.
+  paddle rests, for paddle games whose centre is off. In a 5200 game it is
+  **Horizontal center**: the same for controller 1's analog stick.
 - A game that isn't on its defaults shows **PADDLE MODE** or **CUSTOM KEYS**
   for a moment when it starts. Up to 300 games are remembered; games set to
   use the thumbstick as a paddle in 2.0 keep that setting.

@@ -72,7 +72,9 @@ int     a8_settings_game_machine(void);
 void    a8_settings_set_game_machine(int m);
 /* The Joy-Con paddle's centre (at rest), moved by this much of the pot's
  * range: + = to the right. The pot runs 1 (right) .. 228 (left), centre
- * 114, so -A8_PADDLE_OFS_MAX .. +A8_PADDLE_OFS_MAX. */
+ * 114, so -A8_PADDLE_OFS_MAX .. +A8_PADDLE_OFS_MAX.
+ * In a 5200 game ("Horizontal center"): controller 1's stick x (6 left ..
+ * 114 .. 220 right), + = to the right as well (a8_input.cpp). */
 #define A8_PADDLE_OFS_MAX 113
 int     a8_settings_game_paddle_ofs(void);
 void    a8_settings_set_game_paddle_ofs(int ofs);
