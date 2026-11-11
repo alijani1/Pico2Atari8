@@ -297,8 +297,13 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
 
 **USB gamepad / keyboard** (`A8_USB_HOST`): the USB-A ports take a gamepad
 and a keyboard (TinyUSB host over Pico-PIO-USB, a copy in
-`extern/pico-pio-usb`, run on core 1). Not through the serial monitor:
-held exactly as long as the button or key is.
+`extern/pico-pio-usb`, run on core 0 with its 1 ms frame timer at the
+highest priority, as Adafruit's own Fruit Jam code does - on core 1 the
+HDMI interrupt broke its transfers). Not through the serial monitor: held
+exactly as long as the button or key is. After a flash write (a game's
+unpack, a settings save) the ports' 5 V is cycled: a pad suspends while
+the host is silent and didn't wake properly, so it reconnects instead
+(about half a second).
 
 | USB gamepad (SNES-style) | Game | Menus |
 |---|---|---|

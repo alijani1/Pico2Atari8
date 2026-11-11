@@ -310,7 +310,6 @@ static volatile bool     usb_pad_on = false, usb_kbd_on = false;
 static volatile uint16_t usb_vid = 0, usb_pid = 0;
 static volatile uint8_t  usb_raw[16], usb_raw_len = 0;  /* the pad's last report as it came */
 static volatile uint32_t usb_events = 0;                 /* mounts / unmounts: core 0 logs them */
-static volatile uint32_t usb_reports = 0;                /* DIAG (temporary): reports received */
 static uint8_t usb_pad_addr = 0, usb_kbd_addr = 0;
 
 /* The SNES-style pad's report (and the many cheap pads that share it). */
@@ -339,14 +338,6 @@ static uint32_t usb_parse_pad(const uint8_t *r, uint16_t len) {
     return b;
 }
 
-/* DIAG (temporary): every device the host sets up (the hub too) */
-extern "C" void tuh_mount_cb(uint8_t dev) {
-    uint16_t vid = 0, pid = 0;
-    tuh_vid_pid_get(dev, &vid, &pid);
-    Serial.printf("[usb] device %u mounted: %04x:%04x%c", dev, vid, pid, 10);
-}
-extern "C" void tuh_umount_cb(uint8_t dev) { Serial.printf("[usb] device %u unmounted%c", dev, 10); }
-
 /* (TinyUSB's header declares the HID mount / unmount callbacks weak, which
  * made these definitions weak too - and the linker took Adafruit's empty
  * ones: the pad was set up but never asked for a report. a8_stubs.c, which
@@ -354,8 +345,6 @@ extern "C" void tuh_umount_cb(uint8_t dev) { Serial.printf("[usb] device %u unmo
 extern "C" void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, uint16_t desc_len) {
     (void)desc; (void)desc_len;
     uint8_t proto = tuh_hid_interface_protocol(dev, idx);
-    Serial.printf("[usb] device %u HID interface %u, protocol %u, report descriptor %u bytes%c",
-                  dev, idx, proto, desc_len, 10);   /* DIAG (temporary) */
     if (proto == HID_ITF_PROTOCOL_KEYBOARD) {
         usb_kbd_addr = dev;
         usb_kbd_on = true;
@@ -392,7 +381,6 @@ extern "C" void tuh_hid_report_received_cb(uint8_t dev, uint8_t idx, uint8_t con
         usb_raw_len = (uint8_t)n;
         usb_pad = usb_parse_pad(r, len);
     }
-    usb_reports++;
     tuh_hid_receive_report(dev, idx);
 }
 
@@ -585,23 +573,6 @@ static int usb_kbd_akey(bool is5200) {
 
 /* Core 0: everything held on the USB ports (the pad and the keyboard). */
 static uint32_t usb_buttons(void) {
-    {   /* DIAG (temporary): is core 1's loop running, the USB frame timer? */
-        static uint32_t last = 0, sof0 = 0, rep0 = 0;
-        uint32_t now = millis();
-        if (now - last >= 2000) {
-            uint32_t f = pio_usb_host_get_frame_number();
-            uint32_t r = usb_reports;
-            Serial.printf("[usb] diag: USB frames %lu in %lu ms, %lu reports, pad held %03lx, HDMI sound %s%c",
-                          (unsigned long)(f - sof0), (unsigned long)(now - last),
-                          (unsigned long)(r - rep0), (unsigned long)usb_pad,
-#ifdef A8_HDMI_AUDIO
-                          a8_display_hdmi_audio() ? "on" : "off", 10);
-#else
-                          "not built", 10);
-#endif
-            last = now; sof0 = f; rep0 = r;
-        }
-    }
     static uint32_t seen = 0;
     if (usb_events != seen) {                            /* (logged here: core 0 has the serial) */
         seen = usb_events;
@@ -838,16 +809,6 @@ bool a8_input_frame(void) {
 #endif
 #ifdef A8_USB_HOST
     a8_input_usb_task();
-    {   /* DIAG (temporary): what the game sees from the pad, as it changes */
-        static uint32_t was = 0xFFFFFFFF;
-        uint32_t now_b = usb_buttons();
-        if (now_b != was) {
-            Serial.printf("[usb] game sees pad %03lx (last report %u bytes:", (unsigned long)now_b, usb_raw_len);
-            for (int i = 0; i < usb_raw_len && i < 8; i++) Serial.printf(" %02x", usb_raw[i]);
-            Serial.printf(")%c", 10);
-            was = now_b;
-        }
-    }
 #endif
     a8_input_t in;
     memset(&in, 0, sizeof(in));
