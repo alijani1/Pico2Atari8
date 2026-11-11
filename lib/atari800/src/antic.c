@@ -23,6 +23,7 @@
 */
 
 #include "config.h"
+/* Pico2Atari8: all of ANTIC runs from RAM (A8_RAM, config.h) */
 #include <string.h>
 #if HAVE_STDINT_H
 # include <stdint.h>
@@ -181,12 +182,12 @@ static UBYTE *scratchFillLimit;
 
 #define READ_VIDEO_LONG(ptr) (*(ptr))
 
-void ANTIC_VideoMemset(UBYTE *ptr, UBYTE val, ULONG size)
+A8_RAM void ANTIC_VideoMemset(UBYTE *ptr, UBYTE val, ULONG size)
 {
 	FILL_VIDEO(ptr, val, size);
 }
 
-void ANTIC_VideoPutByte(UBYTE *ptr, UBYTE val)
+A8_RAM void ANTIC_VideoPutByte(UBYTE *ptr, UBYTE val)
 {
 	WRITE_VIDEO_BYTE(ptr, val);
 }
@@ -742,7 +743,7 @@ static const UBYTE prior_to_pm_lookup[64] = {
 	PL_31, PL_31, PL_30, PL_33, PL_3c, PL_35, PL_3e, PL_35
 };
 
-static void init_pm_lookup(void)
+A8_RAM static void init_pm_lookup(void)
 {
 	static const UBYTE pm_lookup_template[10][16] = {
 		/* PL_20 */
@@ -810,7 +811,7 @@ static const UBYTE hold_missiles_tab[16] = {
 	0x00,0x03,0x0c,0x0f,0x30,0x33,0x3c,0x3f,
 	0xc0,0xc3,0xcc,0xcf,0xf0,0xf3,0xfc,0xff};
 
-static void pmg_dma(void)
+A8_RAM static void pmg_dma(void)
 {
 	/* VDELAY bit set == GTIA ignores PMG DMA in even lines */
 	if (ANTIC_player_dma_enabled) {
@@ -901,7 +902,7 @@ static UWORD art_normal_colpf2_save;
 static UWORD art_reverse_colpf1_save;
 static UWORD art_reverse_colpf2_save;
 
-static void setup_art_colours(void)
+A8_RAM static void setup_art_colours(void)
 {
 	static UWORD *art_colpf1_save = &art_normal_colpf1_save;
 	static UWORD *art_colpf2_save = &art_normal_colpf2_save;
@@ -946,7 +947,7 @@ static void setup_art_colours(void)
 
 /* Initialization ---------------------------------------------------------- */
 
-int ANTIC_Initialise(int *argc, char *argv[])
+A8_RAM int ANTIC_Initialise(int *argc, char *argv[])
 {
 #if !defined(BASIC) && !defined(CURSES_BASIC)
 	int i, j;
@@ -1014,7 +1015,7 @@ int ANTIC_Initialise(int *argc, char *argv[])
 	return TRUE;
 }
 
-void ANTIC_Reset(void)
+A8_RAM void ANTIC_Reset(void)
 {
 	ANTIC_NMIEN = 0x00;
 	ANTIC_NMIST = 0x1f;
@@ -1049,7 +1050,7 @@ void ANTIC_Reset(void)
 	}\
 }
 
-static void do_border(void)
+A8_RAM static void do_border(void)
 {
 	int kk;
 	UWORD *ptr = &scrn_ptr[LBORDER_START];
@@ -1065,7 +1066,7 @@ static void do_border(void)
 			DO_BORDER
 }
 
-static void do_border_gtia10(void)
+A8_RAM static void do_border_gtia10(void)
 {
 	int kk;
 	UWORD *ptr = &scrn_ptr[LBORDER_START];
@@ -1088,7 +1089,7 @@ static void do_border_gtia10(void)
 	}
 }
 
-static void do_border_gtia11(void)
+A8_RAM static void do_border_gtia11(void)
 {
 	int kk;
 	UWORD *ptr = &scrn_ptr[LBORDER_START];
@@ -1112,7 +1113,7 @@ static void do_border_gtia11(void)
 	GTIA_COLOUR_TO_WORD(ANTIC_cl[C_BAK],GTIA_COLBK)
 }
 
-static void draw_antic_0(void)
+A8_RAM static void draw_antic_0(void)
 {
 	UWORD *ptr = scrn_ptr + LBORDER_START;
 	if (GTIA_pm_dirty) {
@@ -1126,7 +1127,7 @@ static void draw_antic_0(void)
 		FILL_VIDEO(ptr, ANTIC_cl[C_BAK], (RBORDER_END - LBORDER_START) * 2);
 }
 
-static void draw_antic_0_gtia10(void)
+A8_RAM static void draw_antic_0_gtia10(void)
 {
 	UWORD *ptr = scrn_ptr + LBORDER_START;
 	if (GTIA_pm_dirty) {
@@ -1140,7 +1141,7 @@ static void draw_antic_0_gtia10(void)
 		FILL_VIDEO(ptr, ANTIC_cl[C_PM0], (RBORDER_END - LBORDER_START) * 2);
 }
 
-static void draw_antic_0_gtia11(void)
+A8_RAM static void draw_antic_0_gtia11(void)
 {
 	UWORD *ptr = scrn_ptr + LBORDER_START;
 	if (GTIA_pm_dirty) {
@@ -1170,7 +1171,7 @@ static const UBYTE gtia_10_lookup[] =
 static const UBYTE gtia_10_pm[] =
 {1, 2, 4, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-static void draw_an_gtia9(const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_an_gtia9(const ULONG *t_pm_scanline_ptr)
 {
 	int i = ((const UBYTE *) t_pm_scanline_ptr - GTIA_pm_scanline) & ~1;
 	while (i < right_border_start) {
@@ -1212,7 +1213,7 @@ static void draw_an_gtia9(const ULONG *t_pm_scanline_ptr)
 	do_border();
 }
 
-static void draw_an_gtia10(const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_an_gtia10(const ULONG *t_pm_scanline_ptr)
 {
 	int i = ((const UBYTE *) t_pm_scanline_ptr - GTIA_pm_scanline) | 1;
 	UWORD lookup_gtia10[16];
@@ -1256,7 +1257,7 @@ static void draw_an_gtia10(const ULONG *t_pm_scanline_ptr)
 	do_border_gtia10();
 }
 
-static void draw_an_gtia11(const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_an_gtia11(const ULONG *t_pm_scanline_ptr)
 {
 	int i = ((const UBYTE *) t_pm_scanline_ptr - GTIA_pm_scanline) & ~1;
 	while (i < right_border_start) {
@@ -1298,7 +1299,7 @@ static void draw_an_gtia11(const ULONG *t_pm_scanline_ptr)
 	do_border_gtia11();
 }
 
-static void draw_an_gtia_bug(const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_an_gtia_bug(const ULONG *t_pm_scanline_ptr)
 {
 	static const UBYTE gtia_bug_colreg[] = {L_PF0, L_PF1, L_PF2, L_PF3};
 	UWORD lookup_gtia_bug[16];
@@ -1328,17 +1329,17 @@ static void draw_an_gtia_bug(const ULONG *t_pm_scanline_ptr)
 }
 
 #define DEFINE_DRAW_AN(anticmode) \
-	static void draw_antic_ ## anticmode ## _gtia9 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)\
+	A8_RAM static void draw_antic_ ## anticmode ## _gtia9 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)\
 	{\
 		prepare_an_antic_ ## anticmode (nchars, antic_memptr, t_pm_scanline_ptr);\
 		draw_an_gtia9(t_pm_scanline_ptr);\
 	}\
-	static void draw_antic_ ## anticmode ## _gtia10 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)\
+	A8_RAM static void draw_antic_ ## anticmode ## _gtia10 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)\
 	{\
 		prepare_an_antic_ ## anticmode (nchars, antic_memptr, t_pm_scanline_ptr);\
 		draw_an_gtia10(t_pm_scanline_ptr);\
 	}\
-	static void draw_antic_ ## anticmode ## _gtia11 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)\
+	A8_RAM static void draw_antic_ ## anticmode ## _gtia11 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)\
 	{\
 		prepare_an_antic_ ## anticmode (nchars, antic_memptr, t_pm_scanline_ptr);\
 		draw_an_gtia11(t_pm_scanline_ptr);\
@@ -1476,7 +1477,7 @@ static void draw_an_gtia_bug(const ULONG *t_pm_scanline_ptr)
 
 #endif /* PAGED_MEM */
 
-static void draw_antic_2(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_2(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	INIT_BACKGROUND_6
 	INIT_ANTIC_2
@@ -1505,7 +1506,7 @@ static void draw_antic_2(int nchars, const UBYTE *antic_memptr, UWORD *ptr, cons
 }
 
 #ifdef NEW_CYCLE_EXACT
-static void draw_antic_2_dmactl_bug(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_2_dmactl_bug(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	INIT_BACKGROUND_6
 	INIT_ANTIC_2
@@ -1544,7 +1545,7 @@ static void draw_antic_2_dmactl_bug(int nchars, const UBYTE *antic_memptr, UWORD
 }
 #endif
 
-static void draw_antic_2_artif(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_2_artif(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	ULONG screendata_tally;
 	INIT_ANTIC_2
@@ -1575,7 +1576,7 @@ static void draw_antic_2_artif(int nchars, const UBYTE *antic_memptr, UWORD *ptr
 }
 
 #ifndef USE_COLOUR_TRANSLATION_TABLE
-static void draw_antic_2_artif_new(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_2_artif_new(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	ULONG screendata_tally;
 	ULONG pmtally;
@@ -1610,7 +1611,7 @@ static void draw_antic_2_artif_new(int nchars, const UBYTE *antic_memptr, UWORD 
 }
 #endif
 
-static void prepare_an_antic_2(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void prepare_an_antic_2(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
 {
 	UBYTE *an_ptr = (UBYTE *) t_pm_scanline_ptr + (an_scanline - GTIA_pm_scanline);
 #ifdef PAGED_MEM
@@ -1634,7 +1635,7 @@ static void prepare_an_antic_2(int nchars, const UBYTE *antic_memptr, const ULON
 	CHAR_LOOP_END
 }
 
-static void draw_antic_2_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_2_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	INIT_ANTIC_2
 	if ((uintptr_t) ptr & 2) { /* HSCROL & 1 */
@@ -1680,7 +1681,7 @@ static void draw_antic_2_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr
 	do_border();
 }
 
-static void draw_antic_2_gtia10(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_2_gtia10(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 #ifdef WORDS_UNALIGNED_OK
 	ULONG lookup_gtia10[16];
@@ -1746,7 +1747,7 @@ static void draw_antic_2_gtia10(int nchars, const UBYTE *antic_memptr, UWORD *pt
 	do_border_gtia10();
 }
 
-static void draw_antic_2_gtia11(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_2_gtia11(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	INIT_ANTIC_2
 	if ((uintptr_t) ptr & 2) { /* HSCROL & 1 */
@@ -1792,14 +1793,14 @@ static void draw_antic_2_gtia11(int nchars, const UBYTE *antic_memptr, UWORD *pt
 	do_border_gtia11();
 }
 
-static void draw_antic_2_gtia_bug(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_2_gtia_bug(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	prepare_an_antic_2(nchars, antic_memptr, t_pm_scanline_ptr);
 	draw_an_gtia_bug(t_pm_scanline_ptr);
 	return;
 }
 
-static void draw_antic_4(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_4(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	INIT_BACKGROUND_8
 #ifdef PAGED_MEM
@@ -1862,7 +1863,7 @@ static void draw_antic_4(int nchars, const UBYTE *antic_memptr, UWORD *ptr, cons
 	do_border();
 }
 
-static void prepare_an_antic_4(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void prepare_an_antic_4(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
 {
 	UBYTE *an_ptr = (UBYTE *) t_pm_scanline_ptr + (an_scanline - GTIA_pm_scanline);
 #ifdef PAGED_MEM
@@ -1898,7 +1899,7 @@ static void prepare_an_antic_4(int nchars, const UBYTE *antic_memptr, const ULON
 
 DEFINE_DRAW_AN(4)
 
-static void draw_antic_6(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_6(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 #ifdef PAGED_MEM
 	UWORD t_chbase = (anticmode == 6 ? dctr & 7 : dctr >> 1) ^ chbase_20;
@@ -1977,7 +1978,7 @@ static void draw_antic_6(int nchars, const UBYTE *antic_memptr, UWORD *ptr, cons
 	do_border();
 }
 
-static void prepare_an_antic_6(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void prepare_an_antic_6(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
 {
 	UBYTE *an_ptr = (UBYTE *) t_pm_scanline_ptr + (an_scanline - GTIA_pm_scanline);
 #ifdef PAGED_MEM
@@ -2013,7 +2014,7 @@ static void prepare_an_antic_6(int nchars, const UBYTE *antic_memptr, const ULON
 
 DEFINE_DRAW_AN(6)
 
-static void draw_antic_8(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_8(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	lookup2[0x00] = ANTIC_cl[C_BAK];
 	lookup2[0x40] = ANTIC_cl[C_PF0];
@@ -2048,7 +2049,7 @@ static void draw_antic_8(int nchars, const UBYTE *antic_memptr, UWORD *ptr, cons
 	do_border();
 }
 
-static void prepare_an_antic_8(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void prepare_an_antic_8(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
 {
 	UBYTE *an_ptr = (UBYTE *) t_pm_scanline_ptr + (an_scanline - GTIA_pm_scanline);
 	CHAR_LOOP_BEGIN
@@ -2067,7 +2068,7 @@ static void prepare_an_antic_8(int nchars, const UBYTE *antic_memptr, const ULON
 
 DEFINE_DRAW_AN(8)
 
-static void draw_antic_9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	lookup2[0x00] = ANTIC_cl[C_BAK];
 	lookup2[0x80] = lookup2[0x40] = ANTIC_cl[C_PF0];
@@ -2104,22 +2105,22 @@ static void draw_antic_9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, cons
 
 /* ANTIC modes 9, b and c use BAK and PF0 colours only so they're not visible in GTIA modes */
 
-static void draw_antic_9_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_9_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	draw_antic_0();
 }
 
-static void draw_antic_9_gtia10(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_9_gtia10(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	draw_antic_0_gtia10();
 }
 
-static void draw_antic_9_gtia11(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_9_gtia11(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	draw_antic_0_gtia11();
 }
 
-static void draw_antic_a(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_a(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	lookup2[0x00] = ANTIC_cl[C_BAK];
 	lookup2[0x40] = lookup2[0x10] = ANTIC_cl[C_PF0];
@@ -2154,7 +2155,7 @@ static void draw_antic_a(int nchars, const UBYTE *antic_memptr, UWORD *ptr, cons
 	do_border();
 }
 
-static void prepare_an_antic_a(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void prepare_an_antic_a(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
 {
 	UBYTE *an_ptr = (UBYTE *) t_pm_scanline_ptr + (an_scanline - GTIA_pm_scanline);
 	CHAR_LOOP_BEGIN
@@ -2176,7 +2177,7 @@ static void prepare_an_antic_a(int nchars, const UBYTE *antic_memptr, const ULON
 
 DEFINE_DRAW_AN(a)
 
-static void draw_antic_c(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_c(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	lookup2[0x00] = ANTIC_cl[C_BAK];
 	lookup2[0x80] = lookup2[0x40] = lookup2[0x20] = lookup2[0x10] = ANTIC_cl[C_PF0];
@@ -2208,7 +2209,7 @@ static void draw_antic_c(int nchars, const UBYTE *antic_memptr, UWORD *ptr, cons
 	do_border();
 }
 
-static void draw_antic_e(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_e(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	INIT_BACKGROUND_8
 	lookup2[0x00] = ANTIC_cl[C_BAK];
@@ -2245,7 +2246,7 @@ static void draw_antic_e(int nchars, const UBYTE *antic_memptr, UWORD *ptr, cons
 	do_border();
 }
 
-static void prepare_an_antic_e(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void prepare_an_antic_e(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
 {
 	UBYTE *an_ptr = (UBYTE *) t_pm_scanline_ptr + (an_scanline - GTIA_pm_scanline);
 	CHAR_LOOP_BEGIN
@@ -2257,7 +2258,7 @@ static void prepare_an_antic_e(int nchars, const UBYTE *antic_memptr, const ULON
 	CHAR_LOOP_END
 }
 
-static void draw_antic_e_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_e_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	ULONG lookup[16];
 	if ((uintptr_t) ptr & 2) { /* HSCROL & 1 */
@@ -2308,18 +2309,18 @@ static void draw_antic_e_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr
 	do_border();
 }
 
-static void draw_antic_e_gtia10 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_e_gtia10 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	prepare_an_antic_e(nchars, antic_memptr, t_pm_scanline_ptr);
 	draw_an_gtia10(t_pm_scanline_ptr);
 }
-static void draw_antic_e_gtia11 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_e_gtia11 (int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	prepare_an_antic_e(nchars, antic_memptr, t_pm_scanline_ptr);
 	draw_an_gtia11(t_pm_scanline_ptr);
 }
 
-static void draw_antic_f(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_f(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	INIT_BACKGROUND_6
 	INIT_HIRES
@@ -2343,7 +2344,7 @@ static void draw_antic_f(int nchars, const UBYTE *antic_memptr, UWORD *ptr, cons
 	do_border();
 }
 
-static void draw_antic_f_artif(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_f_artif(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	ULONG screendata_tally = *antic_memptr++;
 
@@ -2364,7 +2365,7 @@ static void draw_antic_f_artif(int nchars, const UBYTE *antic_memptr, UWORD *ptr
 }
 
 #ifndef USE_COLOUR_TRANSLATION_TABLE
-static void draw_antic_f_artif_new(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_f_artif_new(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	ULONG pmtally;
 	ULONG screendata_tally = *antic_memptr++;
@@ -2391,7 +2392,7 @@ static void draw_antic_f_artif_new(int nchars, const UBYTE *antic_memptr, UWORD 
 }
 #endif
 
-static void prepare_an_antic_f(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void prepare_an_antic_f(int nchars, const UBYTE *antic_memptr, const ULONG *t_pm_scanline_ptr)
 {
 	UBYTE *an_ptr = (UBYTE *) t_pm_scanline_ptr + (an_scanline - GTIA_pm_scanline);
 	CHAR_LOOP_BEGIN
@@ -2403,7 +2404,7 @@ static void prepare_an_antic_f(int nchars, const UBYTE *antic_memptr, const ULON
 	CHAR_LOOP_END
 }
 
-static void draw_antic_f_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_f_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	if ((uintptr_t) ptr & 2) { /* HSCROL & 1 */
 		prepare_an_antic_f(nchars, antic_memptr, t_pm_scanline_ptr);
@@ -2443,7 +2444,7 @@ static void draw_antic_f_gtia9(int nchars, const UBYTE *antic_memptr, UWORD *ptr
 	do_border();
 }
 
-static void draw_antic_f_gtia10(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_f_gtia10(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 #ifdef WORDS_UNALIGNED_OK
 	ULONG lookup_gtia10[16];
@@ -2504,7 +2505,7 @@ static void draw_antic_f_gtia10(int nchars, const UBYTE *antic_memptr, UWORD *pt
 	do_border_gtia10();
 }
 
-static void draw_antic_f_gtia11(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_f_gtia11(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	if ((uintptr_t) ptr & 2) { /* HSCROL & 1 */
 		prepare_an_antic_f(nchars, antic_memptr, t_pm_scanline_ptr);
@@ -2566,7 +2567,7 @@ to ANTIC's 0xe, but with colours PF0, PF1, PF2, PF3. */
  * since ANTIC data in hi-res modes is sent as PF0-PF3, this data is used
  * by GTIA directly.*/
 
-static void draw_antic_f_gtia_bug(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_f_gtia_bug(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	lookup2[0x00] = ANTIC_cl[C_PF0];
 	lookup2[0x40] = lookup2[0x10] = lookup2[0x04] = lookup2[0x01] = ANTIC_cl[C_PF1];
@@ -2633,7 +2634,7 @@ static void (*draw_antic_0_ptr)(void) = draw_antic_0;
 
 #ifdef NEW_CYCLE_EXACT
 /* wrapper for antic_0, for dmactl bugs */
-static void draw_antic_0_dmactl_bug(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
+A8_RAM static void draw_antic_0_dmactl_bug(int nchars, const UBYTE *antic_memptr, UWORD *ptr, const ULONG *t_pm_scanline_ptr)
 {
 	draw_antic_0_ptr();
 }
@@ -2641,7 +2642,7 @@ static void draw_antic_0_dmactl_bug(int nchars, const UBYTE *antic_memptr, UWORD
 
 /* Artifacting ------------------------------------------------------------ */
 
-void ANTIC_UpdateArtifacting(void)
+A8_RAM void ANTIC_UpdateArtifacting(void)
 {
 #define ART_BROWN 0
 #define ART_BLUE 1
@@ -2762,7 +2763,7 @@ void ANTIC_UpdateArtifacting(void)
 
 /* Display List ------------------------------------------------------------ */
 
-UBYTE ANTIC_GetDLByte(UWORD *paddr)
+A8_RAM UBYTE ANTIC_GetDLByte(UWORD *paddr)
 {
 	int addr = *paddr;
 	UBYTE result;
@@ -2777,7 +2778,7 @@ UBYTE ANTIC_GetDLByte(UWORD *paddr)
 	return result;
 }
 
-UWORD ANTIC_GetDLWord(UWORD *paddr)
+A8_RAM UWORD ANTIC_GetDLWord(UWORD *paddr)
 {
 	UBYTE lsb = ANTIC_GetDLByte(paddr);
 #if !defined(BASIC) && !defined(CURSES_BASIC)
@@ -2791,7 +2792,7 @@ UWORD ANTIC_GetDLWord(UWORD *paddr)
 
 /* Real ANTIC doesn't fetch beginning bytes in HSC
    nor screen+47 in wide playfield. This function does. */
-static void antic_load(void)
+A8_RAM static void antic_load(void)
 {
 #ifdef PAGED_MEM
 	UBYTE *antic_memptr = antic_memory + ANTIC_margin;
@@ -2847,7 +2848,7 @@ static int scanlines_to_curses_display = 0;
 #endif
 
 /* This function emulates one frame drawing screen at Screen_atari */
-void ANTIC_Frame(int draw_display)
+A8_RAM void ANTIC_Frame(int draw_display)
 {
 	static const UBYTE mode_type[32] = {
 		NORMAL0, NORMAL0, NORMAL0, NORMAL0, NORMAL0, NORMAL0, NORMAL1, NORMAL1,
@@ -3206,7 +3207,7 @@ void ANTIC_Frame(int draw_display)
 
 /* update the scanline from the last changed position to the current
 position, when a change was made to a display register during drawing */
-void ANTIC_UpdateScanline(void)
+A8_RAM void ANTIC_UpdateScanline(void)
 {
 	int actual_xpos = ANTIC_cpu2antic_ptr[ANTIC_xpos];
         int oldpos = ANTIC_cur_screen_pos;
@@ -3218,7 +3219,7 @@ void ANTIC_UpdateScanline(void)
 between mode changes */
 /* TODO: support glitches between mode changes (tiny areas that are neither
 the new mode nor the old mode, which occur between mode changes */
-void ANTIC_UpdateScanlinePrior(UBYTE byte)
+A8_RAM void ANTIC_UpdateScanlinePrior(UBYTE byte)
 {
 	int actual_xpos = ANTIC_cpu2antic_ptr[ANTIC_xpos];
 	int prior_mode_adj = 2;
@@ -3228,7 +3229,7 @@ void ANTIC_UpdateScanlinePrior(UBYTE byte)
 }
 
 /* chbase needs a different adjustment */
-void update_scanline_chbase(void)
+A8_RAM void update_scanline_chbase(void)
 {
 	int actual_xpos = ANTIC_cpu2antic_ptr[ANTIC_xpos];
 	int hscrol_adj = (IR & 0x10) ? ANTIC_HSCROL : 0;
@@ -3252,7 +3253,7 @@ void update_scanline_chbase(void)
 }
 
 /* chactl invert needs a different adjustment */
-void update_scanline_invert(void)
+A8_RAM void update_scanline_invert(void)
 {
 	int actual_xpos = ANTIC_cpu2antic_ptr[ANTIC_xpos];
 	int hscrol_adj = (IR & 0x10) ? ANTIC_HSCROL : 0;
@@ -3265,7 +3266,7 @@ void update_scanline_invert(void)
 }
 
 /* chactl blank needs a different adjustment */
-void update_scanline_blank(void)
+A8_RAM void update_scanline_blank(void)
 {
 	int actual_xpos = ANTIC_cpu2antic_ptr[ANTIC_xpos];
 	int hscrol_adj = (IR & 0x10) ? ANTIC_HSCROL : 0;
@@ -3277,7 +3278,7 @@ void update_scanline_blank(void)
 	draw_partial_scanline(oldpos, ANTIC_cur_screen_pos);
 }
 
-static void set_dmactl_bug(void){
+A8_RAM static void set_dmactl_bug(void){
 	need_load = FALSE;
 	saved_draw_antic_ptr = draw_antic_ptr;
 	draw_antic_ptr_changed = 1;
@@ -3292,7 +3293,7 @@ static void set_dmactl_bug(void){
 
 /* draw a partial scanline between point l and point r */
 /* l is the left hand word, r is the point one past the right-most word to draw */
-void draw_partial_scanline(int l, int r)
+A8_RAM void draw_partial_scanline(int l, int r)
 {
 	/* lborder_chars: save left border chars,we restore it after */
 	/*                it is the number of 8pixel 'chars' in the left border */
@@ -3508,7 +3509,7 @@ void draw_partial_scanline(int l, int r)
 
 /* ANTIC registers --------------------------------------------------------- */
 
-UBYTE ANTIC_GetByte(UWORD addr, int no_side_effects)
+A8_RAM UBYTE ANTIC_GetByte(UWORD addr, int no_side_effects)
 {
 	switch (addr & 0xf) {
 	case ANTIC_OFFSET_VCOUNT:
@@ -3531,7 +3532,7 @@ UBYTE ANTIC_GetByte(UWORD addr, int no_side_effects)
 #if !defined(BASIC) && !defined(CURSES_BASIC)
 
 /* GTIA calls it on write to PRIOR */
-void ANTIC_SetPrior(UBYTE byte)
+A8_RAM void ANTIC_SetPrior(UBYTE byte)
 {
 	if ((byte ^ GTIA_PRIOR) & 0x0f) {
 #ifdef USE_COLOUR_TRANSLATION_TABLE
@@ -3685,7 +3686,7 @@ void ANTIC_SetPrior(UBYTE byte)
 
 #endif /* !defined(BASIC) && !defined(CURSES_BASIC) */
 
-void ANTIC_PutByte(UWORD addr, UBYTE byte)
+A8_RAM void ANTIC_PutByte(UWORD addr, UBYTE byte)
 {
 	switch (addr & 0xf) {
 	case ANTIC_OFFSET_DLISTL:

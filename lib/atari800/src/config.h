@@ -37,4 +37,26 @@
 #define HAVE_TIME_H 1
 #define HAVE_STRINGS_H 1
 
+/* --- Path buffers --------------------------------------------------------
+ * The core sizes every path buffer by FILENAME_MAX - newlib's is 1 KB, so
+ * ~45 static ones (ROM image names, SIO_filename, CFG_data_dir ...) took
+ * ~45 KB of RAM, and more on the emulator stack. Our paths are the ROM
+ * drive's: "/ATARIOSB.ROM", a game's path (Game list: < 48 characters), the
+ * unpacked zip's name. 128 holds them all. Every file that uses
+ * FILENAME_MAX includes this header (directly or through atari.h) before
+ * declaring with it, so the sizes agree. The RAM goes to running ANTIC
+ * from RAM (antic.c, A8_RAM). */
+#include <stdio.h>
+#undef FILENAME_MAX
+#define FILENAME_MAX 128
+
+/* Code that runs every scanline: in RAM (.time_critical.*, copied there at
+ * boot), not in flash. From flash, the emulator's per-scanline code doesn't
+ * fit the 16 KB, 2-way XIP cache, and its speed depended on where it
+ * landed: Arkanoid's ANTIC mode 4 line drawing (draw_antic_4) took 67 % of
+ * core 0 instead of 17 % when its loop shared cache sets with
+ * draw_antic_2 and the audio push code (profiled, 2026-11-10: 60 -> 41
+ * fps after an unrelated change). */
+#define A8_RAM __attribute__((section(".time_critical.a8")))
+
 #endif /* CONFIG_H_ */

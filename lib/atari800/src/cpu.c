@@ -430,7 +430,13 @@ void CPU_NMI(void)
 
 
 /*	0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F */
-static const int cycles[256] =
+/* Pico2Atari8: not const, so it's in RAM (.data), not in flash (.rodata) -
+ * CPU_GO reads it on every instruction, like its jump table below. In
+ * flash, .rodata sits after all the code, so any code change moved these
+ * tables, and where their cache lines collided with hot code every 6502
+ * instruction paid a flash read (Arkanoid: 60 -> 41 fps after an unrelated
+ * change, with CPU_GO itself already in RAM). */
+static int cycles[256] __attribute__((section(".data.cpu_cycles"))) =   /* (the section: else GCC sees it never written and puts it back in .rodata) */
 {
 	7, 6, 2, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6,		/* 0x */
 	2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,		/* 1x */
@@ -474,7 +480,7 @@ void CPU_GO(int limit)
 #else
 #define OPCODE_ALIAS(code)	opcode_##code:
 #define DONE				goto next
-	static const void *opcode[256] =
+	static void *opcode[256] __attribute__((section(".data.cpu_opcode"))) =   /* Pico2Atari8: in RAM, see cycles[] */
 	{
 		&&opcode_00, &&opcode_01, &&opcode_02, &&opcode_03,
 		&&opcode_04, &&opcode_05, &&opcode_06, &&opcode_07,

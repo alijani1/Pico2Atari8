@@ -28,11 +28,15 @@
   short before).
 
 **Steady full speed**
-- **The 6502 CPU emulation now runs from RAM.** Run from flash it shared a
-  16 KB cache with the rest of the emulator, which didn't fit, so speed
-  depended on where the code happened to land: unrelated changes could drop
-  a game from 60 to 53 fps. It now holds 60 regardless. The RAM comes from
-  unused file-browser buffers, so there is more free memory than in 2.0.
+- **The emulator's per-scanline work now runs from RAM:** the 6502 CPU
+  (with its opcode and cycle tables) and ANTIC, the chip that draws every
+  line. Run from flash they competed for a 16 KB code cache, so speed
+  depended on where code happened to land: unrelated changes dropped some
+  games from 60 to 53 fps, and Arkanoid to 41 (its line drawing ran 4x
+  slower when it shared cache slots with other hot code). Games now hold
+  60 fps however the rest of the code changes.
+- **More free memory than 2.0** despite that: the emulator's file-path
+  buffers were 1 KB each (about 45 of them); 128 bytes is plenty here.
 
 ## 2.0 (31 October 2026)
 
