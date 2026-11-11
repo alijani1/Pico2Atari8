@@ -69,6 +69,7 @@
 #include "pico_paddles.h"
 #ifdef PICO_FRUITJAM
 #include "pico_audio.h"                    /* the serial monitor's sound keys */
+#include "a8_display.h"                    /* V: the next HDMI mode */
 #endif
 
 extern "C" {
@@ -236,6 +237,9 @@ static void serial_key(int c) {
     case 9: case 'e':   vpin_press(VP_SELECT, TAP); break;
     case 'o':           vpin_press(VP_OPTION, TAP); break;
     case 'k':           vpin_press(VP_BLUE, TAP); break;
+#ifdef A8_HDMI
+    case 'V':           a8_display_next_hdmi_mode(); break;
+#endif
     default:            pico_audio_key(c); break;
     }
 }

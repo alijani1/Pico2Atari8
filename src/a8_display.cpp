@@ -570,7 +570,7 @@ uint32_t a8_display_push_us(uint32_t *avg_rows) {
 #ifdef A8_HDMI
 /* ---- HDMI (the Fruit Jam: RP2350 HSTX) -----------------------------------
  *
- * 640x480 at 60 Hz through Pimoroni's dvhstx driver (from Adafruit's
+ * 800x480 at 60 Hz (by default; see HDMI_MODES) through Pimoroni's dvhstx driver (from Adafruit's
  * Adafruit-DVI-HSTX library; only its driver is built, at the end of this file)
  * in scanline mode: there is no frame buffer. The driver's DMA interrupt
  * (core 1, highest priority) asks for each output line just before it goes
@@ -603,6 +603,8 @@ uint32_t a8_display_push_us(uint32_t *avg_rows) {
  * line interrupt: the picture drops out for that moment (the driver
  * restarts its stream after). */
 #include "drivers/dvhstx/dvhstx.hpp"
+#include "hardware/structs/hstx_ctrl.h"
+#include "hardware/gpio.h"
 
 static pimoroni::DVHSTX hdmi;                           /* claims DMA channels 0-2 here */
 static uint32_t hdmi_pal[256];                          /* index -> an RGB565 pixel twice */
@@ -615,10 +617,34 @@ static volatile bool hdmi_wanted = false, hdmi_started = false, hdmi_ok = false;
 static volatile bool composing = false;                 /* core 1 is in hdmi_compose */
 static const uint8_t HDMI_BLACK = 0x00;                 /* Atari palette: black (side bands) */
 
-/* One output line (the driver's interrupt, core 1). */
-static void __not_in_flash_func(hdmi_line)(uint32_t v_scanline, uint32_t active_line, uint32_t *dst) {
-    (void)v_scanline;
-    const int r = (int)(active_line >> 1);
+/* The video mode: the picture is 640x480 (320x240 doubled), centred in the
+ * mode's lines with black around it, or cropped (720x400: 20 Atari rows off
+ * the top and the bottom). Displays differ in what they take: the first
+ * one tried showed nothing at 640x480 @ 60 Hz (the usual mode for 320x240)
+ * but 720x400 @ 70 Hz, 720x576 @ 50 Hz and 800x480 @ 60 Hz, 800x600 only
+ * sometimes (2026-11-11). 800x480 is the default (the user's pick: full
+ * height, black side bands); A8_HDMI_MODE picks another at build time, and
+ * the serial monitor's V key steps through them.
+ * TODO: a Settings row for it (kept in the settings sector), for displays
+ * that take none of the default. */
+struct HdmiMode { uint16_t w, h; const char *name; };
+static const HdmiMode HDMI_MODES[] = {
+    { 320, 240, "640x480 @ 60 Hz" },
+    { 360, 200, "720x400 @ 70 Hz (as Doom)" },
+    { 360, 240, "720x480 @ 60 Hz (480p)" },
+    { 360, 288, "720x576 @ 50 Hz (576p)" },
+    { 400, 300, "800x600 @ 60 Hz" },
+    { 400, 240, "800x480 @ 60 Hz" },
+};
+static const int HDMI_NMODES = sizeof(HDMI_MODES) / sizeof(HDMI_MODES[0]);
+#ifndef A8_HDMI_MODE
+#define A8_HDMI_MODE 5                                  /* index into HDMI_MODES: 800x480 @ 60 Hz */
+#endif
+static volatile int hdmi_vmode = A8_HDMI_MODE, hdmi_vmode_wanted = A8_HDMI_MODE;
+static volatile int out_words = SCR_W, out_lines = 2 * SCR_H;   /* the mode's line: words (2 pixels), lines */
+
+/* Picture row r (0..239) as 320 words. */
+static inline __attribute__((always_inline)) void hdmi_picture_line(int r, uint32_t *dst) {
     const uint32_t *pal = hdmi_pal;
     if (!hdmi_game || r < ov_top || r >= ov_bottom) {
         const uint8_t *s = frame8 + r * SCR_W;
@@ -651,6 +677,20 @@ static void __not_in_flash_func(hdmi_line)(uint32_t v_scanline, uint32_t active_
     } else {
         for (int x = 0; x < SCR_W; x++) dst[x] = pal[s[x]];
     }
+}
+
+/* One output line (the driver's interrupt, core 1). */
+static void __not_in_flash_func(hdmi_line)(uint32_t v_scanline, uint32_t active_line, uint32_t *dst) {
+    (void)v_scanline;
+    const int words = out_words, pad = (words - SCR_W) / 2;
+    const int r = ((int)active_line - (out_lines - 2 * SCR_H) / 2) >> 1;
+    const uint32_t black = hdmi_pal[HDMI_BLACK];        /* index 0: black in both palettes */
+    if (r < 0 || r >= SCR_H) {
+        for (int x = 0; x < words; x++) dst[x] = black;
+        return;
+    }
+    for (int x = 0; x < pad; x++) { dst[x] = black; dst[words - 1 - x] = black; }
+    hdmi_picture_line(r, dst + pad);
 }
 
 /* Row y of the scaled game picture as colour indices (no TV blend: an
@@ -702,11 +742,12 @@ void a8_display_init(void) {
     hdmi_pal_332();
     hdmi_wanted = true;
     for (uint32_t t0 = millis(); !hdmi_started && millis() - t0 < 2000; ) delay(1);
-    Serial.printf("[display] HDMI 640x480 %s: sys %lu MHz, HSTX %lu MHz, peri %lu MHz%c",
+    Serial.printf("[display] HDMI %s: sys %lu MHz, HSTX %lu MHz, peri %lu MHz%c",
                   hdmi_ok ? "running" : "FAILED",
                   (unsigned long)(clock_get_hz(clk_sys) / 1000000),
                   (unsigned long)(clock_get_hz(clk_hstx) / 1000000),
                   (unsigned long)(clock_get_hz(clk_peri) / 1000000), 10);
+    a8_display_report();
 }
 
 void a8_display_start(void) {
@@ -761,15 +802,43 @@ static void hdmi_compose(void) {
     push_count++;
 }
 
+/* The serial monitor's V key: the next video mode (core 1 switches). */
+void a8_display_next_hdmi_mode(void) {
+    hdmi_vmode_wanted = (hdmi_vmode + 1) % HDMI_NMODES;
+}
+
+/* At start: how the output is set up - the mode, HSTX's control register,
+ * its clock, the frames sent, and the function of GPIO 12-19 (0 = HSTX). */
+void a8_display_report(void) {
+    char funcs[9];
+    for (int i = 0; i < 8; i++) funcs[i] = (char)('0' + (gpio_get_function(12 + i) & 0x1F) % 10);
+    funcs[8] = 0;
+    Serial.printf("[display] HDMI %s %s, frames %lu, HSTX csr %08lx, clk_hstx %lu Hz, sys %lu Hz, "
+                  "GPIO 12-19 functions %s (0 = HSTX), game %d, scale %d%c",
+                  HDMI_MODES[hdmi_vmode].name, hdmi_ok ? "running" : "NOT RUNNING",
+                  (unsigned long)hdmi.get_frame_count(),
+                  (unsigned long)hstx_ctrl_hw->csr, (unsigned long)clock_get_hz(clk_hstx),
+                  (unsigned long)clock_get_hz(clk_sys), funcs, (int)hdmi_game, (int)hdmi_mode, 10);
+}
+
 /* Core 1, all the time (main.cpp loop1): starts the output when asked, then
  * in a game the overlays once a frame. */
 void a8_display_core1_loop(void) {
-    if (hdmi_wanted && !hdmi_started) {
+    if (hdmi_wanted && (!hdmi_started || hdmi_vmode_wanted != hdmi_vmode)) {
         /* the Fruit Jam's HSTX pins (its variant): CK+ 13, D0+ 15, D1+ 17, D2+ 19 */
         static const pimoroni::DVHSTXPinout pins = { PIN_CKP, { PIN_D0P, PIN_D1P, PIN_D2P } };
+        if (hdmi_started) hdmi.reset();
+        const HdmiMode &m = HDMI_MODES[hdmi_vmode_wanted];
         hdmi.set_scanline_callback(hdmi_line);
-        hdmi_ok = hdmi.init(SCR_W, SCR_H, pimoroni::DVHSTX::MODE_RGB565, false, pins);
+        hdmi_ok = hdmi.init(m.w, m.h, pimoroni::DVHSTX::MODE_RGB565, false, pins);
+        if (hdmi_ok) {
+            out_words = hdmi.get_width() / 2;
+            out_lines = hdmi.get_height();
+        }
+        hdmi_vmode = hdmi_vmode_wanted;
         hdmi_started = true;
+        Serial.printf("[display] HDMI mode %d of %d: %s, %s (%d x %d)%c", hdmi_vmode + 1, HDMI_NMODES,
+                      m.name, hdmi_ok ? "running" : "FAILED", out_words * 2, out_lines, 10);
     }
     composing = true;
     __dmb();

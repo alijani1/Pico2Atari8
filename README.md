@@ -229,7 +229,7 @@ A prototype for the next hardware revision: the Adafruit Fruit Jam (RP2350B)
 has HDMI instead of a TFT, and a TLV320DAC3100 I2S codec instead of the PAM
 amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
 
-- **Picture:** HDMI 640x480 at 60 Hz from the RP2350's HSTX (GPIO 12-19),
+- **Picture:** HDMI 800x480 at 60 Hz from the RP2350's HSTX (GPIO 12-19),
   with Pimoroni's dvhstx driver from Adafruit-DVI-HSTX 2.1.0. Only the
   driver is built (at the end of [src/a8_display.cpp](src/a8_display.cpp)); the
   library's Arduino wrapper and Adafruit GFX are not. There is **no frame
@@ -246,6 +246,11 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
   - The driver's start-up runs clk_sys at 240 MHz (from PLL_USB) and HSTX
     at the exact pixel clock, so `f_cpu` stays at 150 MHz in platformio.ini
     (any other value makes the core move clk_sys back).
+  - The 320x240 picture is doubled to 640x480 in the middle, black bands at
+    the sides. Displays differ in the modes they take: the first one tried
+    showed nothing at 640x480 @ 60 Hz (the usual mode) but 720x400 @ 70 Hz,
+    720x576 @ 50 Hz and 800x480 @ 60 Hz. `A8_HDMI_MODE` picks another at
+    build time; the serial monitor's `V` steps through them live.
   - The emulator (59.92 Hz, paced by the sound) isn't locked to the HDMI
     frame, so a tear line may drift through the picture (a TODO if it shows).
 - **Sound:** arduino-pico's `I2S` at the emulator's 22050 Hz (16-bit
@@ -267,7 +272,8 @@ amp and PWM. `pio run -e fruitjam -t upload`, then open the serial monitor.
 
 The **serial monitor** is a controller too: arrows or `w` `a` `s` `d`
 (joystick 1), space (fire), Enter (START / OK), Esc or `m` (MENU held),
-Tab or `e` (SELECT), `o` (OPTION), `k` (on-screen keyboard). A terminal sends
+Tab or `e` (SELECT), `o` (OPTION), `k` (on-screen keyboard), `V`
+(the next HDMI mode). A terminal sends
 presses, not releases, so a key holds for a moment and its repeat keeps it
 held. Sound keys: `+` / `-` volume, `A` `H` `S` `B` output (auto,
 headphones, speaker, both), `I` audio report.

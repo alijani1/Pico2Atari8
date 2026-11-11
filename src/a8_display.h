@@ -19,5 +19,11 @@ void a8_display_toast(const char *text);   /* message top-left for 2 s (digits, 
 void a8_display_stats(uint32_t *shown, uint32_t *skipped);
 /* Average push time (us) and rows sent per push, since the last call. */
 uint32_t a8_display_push_us(uint32_t *avg_rows);
+#ifdef A8_HDMI
+/* HDMI set-up line on the serial monitor (at start). */
+void a8_display_report(void);
+/* Step to the next HDMI video mode (serial monitor key V). */
+void a8_display_next_hdmi_mode(void);
+#endif
 
 #endif
