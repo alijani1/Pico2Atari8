@@ -28,6 +28,13 @@
 - The Yellow + click message now reads **PADDLE** / **JOYSTICK** (it was cut
   short before).
 
+**5200 games: no dead zone on the thumbstick**
+- The thumbstick now gives a 5200 game its exact position, every bit of
+  movement, as a real 5200 stick does. It used to ignore the first ~15 % of
+  travel. Whichever stick was moved last steers controller 1 (on the Duo
+  5200: the thumbstick or the real controller on port 1). Menus and the
+  on-screen keyboard keep their dead zones.
+
 **Steady full speed**
 - **The emulator's per-scanline work now runs from RAM:** the 6502 CPU
   (with its opcode and cycle tables) and ANTIC, the chip that draws every

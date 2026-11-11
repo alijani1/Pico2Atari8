@@ -151,17 +151,17 @@ static int8_t axis_dir(const JoyAxis &a, int v, int dead_pct = 30) {
 }
 
 /* As a 5200 pot: 6 (left / up) .. 114 (centre) .. 220 (right / down), the
- * travel past a small dead zone spread over the whole range; inside the
- * dead zone A8_POT_NONE (the core then sees the centre). */
+ * stick's position as it is - no dead zone: a game reads every bit of
+ * movement, as from a real 5200 stick. (It had an 8 % dead zone, returning
+ * A8_POT_NONE inside it; dead zones are for the menus and the keyboard,
+ * which use the directions, joycon_read's dead_x_pct.) */
 static const int POT_MIN = 6, POT_CENTRE = 114, POT_MAX = 220;
 static int16_t axis_pot(const JoyAxis &a, int v) {
     int centre, half;
     axis_centre(a, &centre, &half);
-    int dead = half * 8 / 100, d = v - centre;
-    if (d >= -dead && d <= dead) return A8_POT_NONE;
-    int range = half - dead;
-    int p = d > 0 ? POT_CENTRE + (d - dead) * (POT_MAX - POT_CENTRE) / range
-                  : POT_CENTRE + (d + dead) * (POT_CENTRE - POT_MIN) / range;
+    int d = v - centre;
+    int p = d > 0 ? POT_CENTRE + d * (POT_MAX - POT_CENTRE) / half
+                  : POT_CENTRE + d * (POT_CENTRE - POT_MIN) / half;
     if (p < POT_MIN) p = POT_MIN;
     if (p > POT_MAX) p = POT_MAX;
     return (int16_t)p;
@@ -368,19 +368,27 @@ bool a8_input_frame(void) {
             in.stick[n] = 0;
         }
 #endif
-        /* the Joy-Con stands in for controller 1's stick while it's
-         * clearly pushed (past 15 %: a resting one may wander a little)
-         * and controller 1's own stick is at rest (or unplugged) */
+        /* the Joy-Con is controller 1's analog stick, with no dead zone (its
+         * position as it is, axis_pot). Whichever was moved last steers: a
+         * real controller 1 (Duo 5200) or a digital direction (a joystick on
+         * port 1, the Duo's 5-way) takes over while the Joy-Con rests, and
+         * the Joy-Con takes it back once it's clearly pushed (past 15 % -
+         * only to tell a push from a resting stick's wander; not a dead
+         * zone: from then on every bit of its movement counts). (It used to
+         * count only while pushed past 15 %: a dead zone in the game.) */
         in.stick[0] |= five_way();
         int16_t jx, jy;
         nav = in.stick[0] | joycon_read(&jx, &jy);
-        bool pushed = (jx != A8_POT_NONE && (jx < 114 - 16 || jx > 114 + 16)) ||
-                      (jy != A8_POT_NONE && (jy < 114 - 16 || jy > 114 + 16));
+        bool pushed = jx < 114 - 16 || jx > 114 + 16 || jy < 114 - 16 || jy > 114 + 16;
         bool c1_rests = (in.pot[0] == A8_POT_NONE || in.pot[0] == 114) &&
                         (in.pot[1] == A8_POT_NONE || in.pot[1] == 114);
-        if (pushed && c1_rests) {
-            in.pot[0] = jx != A8_POT_NONE ? jx : 114;
-            in.pot[1] = jy != A8_POT_NONE ? jy : 114;
+        bool other_steers = !c1_rests || (in.stick[0] & (A8_UP | A8_DOWN | A8_LEFT | A8_RIGHT));
+        static bool joy_steers = true;
+        if (pushed) joy_steers = true;
+        else if (other_steers) joy_steers = false;
+        if (joy_steers && PIN_JOY_X >= 0) {
+            in.pot[0] = jx;
+            in.pot[1] = jy;
         }
         /* Game Settings > Horizontal center: controller 1's stick x, moved
          * (+ = right) - at rest too, where the core would read 114. Not
