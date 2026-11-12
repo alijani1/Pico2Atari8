@@ -74,12 +74,98 @@ the ESP32's UART get driven.
 
 ## 2. Modules to copy and how they plug in
 
+### Shared code: take these files unchanged
+
+**USB pads / keyboard: Pico2Arcade must NOT write its own HID parser.** The
+whole USB host side - host start, mount / unmount, the HID report-descriptor
+parser, the GamePad / Joystick collection filter, the pad layout, report
+decoding, the SNES-pad exception, unplug recovery, the power-cycle after
+flash writes, the keyboard report - is one self-contained module with no
+emulator in it, used unchanged by Pico2Atari8. Copy these folders as they
+are (and copy any fix back - one parser for both projects):
+
+| Folder | What |
+|---|---|
+| `extern/usb_pads/` | `usb_pads.h` (the API), `usb_pads.cpp` (C++: host, parser, pads), `usb_pads_glue.c` (C: Pico-PIO-USB's sources + TinyUSB's HID mount callbacks) |
+| `extern/pico-pio-usb/` | Pico-PIO-USB 0.7.2, patched (the transfer race, a 12-endpoint pool) |
+| `extern/tinyusb-config/` | `tusb_config_fruitjam.h` (1024-byte enumeration buffer) |
+
+Build (Pico2Arcade env): `-DUSE_TINYUSB`, `-Iextern/usb_pads
+-Iextern/pico-pio-usb -Iextern/tinyusb-config
+-DCFG_TUSB_CONFIG_FILE=\"tusb_config_fruitjam.h\"`, and compile
+`usb_pads.cpp` once as C++ and `usb_pads_glue.c` once as C - as files of
+their own (e.g. `build_src_filter = +<*> +<../extern/usb_pads/>` for that env
+only - not tried), or `#include "usb_pads.cpp"` / `#include "usb_pads_glue.c"` into an
+existing .cpp / .c the way Pico2Atari8 does (src/a8_input.cpp,
+src/a8_stubs.c) if an extra object file disturbs the other boards' builds.
+The glue must be a C file that does not include TinyUSB's headers (they
+declare the HID callbacks weak - section 3, item 7).
+
+Calling it (all from the one core that called `usb_pads_begin` - not the
+HDMI core):
+
+```c
+#include "usb_pads.h"
+static const usb_pads_config_t cfg = USB_PADS_FRUITJAM;   /* D+ 1, 5 V on 11, PIO 2, DMA 11 */
+usb_pads_begin(&cfg);                    /* once, at start-up */
+
+/* every input poll: each emulated frame, each menu loop, any screen with
+ * its own loop (the host's task, the unplug watchdog, the power-cycle) */
+usb_pads_task();
+uint32_t b = usb_pads_buttons(0);        /* USBP_UP/DOWN/LEFT/RIGHT (D-pad, hat),
+                                            USBP_A/B/X/Y/L/R/SELECT/START */
+b |= usb_pads_stick_dirs(0);             /* the left stick as directions (menus) */
+if (usb_pads_analog(0)) {
+    int x = usb_pads_axis(0, 0);         /* -1000 .. +1000 of the range the pad reports */
+    int y = usb_pads_axis(0, 1);
+}
+bool p2 = usb_pads_connected(1);         /* player 2's pad */
+if (usb_pads_keyboard() && usb_pads_kbd_has(0x29)) { /* Esc held (HID usage) */ }
+
+/* after any flash write (interrupts off > 3 ms): */
+usb_pads_power_cycle();
+```
+
+`USBP_B` is the main fire (generic HID button 1), then A, X, Y. Start +
+Select together is a good "menu" combo (Pico2Atari8's). The emulator-side
+mapping (which USBP_ bit is which arcade input, per-game remapping) is
+Pico2Arcade's own; Pico2Atari8's is src/a8_input.cpp (`usb_down`,
+`usb_slots`, `usb_kbd_akey` for the Atari keyboard). Controller-test
+helpers: `usb_pads_ids`, `usb_pads_raw`, `usb_pads_numbers`,
+`usb_pads_axis_raw`, `usb_pads_events`.
+
+**Sound: take Pico2Atari8's `src/pico_audio.cpp` / `pico_audio.h` whole.**
+Pico2Arcade's own pico_audio.cpp is the PWM half of the same file (same
+lineage, same API); Pico2Atari8's API is a strict superset (I2S + TLV320
+codec, HDMI sound ring, menu sound, beep, output switching). Its outside
+needs: `pico_board.h`'s pin table (Pico2Arcade has the same),
+`src/sounds/menu16s8.h` with `A8_MENU_MUSIC`, and with
+`A8_HDMI_AUDIO` one call, `a8_display_hdmi_audio()` (is the HDMI output
+carrying sound), plus `pico_audio_hdmi_take()` being called by the HDMI
+code. The `A8_` macro names (`A8_TLV_OUTPUT`, `A8_SOUND_HDMI`,
+`A8_MENU_MUSIC` ...) are only build flags; keep them so the file stays
+identical in both projects. Not split out further: it was already a
+standalone module.
+
+**HDMI: not a drop-in module.** The HDMI half of src/a8_display.cpp reads
+atari800's `Screen_atari` (8-bit indices, 384 wide), applies the Atari Scale
+modes and composes Atari overlays (FPS, toast, on-screen keyboard) - the
+picture side is emulator-specific, and Galagino's is different (RGB565
+strips). Copy these parts as they are and write the picture callback anew:
+the mode table and `a8_display_core1_loop`'s start / mode-switch / audio
+logic (:1050-1112), `hdmi_audio_feed` (:669), the driver includes and the
+800x600 timing fix at the end (:1114-1154), the `A8Canvas` menu canvas
+(:333), the settings' 10 s mode confirm and button-3 reset. Making it a
+shared module would mean a "source frame" callback API; not done.
+
+### Pico2Atari8 file map
+
 | Module | Pico2Atari8 file | What to take |
 |---|---|---|
 | HDMI output | src/a8_display.cpp:586-1154 (the `#ifdef A8_HDMI` half) | The scanline callback, the mode table, the core-1 loop, the menu canvas, the dvhstx includes at the end |
 | Codec + I2S sound | src/pico_audio.cpp:16-414 (the `#ifdef PICO_FRUITJAM` block) | Drops into Pico2Arcade's pico_audio.cpp: same lineage, same API (its PWM half is the `#else`) |
 | Menu sound / beep | src/pico_audio.cpp:584-711, src/sounds/menu16s8.h | Every board |
-| USB host | src/a8_input.cpp:291-960, src/a8_stubs.c:26-41, extern/pico-pio-usb, extern/tinyusb-config | Parser and pad state are emulator-independent; the mapping to the machine is not |
+| USB host | extern/usb_pads, extern/pico-pio-usb, extern/tinyusb-config (unchanged - above); the Atari mapping in src/a8_input.cpp:290-573 | Never a second parser |
 | SD card | src/pico_romfs.cpp:363-625 (`#ifdef A8_SD`) | Pico2Arcade's pico_romfs.cpp is the same lineage |
 | USB drive mode | src/pico_drive.cpp (card part: :77-103, :217-345) | Pico2Arcade's pico_drive.cpp is the same lineage |
 | Flash writes | src/a8_flash.cpp:51 | The QMI restore and the USB power-cycle hook |
@@ -90,7 +176,7 @@ In Pico2Atari8 an extra object file (even an empty one) reorders the linker's
 veneers in the *other* boards' builds (chain-booted slot builds), so new code
 goes into existing files: the dvhstx driver is `#include`d at the end of
 src/a8_display.cpp:1122-1154, Pico-PIO-USB's C and the HDMI audio packet code
-into src/a8_stubs.c:22-34. Check whether Pico2Arcade has the same issue
+into src/a8_stubs.c:16-40. Check whether Pico2Arcade has the same issue
 before adding files.
 
 ### HDMI: the scanline-callback contract
@@ -186,7 +272,7 @@ build's existing 288 -> 240 downscale doubled to 480.
   before USB works.
 - USB pad buttons map onto **virtual pins** that the existing per-game
   mapping (Game Settings slots) already reads, so the USB pad reuses the
-  Joy-Con / DB9 mapping code (`usb_slots`, src/a8_input.cpp:917; `usb_down`).
+  Joy-Con / DB9 mapping code (`usb_slots`, `usb_down` in src/a8_input.cpp).
   Don't build a second mapping path.
 
 ---
@@ -235,7 +321,7 @@ the feed from the emulator's frame loop or from core 0.
    - Fix: host moved to **core 0**, `usb_host.begin(1)` called on core 0 (the
      alarm pool is made on the calling core), then
      `irq_set_priority(timer_hardware_alarm_get_irq_num(timer0_hw, 2),
-     PICO_HIGHEST_IRQ_PRIORITY)` (src/a8_input.cpp:666-687). The race patch
+     PICO_HIGHEST_IRQ_PRIORITY)` (`usb_pads_begin`, extern/usb_pads/usb_pads.cpp). The race patch
      stays in the vendored copy: start + clear inside
      `save_and_disable_interrupts()` (extern/pico-pio-usb/pio_usb.c:90-99).
    - Cost: TinyUSB's enumeration waits (150 ms debounce, resets, retries)
@@ -246,8 +332,8 @@ the feed from the emulator's frame loop or from core 0.
    > 3 ms, devices **suspend**. The SNES pad never woke properly (kept
    repeating its last report). Diagnosed when toggling the FPS display (a
    saved setting) killed the pad. Fix: after each flash write switch the
-   ports' 5 V off for 300 ms and back on (`a8_input_usb_flash_written`,
-   src/a8_input.cpp:702, called from src/a8_flash.cpp:51) - a replug to the
+   ports' 5 V off for 300 ms and back on (`usb_pads_power_cycle`,
+   extern/usb_pads/usb_pads.cpp, via `a8_input_usb_flash_written` called from src/a8_flash.cpp:51) - a replug to the
    host; devices re-enumerate in about half a second. Several writes in a
    row give one power cycle, timed from the last.
 3. **Flash writes and other subsystems** (all in src/a8_flash.cpp):
@@ -269,7 +355,7 @@ the feed from the emulator's frame loop or from core 0.
    new device is seen. A gone pad fails every request (report callback with
    `len == 0`; an idle pad NAKs instead and produces no callback). Fix: a
    pad whose reports fail for **500 ms** is taken as unplugged and the ports
-   are power-cycled as in 2 (src/a8_input.cpp:709-735). Confirmed: "unplug
+   are power-cycled as in 2 (`usb_pads_task`, extern/usb_pads/usb_pads.cpp). Confirmed: "unplug
    works now, it recovers".
 5. **Controller test froze on Start+Select.** The host task is not on an
    IRQ: it runs only when called. A screen with its own input loop didn't
@@ -282,7 +368,7 @@ the feed from the emulator's frame loop or from core 0.
    `tuh_hid_mount_cb` / `tuh_hid_umount_cb` weak, which made our
    definitions in a file including that header weak too, and the linker
    took Adafruit's empty ones. Fix: define them in a file that doesn't
-   include it (src/a8_stubs.c:36-41) and forward.
+   include it (extern/usb_pads/usb_pads_glue.c) and forward.
 8. **Second TinyUSB.** Fetching Pico-PIO-USB as a PlatformIO library pulled
    in another Adafruit TinyUSB that replaced the core's. Fix: vendor
    Pico-PIO-USB 0.7.2 into extern/pico-pio-usb (with its LICENSE) and
@@ -311,7 +397,9 @@ your own PIO/DMA use against those.
 
 ## 4. USB host lessons (pads)
 
-All in src/a8_input.cpp:291-960; the Controller test screen
+All of these are already in extern/usb_pads/usb_pads.cpp (the shared module
+- section 2); they are here so nobody "simplifies" them away. The
+Controller test screen
 (src/a8_ctltest.cpp:167, `draw_usb`) shows both pads' IDs, raw reports and
 button numbers - build it early, it diagnosed most of these.
 
@@ -325,7 +413,7 @@ button numbers - build it early, it diagnosed most of these.
   `L = PadLayout()` in the parser). An empty descriptor left stack garbage
   as the layout: the menus were stuck on UP.
 - **Parse only inside Generic Desktop Joystick (0x04) / GamePad (0x05)
-  application collections** (`hid_parse_layout`, src/a8_input.cpp:397): X
+  application collections** (`hid_parse_layout`, extern/usb_pads/usb_pads.cpp): X
   (0x30), Y (0x31), hat (0x39), buttons 1-16, input data-variable fields of
   the first report ID that has any. A combo device's mouse X/Y and keyboard
   are not a pad.
@@ -333,8 +421,8 @@ button numbers - build it early, it diagnosed most of these.
   pad). A pad's second "reports only" interface was taken as pad 2 and stole
   the player slot.
 - **Use the range the device reports.** Axes are normalised from the
-  descriptor's logical min/max to -1000..1000 (`usb_axis_norm`,
-  src/a8_input.cpp:875) and fed to the same paths as the Joy-Con / pots
+  descriptor's logical min/max to -1000..1000 (`usb_pads_axis`,
+  extern/usb_pads/usb_pads.cpp) and fed to the same paths as the Joy-Con / pots
   (analog paddles, 5200 pots); directions from the stick with a 30% dead
   zone. Don't apply Joy-Con-style range learning to USB.
 - **Button numbering**: generic button 1 = the main fire (B's slot), 2 = A,

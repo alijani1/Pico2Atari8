@@ -26,19 +26,17 @@
 /* (Not atari800 either:) Pico-PIO-USB, the Fruit Jam's USB host ports'
  * driver (extern/pico-pio-usb, on the include path) - here for the same
  * reason. a8_input.cpp has the rest. */
-#include "pio_usb.c"
-#include "pio_usb_host.c"
-#include "pio_usb_device.c"
-#include "usb_crc.c"
+/* (Now with the shared usb_pads module's C side - extern/usb_pads, also
+ * Pico2Arcade's - which has the four files below.) */
+/* #include "pio_usb.c"
+ * #include "pio_usb_host.c"
+ * #include "pio_usb_device.c"
+ * #include "usb_crc.c" */
 /* TinyUSB's HID mount / unmount callbacks, defined here - not in
  * a8_input.cpp, whose TinyUSB header declares them weak (that made its
- * definitions weak, and Adafruit's empty ones were linked instead). */
-void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, uint16_t desc_len);
-void a8_usb_hid_umount(uint8_t dev, uint8_t idx);
-void tuh_hid_mount_cb(uint8_t dev, uint8_t idx, uint8_t const *desc, uint16_t desc_len) {
-    a8_usb_hid_mount(dev, idx, desc, desc_len);
-}
-void tuh_hid_umount_cb(uint8_t dev, uint8_t idx) { a8_usb_hid_umount(dev, idx); }
+ * definitions weak, and Adafruit's empty ones were linked instead).
+ * (Now in usb_pads_glue.c, for the same reason.) */
+#include "usb_pads_glue.c"
 #endif
 
 int Devices_enable_h_patch = FALSE;

@@ -315,7 +315,9 @@ HDMI interrupt broke its transfers). Not through the serial monitor: held
 exactly as long as the button or key is. After a flash write (a game's
 unpack, a settings save) the ports' 5 V is cycled: a pad suspends while
 the host is silent and didn't wake properly, so it reconnects instead
-(about half a second).
+(about half a second). The host, the HID parser and the pads' state are the
+`extern/usb_pads` module, shared unchanged with Pico2Arcade
+(docs/FRUITJAM_PORTING.md); src/a8_input.cpp maps it onto the Atari.
 
 | USB gamepad (SNES-style) | Game | Menus |
 |---|---|---|
