@@ -2,6 +2,30 @@
 
 Ideas parked for later, newest first.
 
+## Fruit Jam: open items after HDMI / sound / USB pads / SD (parked 2026-11-11)
+
+Done on the `fruitjam-sound` branch and confirmed on hardware: HDMI sound and
+screen modes, menu music and beeps, USB gamepads (generic HID, analog, pad 2,
+unplug recovery), games from the microSD card, and the card in USB drive mode.
+Still open:
+
+1. **Disk writes to the SD card.** ATRs on the card are read-only (loaded into
+   PSRAM, or streamed for big ones). Write back changed sectors to the card's
+   file (TODO in src/pico_romfs.cpp, the A8_SD block).
+2. **USB keyboard test.** The keyboard path (src/a8_input.cpp `usb_key`,
+   F-keys) is built but untested on hardware.
+3. **Learn mode for pad buttons.** Generic HID pads number their buttons
+   freely (the Quad in controller mode sends Red as button 1). Press each slot's
+   button once to map it, per device (VID:PID), instead of the fixed
+   1=B 2=A 3=X 4=Y order.
+4. **Other boards with the shared changes.** Quad, Duo 5200, Duo, duo_tiny:
+   menu beeps, Volume in Game Settings, menu sound running in the menus
+   (amp hiss?), and Eject on the PC now restarting drive mode.
+5. **Slot UF2 drag-drop.** Check that the `picotool --abs-block` slot UF2s
+   (quad / duo5200 / duo) write only their slot on a BOOTSEL drag-drop.
+6. **SD speed.** Big copies over SPI at 25 MHz; try SDIO (`A8_SD_SDIO`) on the
+   Fruit Jam's slot pins.
+
 ## Joy-Con paddle mode: make it discoverable (parked 2026-11-10) - DONE in 2.1
 
 Done by Game Settings (src/a8_gamecfg.cpp): the Thumbstick row (Joystick /
