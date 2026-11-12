@@ -36,10 +36,35 @@ enum { A8B_RED, A8B_GREEN, A8B_BLUE, A8B_YELLOW, A8B_START, A8B_SELECT, A8B_CLIC
        A8B_COUNT };
 void    a8_input_joycon_diag(int raw[2], int centre[2], int lo[2], int hi[2], int16_t pot[2]);
 bool    a8_input_button(int which);
+#ifdef A8_USB_HOST
+/* The Fruit Jam's USB host ports (a8_input.cpp): the task (core 0: the
+ * input polling calls it; a8_input_init starts the host); and for
+ * Controller test, what is plugged in and held. */
+void    a8_input_usb_task(void);
+/* After a flash write (a8_flash.cpp): the ports are power-cycled. */
+void    a8_input_usb_flash_written(void);
+enum { A8U_UP = 1, A8U_DOWN = 2, A8U_LEFT = 4, A8U_RIGHT = 8, A8U_A = 16, A8U_B = 32, A8U_X = 64,
+       A8U_Y = 128, A8U_L = 256, A8U_R = 512, A8U_SELECT = 1024, A8U_START = 2048,
+       A8U_OPTION = 4096, A8U_MENU = 8192 };    /* (the last two: the keyboard's F2, F12) */
+struct A8UsbDiag {
+    bool pad[2], keyboard;        /* player 1's, player 2's pad */
+    uint16_t vid[2], pid[2];
+    uint32_t buttons[2];          /* A8U_* */
+    uint16_t numbers[2];          /* its buttons 1-16 held (bit n - 1; read by its layout) */
+    uint8_t raw[2][16], raw_len[2];   /* their last reports */
+    uint8_t kbd[8];               /* the keyboard's last report */
+    int key;                      /* the Atari key it types now, or -1 */
+};
+void    a8_input_usb_diag(A8UsbDiag *d);
+#endif
 uint8_t a8_input_port_dirs(int n, bool *fire);
 int     a8_input_num_ports(void);
 /* The Duo Ultimate's 5-way (A8_UP ... directions; *press = its press);
  * 0 / false elsewhere. */
 uint8_t a8_input_five_way(bool *press);
+#if defined(PICO_FRUITJAM) && defined(A8_HEADLESS)
+/* The Fruit Jam's button 3 was pressed: go to the next game (headless). */
+bool    a8_input_next_game(void);
+#endif
 
 #endif

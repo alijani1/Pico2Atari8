@@ -17,6 +17,10 @@
  *                            keyboard's DRV: off 1.5 s after the game stops
  *                            reading the disk, a8_drive1_auto_off_poll)
  *   Reset to defaults
+ *   Volume (all games)       as Settings > Volume, and the Fruit Jam's Sound
+ *   Sound (all games)        output: settings for every game, here too so a
+ *                            game needn't be left for them (at the top;
+ *                            Reset leaves them)
  *
  * Blue, START, SELECT, MENU and the sticks stay as they are. Opened from
  * the game list (Green on a game) or in a game (Blue, then the gear key);
@@ -31,6 +35,7 @@
 #include "a8_input.h"
 #include "a8_osk.h"
 #include "a8_platform.h"
+#include "pico_audio.h"
 
 extern "C" {
 #include "akey.h"
@@ -53,6 +58,10 @@ static const uint8_t CHOICES_5200[] = { A8_ACT_FIRE, A8_ACT_TOP_FIRE, AKEY_5200_
 #ifdef PICO_DUO
 static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Red", "Green", "Yellow", "5-way press",
                                                      "Left side", "Right side", "Blue" };
+#elif defined(PICO_FRUITJAM)
+/* the USB pad's buttons (A also the Fruit Jam's button 1) */
+static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Pad B / Button 1", "Pad A", "Pad X", "Click",
+                                                     "Pad L", "Pad R", "Pad Y" };
 #else
 static const char *const SLOT_NAMES[A8_GB_COUNT] = { "Red", "Green", "Yellow", "Thumbstick click",
                                                      "Left side button", "Right side button", "Blue" };
@@ -62,7 +71,8 @@ static const int SLOT_ORDER[A8_GB_COUNT] = { A8_GB_RED, A8_GB_GREEN, A8_GB_YELLO
                                              A8_GB_CLICK, A8_GB_SIDE_L, A8_GB_SIDE_R };
 
 /* The rows: a button slot (0 .. A8_GB_COUNT - 1), or one of these. */
-enum { ROW_STICK = 20, ROW_PADDLE_OFS, ROW_MACHINE, ROW_SCALE, ROW_DRIVE, ROW_RESET, ROW_BACK };
+enum { ROW_STICK = 20, ROW_PADDLE_OFS, ROW_MACHINE, ROW_SCALE, ROW_DRIVE, ROW_RESET, ROW_BACK,
+       ROW_VOLUME, ROW_SOUND };
 
 #ifdef PICO_TINY_SCREEN
 static const int ROW_H = 10, LIST_Y = 10, SHOWN = 7, PANEL_W = 160, PANEL_H = 80, FONT = 1, TEXT_X = 2;
@@ -76,7 +86,7 @@ static const uint16_t COL_BG = TFT_BLACK, COL_TEXT = TFT_WHITE, COL_SEL_BG = 0x2
                       COL_TITLE = 0xFD20, COL_HINT = TFT_DARKGREY, COL_VALUE = 0x07FF,
                       COL_CHANGED = 0xFD20, COL_KEY = 0x39E7;
 
-static int rows[A8_GB_COUNT + 8], n_rows = 0, first_shown = 0;
+static int rows[A8_GB_COUNT + 10], n_rows = 0, first_shown = 0;
 static bool g5200 = false, g_in_game = false;
 static const char *g_name = "";
 
@@ -125,6 +135,12 @@ static void value_text(int row, char *buf, size_t cap, bool *changed) {
         return;
     }
     switch (row) {
+    case ROW_VOLUME:
+        snprintf(buf, cap, "%d%%", pico_audio_get_volume_pct());
+        return;
+    case ROW_SOUND:
+        snprintf(buf, cap, "%s", a8_settings_sound_name(a8_settings.sound_out));
+        return;
     case ROW_STICK:
         snprintf(buf, cap, "%s", a8_settings_game_paddle() ? "Paddle" : "Joystick");
         *changed = a8_settings_game_paddle();
@@ -163,6 +179,8 @@ static void value_text(int row, char *buf, size_t cap, bool *changed) {
 static const char *row_name(int row) {
     if (row < A8_GB_COUNT) return SLOT_NAMES[row];
     switch (row) {
+    case ROW_VOLUME: return "Volume (all games)";
+    case ROW_SOUND: return "Sound (all games)";
     case ROW_STICK: return "Thumbstick";
     case ROW_PADDLE_OFS: return g5200 ? "Horizontal center" : "Paddle center";
     case ROW_MACHINE: return "Machine";
@@ -370,6 +388,10 @@ void a8_gamecfg_screen(const char *name, bool is5200, bool in_game, bool has_dis
     g_in_game = in_game;
     g_name = name ? name : "";
     n_rows = 0;
+    rows[n_rows++] = ROW_VOLUME;                          /* (for every game: first, quick to reach) */
+#ifdef PICO_FRUITJAM
+    rows[n_rows++] = ROW_SOUND;
+#endif
     for (int s : SLOT_ORDER) if (a8_input_has_slot(s)) rows[n_rows++] = s;
     if (!is5200 && a8_input_has_joycon()) { rows[n_rows++] = ROW_STICK; rows[n_rows++] = ROW_PADDLE_OFS; }
     if (is5200) rows[n_rows++] = ROW_PADDLE_OFS;          /* "Horizontal center" */
@@ -407,6 +429,12 @@ void a8_gamecfg_screen(const char *name, bool is5200, bool in_game, bool has_dis
                 rep = Repeat();
                 continue;
             }
+        } else if (row == ROW_VOLUME && dir) {
+            a8_settings_volume_step(dir);
+            draw_row(sel, true);
+        } else if (row == ROW_SOUND && (dir || (p & A8M_OK))) {
+            a8_settings_sound_step(dir ? dir : 1);
+            draw_row(sel, true);
         } else if (row == ROW_STICK && (dir || (p & A8M_OK))) {
             a8_settings_set_game_paddle(!a8_settings_game_paddle());
             draw_row(sel, true);

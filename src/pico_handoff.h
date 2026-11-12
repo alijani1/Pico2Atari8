@@ -36,6 +36,11 @@ extern "C" {
  * for reads only, so USB ROM drive mode needs it to write the drive. */
 #define HANDOFF_SCRATCH_HOST    0
 #define HANDOFF_HOST_QUAD_TAG   0x51AD0000u
+/* Headless test build (A8_HEADLESS, the Fruit Jam), standalone: scratch[2]
+ * = this tag | the index of the game to start (button 3: the next one). Not
+ * the Quad's FATOFS: that is read only after the Quad's tag in scratch[0]. */
+#define HANDOFF_SCRATCH_GAME    2
+#define HANDOFF_GAME_TAG        0x6A4D0000u
 
 /* scratch[1] bits 8..15 = option flags, carried both ways with the volume
  * (Quad host: saved in its settings, so they survive power-off). */

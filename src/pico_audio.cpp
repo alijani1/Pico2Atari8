@@ -1,9 +1,418 @@
 /* pico_audio.cpp — PWM audio implementation. */
+/* (PICO_FRUITJAM: I2S to the Fruit Jam's TLV320DAC3100 instead - the first
+ * block below; the PWM code is the #else.) */
 
 #include <Arduino.h>
+#ifdef PICO_FRUITJAM
+#include <I2S.h>
+#include <hardware/clocks.h>
+#include <PicoTlv320.hpp>
+#else
 #include <PWMAudio.h>
+#endif
 #include "pico_audio.h"
 #include "pico_board.h"
+
+#ifdef PICO_FRUITJAM
+/* ---- I2S + TLV320DAC3100 (Adafruit Fruit Jam) ----------------------------
+ *
+ * arduino-pico's I2S class (the same AudioBufferManager ring as PWMAudio,
+ * DMA_IRQ_0) sends 16-bit stereo frames - the mono sample in both halves -
+ * at the emulator's rate: BCLK = 32 x rate (22050 Hz: 705.6 kHz). The codec
+ * has no MCLK; its PLL runs from BCLK, so the codec is configured once BCLK
+ * runs. Its driver is PicoMultiTrackAudio's PicoTlv320 (only that: the
+ * Impl header below, none of the mixer), on the SDK's I2C, not Wire.
+ *
+ * At 200 MHz no PIO divider is exact at 22050 Hz (22050 has factors 3 and
+ * 7), so BCLK has fractional jitter; -DA8_SAMPLE_RATE=25000 gives an exact
+ * divider (125) to compare on the bench.
+ *
+ * Volume stays in the sample path (the same curve as PWM); the codec sits
+ * at fixed levels. Amp on / off = the DAC's soft mute (no pop). Output:
+ * headphones while some are plugged in, else the speaker (A8_TLV_OUTPUT
+ * forces 1 headphones, 2 speaker, 3 both; serial keys, main.cpp). */
+#include <PicoTlv320Impl.hpp>          /* the driver's code: in this one file */
+#ifdef A8_HDMI_AUDIO
+#include "a8_display.h"                  /* sound over HDMI (a8_display.cpp) */
+#endif
+
+#ifndef A8_I2S_BCLK_PIN
+#define A8_I2S_BCLK_PIN 26             /* WS = 27 (BCLK + 1) */
+#endif
+#ifndef A8_I2S_DATA_PIN
+#define A8_I2S_DATA_PIN 24             /* DIN to the codec */
+#endif
+#ifndef A8_TLV_SDA_PIN
+#define A8_TLV_SDA_PIN 20              /* I2C0, shared with STEMMA QT and HDMI DDC */
+#endif
+#ifndef A8_TLV_SCL_PIN
+#define A8_TLV_SCL_PIN 21
+#endif
+#ifndef A8_TLV_RESET_PIN
+#define A8_TLV_RESET_PIN 22            /* also the ESP32-C6's EN: resets it too */
+#endif
+#ifndef A8_TLV_OUTPUT
+#define A8_TLV_OUTPUT 0                /* 0 auto (headset detect), 1 HP, 2 speaker, 3 both */
+#endif
+
+static I2S g_i2s(OUTPUT);
+static PicoTlv320 g_codec;
+static bool     g_codec_ok = false;
+static bool     g_started    = false;
+static int      g_sample_rate = 0;
+static bool     g_amp_on = false;      /* unmuted (wanted); kept across suspend */
+static int      g_output_mode = A8_TLV_OUTPUT;
+// Volume 0..100 %, applied as gain = pct² / 10000 — the same perceptual
+// curve PicoCartReader uses, so a given % sounds the same in both.
+static volatile int g_volume_pct = 50;    /* default 50 %: full is too loud */
+static volatile int g_gain       = 10000;   // pct², 0..10000
+
+/* Health, reported every 5 s (pico_audio_report). */
+static volatile uint32_t g_underruns = 0;      /* pushes that found the ring had run dry */
+static volatile uint32_t g_stretched = 0;      /* samples played twice (ring under half) */
+static volatile int      g_min_queued = 1 << 30;
+
+#ifdef A8_HDMI_AUDIO
+/* Sound over HDMI instead (serial key O, or A8_SOUND_HDMI from start-up):
+ * the same samples go into this ring instead of the I2S one, and core 1
+ * (a8_display.cpp) takes them two at a time into HDMI audio packets at
+ * 44100 Hz. The emulator is paced by this ring as by the I2S one. I2S is
+ * stopped and the codec muted meanwhile: two outputs would run off two
+ * clocks (the crystal, the HDMI pixel clock) and drift apart. */
+static const int HDMI_RING = 512;                      /* 23 ms; the packet queue adds 18 */
+static int16_t   g_hring[HDMI_RING];
+static volatile uint32_t g_hhead = 0, g_htail = 0;     /* core 0 writes, core 1 reads */
+static volatile bool g_hdmi = false;
+/* Before pico_audio_init: where the sound is to go (Settings > Sound
+ * output); the HDMI output carries sound packets all along (a8_display.cpp),
+ * so switching never restarts it. */
+#ifndef A8_SOUND_HDMI
+#define A8_SOUND_HDMI 0                  /* 1: sound over HDMI from start-up */
+#endif
+static bool g_hdmi_wanted = A8_SOUND_HDMI;
+#endif
+
+static void i2s_start(int rate) {
+    g_i2s.setBCLK(A8_I2S_BCLK_PIN);
+    g_i2s.setDATA(A8_I2S_DATA_PIN);
+    g_i2s.setBitsPerSample(16);
+    // 8 buffers × 128 words = 1024 samples, as PWMAudio (see below).
+    g_i2s.setBuffers(8, 128);
+    bool ok = g_i2s.begin(rate);
+    uint32_t sys = clock_get_hz(clk_sys), bclk = (uint32_t)rate * 32;
+    Serial.printf("[audio] I2S %s: %d Hz, BCLK %lu Hz (GPIO %d, WS %d, DIN %d), "
+                  "PIO divider %.4f (sys %lu MHz)\n",
+                  ok ? "running" : "FAILED", rate, (unsigned long)bclk, A8_I2S_BCLK_PIN,
+                  A8_I2S_BCLK_PIN + 1, A8_I2S_DATA_PIN, (double)sys / (2.0 * bclk),
+                  (unsigned long)(sys / 1000000));
+}
+
+static PicoTlv320::Output wanted_output(void) {
+    if (g_output_mode) return (PicoTlv320::Output)g_output_mode;
+    PicoTlv320::Headset h = g_codec.headset();
+    return (h == PicoTlv320::HEADSET_NONE || h == PicoTlv320::HEADSET_UNKNOWN)
+           ? PicoTlv320::OUTPUT_SPEAKER : PicoTlv320::OUTPUT_HEADPHONE;
+}
+
+static const char *output_name(int o) {
+    static const char *const n[4] = { "none", "headphones", "speaker", "speaker + headphones" };
+    return n[o & 3];
+}
+
+extern "C" void pico_audio_init(int sample_rate) {
+    if (g_started && sample_rate == g_sample_rate) return;
+    if (g_started) {                    /* rate change: the codec's clocks too */
+        g_codec.powerDown();
+        g_i2s.end();
+    } else {
+        PicoTlv320::busBegin(i2c0, A8_TLV_SDA_PIN, A8_TLV_SCL_PIN);
+        g_codec_ok = g_codec.begin(i2c0, PicoTlv320::DEFAULT_ADDRESS, A8_TLV_RESET_PIN);
+        Serial.printf("[audio] TLV320DAC3100 at 0x%02x: %s\n", PicoTlv320::DEFAULT_ADDRESS,
+                      g_codec_ok ? "found" : "NOT FOUND");
+    }
+    i2s_start(sample_rate);             /* BCLK first: the codec's PLL locks to it */
+    g_sample_rate = sample_rate;
+    g_started = true;
+    if (!g_codec_ok) return;
+    if (!g_codec.configure((uint32_t)sample_rate * 32, (uint32_t)sample_rate)) {
+        Serial.println("[audio] codec configure FAILED (no clock solution?)");
+        return;
+    }
+    const PicoTlv320Clocks &c = g_codec.clocks();
+    Serial.printf("[audio] codec PLL P %u R %u J %u = %lu Hz, NDAC %u MDAC %u DOSR %u\n",
+                  c.p, c.r, c.j, (unsigned long)c.pllHz, c.ndac, c.mdac, c.dosr);
+    g_codec.enableHeadsetDetect(true);
+    PicoTlv320::Output o = wanted_output();
+    g_codec.setOutput(o);
+    g_codec.setMute(!g_amp_on);
+    Serial.printf("[audio] output: %s (%s)\n", output_name(o), g_output_mode ? "fixed" : "auto");
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi_wanted && a8_display_hdmi_audio()) {   /* HDMI has the sound from the start */
+        g_codec.setMute(true);
+        g_i2s.end();
+        g_hhead = g_htail = 0;
+        g_hdmi = true;
+        Serial.printf("[audio] sound: HDMI (44100 Hz)%c", 10);
+    }
+#endif
+}
+
+/* Flash writes: I2S off (its DMA can't ride out interrupts off, as PWM's),
+ * the codec muted first so BCLK stopping isn't heard; it keeps its setup,
+ * and its PLL locks again once BCLK is back. */
+extern "C" void pico_audio_suspend(void) {
+    if (!g_started) return;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) return;                  /* I2S is stopped (HDMI has the sound) */
+#endif
+    if (g_codec.ready()) {
+        g_codec.setMute(true);
+        delay(10);                       /* soft-step mute: up to ~128 samples (6 ms) */
+    }
+    g_i2s.end();
+}
+extern "C" void pico_audio_resume(void) {
+    if (!g_started) return;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) return;
+#endif
+    i2s_start(g_sample_rate);
+    if (g_codec.ready() && g_amp_on) {
+        delay(10);                       /* PLL lock (typically 10 ms) */
+        g_codec.setMute(false);
+    }
+}
+
+extern "C" void pico_audio_set_sample_rate(int sample_rate) {
+    pico_audio_init(sample_rate);
+}
+
+/* As the PWM version below (the stretch while the ring is under half full,
+ * and the DC blocker - see there), but each sample goes out as one stereo
+ * word (it in both halves), written a block at a time. In RAM: it runs for
+ * every sample, and from flash its loop would compete with the emulator's
+ * per-scanline code for the XIP cache (config.h, A8_RAM). */
+static const int RING_SAMPLES = 8 * 128;               /* setBuffers(8, 128): a word = a frame = a sample */
+static int32_t  g_dc_x1 = 0, g_dc_y1 = 0;              /* DC blocker: last in, last out (x256) */
+static uint32_t g_stretch_acc = 0;                     /* 16.16: due extra samples */
+
+#ifdef A8_HDMI_AUDIO
+/* The same as below, into the HDMI ring (amp off: silence). */
+static size_t __not_in_flash_func(push_hdmi)(const int16_t *samples, size_t nsamp) {
+    size_t written = 0;
+    uint32_t head = g_hhead;
+    int queued = (int)(head - g_htail);
+    int room = HDMI_RING - queued;
+    if (queued < g_min_queued) g_min_queued = queued;
+    uint32_t step = queued < HDMI_RING / 2
+        ? (uint32_t)(HDMI_RING / 2 - queued) * (65536 / 2) / (HDMI_RING / 2)
+        : 0;
+    const int32_t gain = g_amp_on ? g_gain : 0;
+    while (written < nsamp && room > 0) {
+        int32_t x = samples[written];
+        g_dc_y1 += ((x - g_dc_x1) << 8) - (g_dc_y1 >> 10);   /* y = x - x1 + (1 - 1/1024) y1 */
+        g_dc_x1 = x;
+        int32_t s = (g_dc_y1 >> 8) * gain / 10000;
+        if (s >  32767) s =  32767;
+        if (s < -32768) s = -32768;
+        g_hring[head++ % HDMI_RING] = (int16_t)s;
+        room--;
+        written++;
+        g_stretch_acc += step;
+        if (g_stretch_acc >= 65536) {
+            g_stretch_acc -= 65536;
+            if (room > 0) { g_hring[head++ % HDMI_RING] = (int16_t)s; room--; g_stretched++; }
+        }
+    }
+    __dmb();                             /* the samples before the index (core 1 reads) */
+    g_hhead = head;
+    return written * 2;
+}
+
+/* Core 1 (a8_display.cpp): up to n samples out of the HDMI ring. */
+extern "C" size_t __not_in_flash_func(pico_audio_hdmi_take)(int16_t *dst, size_t n) {
+    uint32_t tail = g_htail, avail = g_hhead - tail;
+    __dmb();
+    if (avail < n) return 0;
+    for (size_t i = 0; i < n; i++) dst[i] = g_hring[tail++ % HDMI_RING];
+    g_htail = tail;
+    return n;
+}
+
+/* Sound to HDMI or back to the Fruit Jam's codec. */
+extern "C" void pico_audio_set_hdmi(int on_) {
+    const bool on = on_ != 0;
+    if (on == g_hdmi || !g_started) return;
+    if (on) {
+        if (!a8_display_hdmi_audio()) {  /* (the output carries sound: nothing to restart) */
+            Serial.printf("[audio] HDMI sound: not in this HDMI mode%c", 10);
+            return;
+        }
+        if (g_codec.ready()) { g_codec.setMute(true); delay(10); }
+        g_i2s.end();
+        g_hhead = g_htail = 0;
+        g_hdmi = true;
+    } else {
+        g_hdmi = false;                  /* nothing more into the ring: HDMI sends silence */
+        i2s_start(g_sample_rate);
+        if (g_codec.ready() && g_amp_on) { delay(10); g_codec.setMute(false); }
+    }
+    g_min_queued = 1 << 30;
+    g_stretched = 0;
+    Serial.printf("[audio] sound: %s%c", g_hdmi ? "HDMI (44100 Hz)" : "Fruit Jam", 10);
+}
+extern "C" void pico_audio_toggle_hdmi(void) { pico_audio_set_hdmi(!g_hdmi); }
+#endif
+
+/* (pico_audio_push_s16 is at the end: it mixes the beep in, then this) */
+static size_t __not_in_flash_func(push_s16_raw)(const void *data, size_t bytes) {
+    if (!g_started || bytes < 2) return 0;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) return push_hdmi((const int16_t *)data, bytes / 2);
+#endif
+    if (g_i2s.getUnderflow()) g_underruns++;           /* the DMA found no buffer: silence played */
+    const int16_t *samples = (const int16_t *)data;
+    size_t nsamp = bytes / 2, written = 0;
+    int room = g_i2s.availableForWrite() / 4;
+    int queued = RING_SAMPLES - room;
+    if (queued < g_min_queued) g_min_queued = queued;
+    uint32_t step = queued < RING_SAMPLES / 2
+        ? (uint32_t)(RING_SAMPLES / 2 - (queued < 0 ? 0 : queued)) * (65536 / 2) / (RING_SAMPLES / 2)
+        : 0;
+    uint32_t block[64];
+    int nb = 0;
+    while (written < nsamp && room > 0) {
+        int32_t x = samples[written];
+        g_dc_y1 += ((x - g_dc_x1) << 8) - (g_dc_y1 >> 10);   /* y = x - x1 + (1 - 1/1024) y1 */
+        g_dc_x1 = x;
+        int32_t s = (g_dc_y1 >> 8) * g_gain / 10000;
+        if (s >  32767) s =  32767;
+        if (s < -32768) s = -32768;
+        uint32_t w = (uint16_t)s | ((uint32_t)(uint16_t)s << 16);
+        block[nb++] = w;
+        room--;
+        written++;
+        g_stretch_acc += step;
+        if (g_stretch_acc >= 65536) {
+            g_stretch_acc -= 65536;
+            if (room > 0) { block[nb++] = w; room--; g_stretched++; }
+        }
+        if (nb >= 63) { g_i2s.write((const uint8_t *)block, nb * 4); nb = 0; }
+    }
+    if (nb) g_i2s.write((const uint8_t *)block, nb * 4);
+    return written * 2;
+}
+
+extern "C" void pico_audio_amp_on(void) {
+    g_amp_on = true;
+    /* the health counts start here: before it (the machine starting, a
+     * pause) the ring ran dry on purpose */
+    g_i2s.getUnderflow();
+    g_underruns = 0;
+    g_stretched = 0;
+    g_min_queued = 1 << 30;
+    if (g_codec.ready()) g_codec.setMute(false);
+}
+extern "C" void pico_audio_amp_off(void) {
+    g_amp_on = false;
+    if (g_codec.ready()) g_codec.setMute(true);
+}
+
+/* Main loop: follow the headphone jack (I2C, so not more than 4 times a
+ * second; about 0.1 ms each). */
+extern "C" void pico_audio_poll(void) {
+    static uint32_t last = 0;
+    uint32_t now = millis();
+    if (!g_codec.ready() || g_output_mode || now - last < 250) return;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) return;                  /* the codec is muted meanwhile */
+#endif
+    last = now;
+    PicoTlv320::Headset h = g_codec.headset();
+    if (h == PicoTlv320::HEADSET_UNKNOWN) return;
+    PicoTlv320::Output o = h == PicoTlv320::HEADSET_NONE ? PicoTlv320::OUTPUT_SPEAKER
+                                                         : PicoTlv320::OUTPUT_HEADPHONE;
+    if (o != g_codec.output()) {
+        g_codec.setOutput(o);
+        Serial.printf("[audio] output -> %s\n", output_name(o));
+    }
+}
+
+extern "C" void pico_audio_set_output(int mode) {
+    g_output_mode = mode & 3;
+    if (!g_codec.ready()) return;
+    PicoTlv320::Output o = wanted_output();
+    g_codec.setOutput(o);
+    Serial.printf("[audio] output: %s (%s)\n", output_name(o), g_output_mode ? "fixed" : "auto");
+}
+
+/* Settings > Sound output (a8_settings.cpp): 0 - 3 the codec's outputs as
+ * pico_audio_set_output, 4 HDMI. Before pico_audio_init (the menu, no
+ * sound yet) it is kept for it. */
+extern "C" void pico_audio_set_sound_output(int o) {
+#ifdef A8_HDMI_AUDIO
+    if (o < 0 || o > 4) o = 0;
+#else
+    if (o < 0 || o > 3) o = 0;
+#endif
+    if (o < 4 && o != g_output_mode) pico_audio_set_output(o);
+#ifdef A8_HDMI_AUDIO
+    if (g_started) pico_audio_set_hdmi(o == 4);
+    else if (o != 4 || a8_display_hdmi_audio()) g_hdmi_wanted = o == 4;   /* (no room: stays) */
+#endif
+}
+extern "C" int pico_audio_get_sound_output(void) {
+#ifdef A8_HDMI_AUDIO
+    if (g_started ? g_hdmi : g_hdmi_wanted) return 4;
+#endif
+    return g_output_mode;
+}
+
+
+/* The serial monitor's sound keys (a8_input.cpp passes on the keys it
+ * doesn't use): + / - volume, A H S B output (auto, headphones, speaker,
+ * both), I the report now. */
+extern "C" void pico_audio_key(int c) {
+    switch (c) {
+    case '+': case '=': pico_audio_set_volume_pct(g_volume_pct + 10); break;
+    case '-': case '_': pico_audio_set_volume_pct(g_volume_pct - 10); break;
+    case 'A': pico_audio_set_output(0); return;
+    case 'H': pico_audio_set_output(1); return;
+    case 'S': pico_audio_set_output(2); return;
+    case 'B': pico_audio_set_output(3); return;
+    case 'I': pico_audio_report(); return;
+    default: return;
+    }
+    Serial.printf("[audio] volume %d %%%c", g_volume_pct, 10);
+}
+
+/* Every 5 s from main.cpp: what the ring went through since the last one. */
+extern "C" void pico_audio_report(void) {
+    int minq = g_min_queued;
+    uint32_t under = g_underruns, str = g_stretched;
+    g_min_queued = 1 << 30;
+    g_underruns = 0;
+    g_stretched = 0;
+#ifdef A8_HDMI_AUDIO
+    if (g_hdmi) {
+        static uint32_t last_gaps = 0;
+        uint32_t gaps = a8_display_hdmi_audio_gaps();
+        Serial.printf("[audio] HDMI 44100 Hz, ring low %d of %d samples, %lu stretched, "
+                      "%lu gaps (silence packets), volume %d %%%s%c",
+                      minq > HDMI_RING ? -1 : minq, HDMI_RING, (unsigned long)str,
+                      (unsigned long)(gaps - last_gaps), g_volume_pct, g_amp_on ? "" : " (muted)", 10);
+        last_gaps = gaps;
+        return;
+    }
+#endif
+    Serial.printf("[audio] %d Hz, ring low %d of %d samples, %lu stretched, %lu under-runs, "
+                  "volume %d %%, %s%s\n",
+                  g_sample_rate, minq > RING_SAMPLES ? -1 : minq, RING_SAMPLES,
+                  (unsigned long)str, (unsigned long)under, g_volume_pct,
+                  output_name(g_codec.output()), g_amp_on ? "" : " (muted)");
+}
+
+#else   /* PWM */
 
 #ifdef PICO_BOARD_TABLE
 /* Pins from the runtime table (pico_board.h) — the PWMAudio object is created
@@ -113,7 +522,8 @@ static const int RING_SAMPLES = 8 * 128;               /* setBuffers(8, 128), mo
 static int32_t  g_dc_x1 = 0, g_dc_y1 = 0;              /* DC blocker: last in, last out (x256) */
 static uint32_t g_stretch_acc = 0;                     /* 16.16: due extra samples */
 
-extern "C" size_t pico_audio_push_s16(const void *data, size_t bytes) {
+/* (pico_audio_push_s16 is at the end: it mixes the beep in, then this) */
+static size_t push_s16_raw(const void *data, size_t bytes) {
     if (!g_started || bytes < 2) return 0;
     const int16_t *samples = (const int16_t *)data;
     size_t nsamp = bytes / 2, written = 0;
@@ -139,6 +549,8 @@ extern "C" size_t pico_audio_push_s16(const void *data, size_t bytes) {
     return written * 2;
 }
 
+#endif  /* PWM */
+
 extern "C" void pico_audio_set_volume_pct(int pct) {
     if (pct < 0)   pct = 0;
     if (pct > 100) pct = 100;
@@ -160,9 +572,140 @@ extern "C" uint8_t pico_audio_get_volume(void) {
     return (uint8_t)((g_volume_pct * 16 + 50) / 100);
 }
 
+#ifndef PICO_FRUITJAM
 extern "C" void pico_audio_amp_on(void) {
     if (AMP_EN_PIN >= 0) digitalWrite(AMP_EN_PIN, HIGH);
 }
 extern "C" void pico_audio_amp_off(void) {
     if (AMP_EN_PIN >= 0) digitalWrite(AMP_EN_PIN, LOW);
+}
+#endif
+
+/* ---- the beep (every board) ----------------------------------------------
+ * A short tone, a triangle wave fading out, mixed into whatever is pushed:
+ * a move in a menu (pico_audio_menu_beep), and a move on the on-screen
+ * keyboard in a game (pico_audio_beep) - where the game's sound, or the
+ * paused game's silent frames, carry it. Before the volume: it follows it.
+ * The beep moves on only by the samples the ring took (the rest come again). */
+static const int BEEP_HZ = 1200, BEEP_MS = 40, BEEP_LEVEL = 9000;
+static volatile uint32_t g_beep_left = 0;
+static uint32_t g_beep_len = 1, g_beep_phase = 0, g_beep_step = 0;
+
+extern "C" void pico_audio_beep(void) {
+    const uint32_t rate = g_sample_rate > 0 ? (uint32_t)g_sample_rate : 22050u;
+    g_beep_step = (uint32_t)(((uint64_t)BEEP_HZ << 32) / rate);
+    g_beep_len = rate * BEEP_MS / 1000;
+    g_beep_phase = 0;
+    g_beep_left = g_beep_len;
+}
+
+#ifdef PICO_FRUITJAM
+#define BEEP_RAM(f) __not_in_flash_func(f)    /* (the game's sound path runs from RAM here) */
+#else
+#define BEEP_RAM(f) f
+#endif
+extern "C" size_t BEEP_RAM(pico_audio_push_s16)(const void *data, size_t bytes) {
+    if (!g_beep_left || bytes < 2) return push_s16_raw(data, bytes);
+    static int16_t mix[256];
+    const int16_t *in = (const int16_t *)data;
+    size_t n = bytes / 2;
+    if (n > 256) n = 256;                /* (the caller sends the rest again) */
+    uint32_t left = g_beep_left, phase = g_beep_phase;
+    for (size_t i = 0; i < n; i++) {
+        int32_t v = in[i];
+        if (left) {
+            int32_t tri = (int32_t)(phase >> 16);                       /* 0 .. 65535 */
+            tri = (tri < 32768 ? tri : 65535 - tri) * 2 - 32768;        /* -32768 .. 32766 */
+            v += tri * BEEP_LEVEL / 32768 * (int32_t)left / (int32_t)g_beep_len;
+            phase += g_beep_step;
+            left--;
+        }
+        mix[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+    }
+    size_t done = push_s16_raw(mix, n * 2);
+    const uint32_t took = (uint32_t)(done / 2);
+    const uint32_t was = g_beep_left;
+    g_beep_phase += g_beep_step * (took < was ? took : was);
+    g_beep_left = took < was ? was - took : 0;
+    return done;
+}
+
+/* ---- the menus' sound (every board) ---------------------------------------
+ * From the game list's start to a game's: the sound runs (the amp on) and
+ * is fed from the menus' input polling (a8_input_menu, every 10 ms or so)
+ * as far as the ring has room: a short tone on each move (every board),
+ * the menu music (A8_MENU_MUSIC: the Fruit Jam), silence between - so
+ * Volume and Sound output are heard as they change. Off once a game is
+ * picked (muted: the game unmutes when it runs). */
+#ifdef A8_MENU_MUSIC
+/* The menus' music: the Game Adapter's menu tune (GameAdapterRGBPico's
+ * include/sounds/menu16s8.h - 16 kHz signed 8-bit mono, a 7.8 s loop, 122
+ * KB of flash), through the game's own path - so Volume and Sound output
+ * are heard as they change. Fed from the menus' input polling
+ * (a8_input_menu, every 10 ms or so) as far as the ring has room; 16000 Hz
+ * to the output's rate by linear interpolation, at half scale (background,
+ * as the Adapter plays it quieter than its volume setting). */
+#include "sounds/menu16s8.h"
+static const uint32_t MUSIC_LEN = sizeof(menu16s8);
+#endif
+
+/* (The tone: the beep above, mixed in by pico_audio_push_s16.) */
+struct MenuSound {
+    uint32_t music_idx, music_frac;      /* where in menu16s8: sample, 1/65536 */
+};
+static MenuSound g_ms;
+static bool     g_menu = false, g_menu_music = false;
+static uint32_t g_menu_rate = 22050, g_music_step = 0;
+
+/* One sample, and the state one sample on. */
+static int16_t menu_sample(MenuSound &m) {
+    int32_t v = 0;
+#ifdef A8_MENU_MUSIC
+    if (!g_menu_music) return 0;
+    int a = menu16s8[m.music_idx], b = menu16s8[m.music_idx + 1 < MUSIC_LEN ? m.music_idx + 1 : 0];
+    v = (a * 65536 + (b - a) * (int32_t)m.music_frac) >> 9;          /* 8-bit << 7: half scale */
+    m.music_frac += g_music_step;
+    if (m.music_frac >= 65536) { m.music_frac -= 65536; if (++m.music_idx >= MUSIC_LEN) m.music_idx = 0; }
+#endif
+    (void)m;
+    return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+}
+
+/* From setup: on (the sound's rate: starts the sound) before the game
+ * list, off (0) once a game is picked. (And around a game's Game Settings,
+ * without the music.) */
+extern "C" void pico_audio_menu_sound(int sample_rate, int music) {
+    g_menu_music = music != 0;
+    if (sample_rate) {
+        pico_audio_init(sample_rate);
+        g_menu_rate = (uint32_t)sample_rate;
+        g_music_step = (uint32_t)((16000ull << 16) / g_menu_rate);    /* < 65536: rates over 16 kHz */
+        g_ms = MenuSound();
+        g_menu = true;
+        pico_audio_amp_on();
+    } else if (g_menu) {
+        g_menu = false;
+        pico_audio_amp_off();            /* the game unmutes when it runs */
+    }
+}
+
+/* A move in a menu (a8_input_menu). */
+extern "C" void pico_audio_menu_beep(void) {
+    if (g_menu) pico_audio_beep();       /* (a game's menus: the sound is suspended there) */
+}
+
+extern "C" void pico_audio_menu_poll(void) {
+    if (!g_menu) return;
+#ifdef PICO_FRUITJAM
+    pico_audio_poll();                   /* the headphone jack, as in a game */
+#endif
+    int16_t buf[128];
+    for (int chunk = 0; chunk < 8; chunk++) {
+        MenuSound m = g_ms;
+        for (int i = 0; i < 128; i++) buf[i] = menu_sample(m);
+        size_t n = pico_audio_push_s16(buf, sizeof(buf)) / 2;
+        if (n == 128) { g_ms = m; continue; }
+        for (size_t i = 0; i < n; i++) menu_sample(g_ms);          /* past what was taken */
+        break;
+    }
 }

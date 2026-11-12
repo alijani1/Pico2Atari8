@@ -13,6 +13,34 @@
 #include "mzpokeysnd.h"
 #include "acidtest.h"
 
+#ifdef A8_HDMI_AUDIO
+/* (Not atari800:) the HDMI sound's packet encoder and queue, pico_hdmi's C
+ * code as Adafruit-DVI-HSTX vendors it - C, so here, in a C file that is
+ * built anyway (an extra object file reorders the other builds' veneers).
+ * a8_display.cpp has the rest of the HDMI driver. */
+#include "drivers/dvhstx/audio_packet.c"
+#include "drivers/dvhstx/audio_queue.c"
+#endif
+
+#ifdef A8_USB_HOST
+/* (Not atari800 either:) Pico-PIO-USB, the Fruit Jam's USB host ports'
+ * driver (extern/pico-pio-usb, on the include path) - here for the same
+ * reason. a8_input.cpp has the rest. */
+#include "pio_usb.c"
+#include "pio_usb_host.c"
+#include "pio_usb_device.c"
+#include "usb_crc.c"
+/* TinyUSB's HID mount / unmount callbacks, defined here - not in
+ * a8_input.cpp, whose TinyUSB header declares them weak (that made its
+ * definitions weak, and Adafruit's empty ones were linked instead). */
+void a8_usb_hid_mount(uint8_t dev, uint8_t idx, uint8_t const *desc, uint16_t desc_len);
+void a8_usb_hid_umount(uint8_t dev, uint8_t idx);
+void tuh_hid_mount_cb(uint8_t dev, uint8_t idx, uint8_t const *desc, uint16_t desc_len) {
+    a8_usb_hid_mount(dev, idx, desc, desc_len);
+}
+void tuh_hid_umount_cb(uint8_t dev, uint8_t idx) { a8_usb_hid_umount(dev, idx); }
+#endif
+
 int Devices_enable_h_patch = FALSE;
 int Devices_enable_p_patch = FALSE;
 int Devices_enable_r_patch = FALSE;

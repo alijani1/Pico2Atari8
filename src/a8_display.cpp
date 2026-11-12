@@ -58,10 +58,14 @@ static const int SCR_W = 320, SCR_H = 240;
 static const int SRC_X = (Screen_WIDTH - SCR_W) / 2;    /* 32: middle 320 columns */
 static const int BAND = 16;                             /* lines per DMA push */
 
+#ifdef A8_HDMI
+static uint8_t *frame8;                                 /* the menu canvas's pixels (heap, a8_display_init) */
+#else
 static uint8_t  frame8[SCR_W * SCR_H] __attribute__((aligned(4)));   /* snapshot for core 1 */
+#endif
 #ifdef PICO_TINY_SCREEN
 static uint16_t tiny565[2][A8_TINY_W * BAND];           /* ping-pong bands of the shrunk frame */
-#else
+#elif !defined(A8_HDMI)
 static uint16_t band565[2][SCR_W * BAND];               /* ping-pong DMA buffers */
 #endif
 static uint16_t pal565[256];                            /* byte-swapped for the panel */
@@ -317,14 +321,47 @@ static void fps_tick(void) {
     last_emu = frames_emulated; last_shown = frames_shown; last_ms = now;
 }
 
+#ifdef A8_HDMI
+/* HDMI: the menus draw with the same TFT_eSPI calls into an 8-bit (RGB332)
+ * sprite whose pixels are frame8 (see the HDMI section at the end).
+ * fillScreen() fills TFT_eSPI's _width x _height, which a sprite leaves at
+ * the panel size of the build flags (TFT_WIDTH 240 x TFT_HEIGHT 320, the
+ * panel's portrait size until init() rotates it, which the canvas never
+ * runs): every clear missed x 240-319, and leftovers showed there (bytes of
+ * the game zips the list peeks into, a8_menu.cpp's scratch use). So the
+ * canvas takes its real size. */
+class A8Canvas : public TFT_eSprite {
+public:
+    explicit A8Canvas(TFT_eSPI *parent) : TFT_eSprite(parent) {}
+    void set_screen_size(int32_t w, int32_t h) {
+        _init_width = _width = w;
+        _init_height = _height = h;
+    }
+};
+static A8Canvas canvas(&tft);
+TFT_eSPI &a8_tft(void) { return canvas; }
+#else
 TFT_eSPI &a8_tft(void) { return tft; }
+#endif
 
 uint8_t *a8_display_scratch(size_t *size) {
+#ifdef A8_HDMI
+    *size = SCR_W * SCR_H;
+#else
     *size = sizeof(frame8);
+#endif
     return frame8;
 }
 
+#ifndef A8_HDMI
 void a8_display_init(void) {
+#ifdef A8_HEADLESS
+    /* No panel (the Fruit Jam sound test): TFT_eSPI is never started, so
+     * it touches no pins (its build flags' pins are the Fruit Jam's button
+     * 3 and ESP32 UART), and nothing is drawn: core 1 stays idle. */
+    Serial.println("[display] none (headless build)");
+    return;
+#endif
     /* clk_peri back on clk_sys: platformio's f_cpu override leaves it on
      * the USB PLL (48 MHz), which caps SPI at 24 MHz (as in Pico2Arcade). */
     uint32_t sys_hz = clock_get_hz(clk_sys);
@@ -341,6 +378,7 @@ void a8_display_init(void) {
     Serial.printf("[display] sys %lu MHz, SPI %lu MHz\n", (unsigned long)(sys_hz / 1000000),
                   (unsigned long)(spi_get_baudrate(spi0) / 1000000));
 }
+#endif
 
 void a8_display_palette(void) {
     static uint16_t plain[256];          /* not byte-swapped: for the shrink */
@@ -356,7 +394,11 @@ void a8_display_palette(void) {
     a8_scale_palette(plain);
 }
 
+#ifndef A8_HDMI
 void a8_display_start(void) {
+#ifdef A8_HEADLESS
+    return;                              /* running stays false: no frames copied */
+#endif
     a8_display_palette();
     tft.fillScreen(TFT_BLACK);
     hashes_valid = false;                /* send the first frame whole */
@@ -364,6 +406,9 @@ void a8_display_start(void) {
 }
 
 void a8_display_stop(void) {
+#ifdef A8_HEADLESS
+    return;
+#endif
     running = false;
     while (frame_ready) tight_loop_contents();
     tft.dmaWait();
@@ -522,6 +567,7 @@ void a8_display_core1_loop(void) {
         frame_ready = false;
     }
 }
+#endif  /* !A8_HDMI */
 
 void a8_display_stats(uint32_t *shown, uint32_t *skipped) {
     *shown = frames_shown;
@@ -534,3 +580,576 @@ uint32_t a8_display_push_us(uint32_t *avg_rows) {
     if (avg_rows) *avg_rows = n ? r / n : 0;
     return n ? s / n : 0;
 }
+
+#ifdef A8_HDMI
+/* ---- HDMI (the Fruit Jam: RP2350 HSTX) -----------------------------------
+ *
+ * 800x480 at 60 Hz (by default; see HDMI_MODES) through Pimoroni's dvhstx driver (from Adafruit's
+ * Adafruit-DVI-HSTX library; only its driver is built, at the end of this file)
+ * in scanline mode: there is no frame buffer. The driver's DMA interrupt
+ * (core 1, highest priority) asks for each output line just before it goes
+ * out, and hdmi_line() makes it - 320 pixels, each sent twice across, each
+ * line twice down - from colour indices through a palette of doubled RGB565
+ * words. In RAM, as is everything it reads.
+ *
+ * Menus: the TFT_eSPI drawing code draws into an 8-bit (RGB332) sprite whose
+ * pixels are frame8 (the snapshot buffer the panels use, here on the heap),
+ * shown through an RGB332 palette.
+ *
+ * In a game: no snapshot copy. The lines are read straight from the
+ * emulator's Screen_atari (its middle 320 columns), with the Scale mode
+ * applied as they are read: STRETCH a row map, TV / TV SHARP 4 pixels -> 3
+ * (TV: the middle one the blend of its two), PIXEL every second pixel, the
+ * side bands black - as scale_frame does in place for the 320x240 panel.
+ * The rows an overlay covers (FPS / message at the top, the on-screen
+ * keyboard at the bottom) come from frame8 instead, which core 1 fills once
+ * a frame: the scaled game rows, then the overlays on top.
+ *
+ * Clock: the driver's start-up moves clk_sys to PLL_USB / 2 = 240 MHz and
+ * runs HSTX from PLL_SYS at the mode's exact clock (126 MHz: 25.2 MHz pixels,
+ * 60.0 Hz). platformio.ini leaves f_cpu at 150 MHz so the core's main()
+ * doesn't set clk_sys back (it does only when F_CPU != 150 MHz).
+ *
+ * Tearing: the emulator (59.92 Hz, paced by the sound) writes Screen_atari
+ * while it is read, so a tear line may drift slowly through the picture.
+ * TODO: if it shows, start each emulated frame at the HDMI vblank.
+ * TODO: flash writes park core 1 (rp2040.idleOtherCore), and with it the
+ * line interrupt: the picture drops out for that moment (the driver
+ * restarts its stream after). */
+#include "drivers/dvhstx/dvhstx.hpp"
+#include "hardware/structs/hstx_ctrl.h"
+#include "hardware/gpio.h"
+
+static pimoroni::DVHSTX hdmi;                           /* claims DMA channels 0-2 here */
+static uint32_t hdmi_pal[256];                          /* index -> an RGB565 pixel twice */
+static uint8_t  hdmi_src_row[SCR_H];                    /* STRETCH: each row's source line */
+static uint8_t  atari332[256];                          /* Atari colour -> RGB332 (canvas) */
+static volatile bool hdmi_game = false;                 /* lines from Screen_atari, else frame8 */
+static volatile uint8_t hdmi_mode = 0;                  /* the Scale mode the lines use */
+static volatile int ov_top = 0, ov_bottom = SCR_H;      /* rows < ov_top or >= ov_bottom: frame8 */
+static volatile bool hdmi_wanted = false, hdmi_started = false, hdmi_ok = false;
+static volatile bool composing = false;                 /* core 1 is in hdmi_compose */
+static volatile bool ov_redraw = true;                  /* frame8 was reused: redraw the overlays */
+
+#ifdef A8_HDMI_AUDIO
+/* ---- sound over HDMI ------------------------------------------------------
+ * The driver sends 16-bit stereo in data islands in the blanking (its
+ * dvhstx_audio.cpp and pico_hdmi's packet code, compiled at the end of this
+ * file and in a8_stubs.c), from a queue of 256 encoded packets (36 KB, in
+ * RAM: A8_HDMI_AUDIO builds only). 44100 Hz = exactly 2 x the emulator's
+ * 22050: each sample is sent twice, the first of the two the mean of it
+ * and the one before. Core 1 encodes: pico_audio.cpp's ring (filled and
+ * paced as for I2S) -> 2 samples -> one packet of 4 frames -> the queue,
+ * kept HDMI_AUDIO_TARGET packets deep (18 ms). The packet code runs from
+ * RAM (the driver places it there). DMA channel 3 is the driver's audio
+ * channel: reserved here from start-up, so the I2S stream can't take it,
+ * and released to the driver when it starts with sound.
+ * The output always starts with sound (an HDMI signal, data islands and
+ * all), silent while the sound goes to the Fruit Jam's codec: switching
+ * the sound then only changes where pico_audio.cpp puts the samples. It
+ * used to restart the output with / without sound (DVI <-> HDMI), and a
+ * display lost the picture over it (2026-11-11). Only a mode with no room
+ * for sound runs without (picture only). */
+extern "C" {
+#include "drivers/dvhstx/audio_config.h"
+#include "pico_hdmi/hstx_packet.h"
+#include "pico_hdmi/hstx_data_island_queue.h"
+}
+#include "hardware/dma.h"
+#include "pico_audio.h"
+static const uint32_t HDMI_AUDIO_RATE = 44100;
+static const uint32_t HDMI_AUDIO_TARGET = 200;          /* packets queued (4 frames each) */
+static const uint HDMI_AUDIO_DMA = pimoroni::DVHSTX::NUM_AUDIO_CHANS - 1;
+/* (A8_SOUND_HDMI, sound to HDMI from start-up: pico_audio.cpp's now) */
+static volatile bool hdmi_audio_wanted = true, hdmi_audio_on = false;
+static int hdmi_audio_frame = 0;                        /* the packets' frame counter (channel status) */
+static int16_t hdmi_audio_prev = 0;
+
+/* Core 1: top the queue up from the sound ring. */
+static void __no_inline_not_in_flash_func(hdmi_audio_feed)(void) {
+    const bool in_hsync = hstx_di_queue_get_hsync_active();
+    while (hstx_di_queue_get_level() < HDMI_AUDIO_TARGET) {
+        int16_t in[2];
+        if (pico_audio_hdmi_take(in, 2) < 2) return;      /* nothing due: the driver sends silence */
+        audio_sample_t f[4];
+        int16_t a = in[0], b = in[1];
+        f[0].left = f[0].right = (int16_t)((hdmi_audio_prev + a) / 2);
+        f[1].left = f[1].right = a;
+        f[2].left = f[2].right = (int16_t)((a + b) / 2);
+        f[3].left = f[3].right = b;
+        hdmi_audio_prev = b;
+        hstx_packet_t packet;
+        int next = hstx_packet_set_audio_samples_cs_rate(&packet, f, 4, hdmi_audio_frame, HDMI_AUDIO_RATE);
+        hstx_data_island_t island;
+        hstx_encode_data_island(&island, &packet, false, in_hsync);
+        if (!hstx_di_queue_push(&island)) return;        /* (below the target: has room) */
+        hdmi_audio_frame = next;
+    }
+}
+#endif
+static const uint8_t HDMI_BLACK = 0x00;                 /* Atari palette: black (side bands) */
+
+/* The video mode: the picture is 640x480 (320x240 doubled), centred in the
+ * mode's lines with black around it, or cropped (720x400: 20 Atari rows off
+ * the top and the bottom). Displays differ in what they take: the first
+ * one tried showed nothing at 640x480 @ 60 Hz (the usual mode for 320x240)
+ * but 720x400 @ 70 Hz, 720x576 @ 50 Hz and 800x480 @ 60 Hz, 800x600 only
+ * sometimes (2026-11-11). 800x480 is the default (the user's pick: full
+ * height, black side bands); A8_HDMI_MODE picks another at build time, and
+ * the serial monitor's V key steps through them.
+ * TODO: a Settings row for it (kept in the settings sector), for displays
+ * that take none of the default.
+ * (Done: Settings > Screen mode, a8_settings.cpp - tried for 10 s before
+ * it is kept; button 3 held at power-on goes back to the default.) */
+/* (name: also the Settings > Screen mode value, so short; note: the log's) */
+struct HdmiMode { uint16_t w, h; const char *name, *note; };
+static const HdmiMode HDMI_MODES[] = {
+    { 320, 240, "640x480 60 Hz", "" },
+    { 360, 200, "720x400 70 Hz", " (as Doom)" },
+    { 360, 240, "720x480 60 Hz", " (480p)" },
+    { 360, 288, "720x576 50 Hz", " (576p)" },
+    { 400, 300, "800x600 60 Hz", "" },
+    { 400, 240, "800x480 60 Hz", "" },
+};
+static const int HDMI_NMODES = sizeof(HDMI_MODES) / sizeof(HDMI_MODES[0]);
+#ifndef A8_HDMI_MODE
+#define A8_HDMI_MODE 5                                  /* index into HDMI_MODES: 800x480 @ 60 Hz */
+#endif
+static volatile int hdmi_vmode = A8_HDMI_MODE, hdmi_vmode_wanted = A8_HDMI_MODE;
+static volatile int out_words = SCR_W, out_lines = 2 * SCR_H;   /* the mode's line: words (2 pixels), lines */
+
+/* Picture row r (0..239) as 320 words. */
+static inline __attribute__((always_inline)) void hdmi_picture_line(int r, uint32_t *dst) {
+    const uint32_t *pal = hdmi_pal;
+    if (!hdmi_game || r < ov_top || r >= ov_bottom) {
+        const uint8_t *s = frame8 + r * SCR_W;
+        for (int x = 0; x < SCR_W; x++) dst[x] = pal[s[x]];
+        return;
+    }
+    const int mode = hdmi_mode;
+    const uint8_t *s = (const uint8_t *)Screen_atari + SRC_X
+                       + (mode == A8_BIG_STRETCH ? hdmi_src_row[r] : r) * Screen_WIDTH;
+    if (mode == A8_BIG_TV || mode == A8_BIG_TV_SHARP) {
+        const uint32_t black = pal[HDMI_BLACK];
+        for (int x = 0; x < (SCR_W - 240) / 2; x++) { dst[x] = black; dst[SCR_W - 1 - x] = black; }
+        uint32_t *d = dst + (SCR_W - 240) / 2;
+        for (int k = 0; k < 80; k++, s += 4, d += 3) {      /* source 4k, 4k+1, 4k+2 */
+            d[0] = pal[s[0]];
+            if (mode == A8_BIG_TV) {
+                uint32_t a = pal_plain[s[1]], b = pal_plain[s[2]];
+                uint32_t c = ((a & 0xF7DEu) + (b & 0xF7DEu)) >> 1;
+                d[1] = c | (c << 16);
+            } else {
+                d[1] = pal[s[1]];
+            }
+            d[2] = pal[s[2]];
+        }
+    } else if (mode == A8_BIG_PIXEL) {
+        const uint32_t black = pal[HDMI_BLACK];
+        for (int x = 0; x < (SCR_W - 160) / 2; x++) { dst[x] = black; dst[SCR_W - 1 - x] = black; }
+        uint32_t *d = dst + (SCR_W - 160) / 2;
+        for (int i = 0; i < 160; i++) d[i] = pal[s[2 * i]];
+    } else {
+        for (int x = 0; x < SCR_W; x++) dst[x] = pal[s[x]];
+    }
+}
+
+/* One output line (the driver's interrupt, core 1). */
+static void __not_in_flash_func(hdmi_line)(uint32_t v_scanline, uint32_t active_line, uint32_t *dst) {
+    (void)v_scanline;
+    const int words = out_words, pad = (words - SCR_W) / 2;
+    const int r = ((int)active_line - (out_lines - 2 * SCR_H) / 2) >> 1;
+    const uint32_t black = hdmi_pal[HDMI_BLACK];        /* index 0: black in both palettes */
+    if (r < 0 || r >= SCR_H) {
+        for (int x = 0; x < words; x++) dst[x] = black;
+        return;
+    }
+    for (int x = 0; x < pad; x++) { dst[x] = black; dst[words - 1 - x] = black; }
+    hdmi_picture_line(r, dst + pad);
+}
+
+/* Row y of the scaled game picture as colour indices (no TV blend: an
+ * overlay's rows aren't blended on the panel either). */
+static void __not_in_flash_func(hdmi_scaled_row)(int y, int mode, uint8_t *dst) {
+    const uint8_t *s = (const uint8_t *)Screen_atari + SRC_X
+                       + (mode == A8_BIG_STRETCH ? hdmi_src_row[y] : y) * Screen_WIDTH;
+    if (mode == A8_BIG_TV || mode == A8_BIG_TV_SHARP || mode == A8_BIG_PIXEL) {
+        const int w = mode == A8_BIG_PIXEL ? 160 : 240, x0 = (SCR_W - w) / 2;
+        memset(dst, HDMI_BLACK, x0);
+        memset(dst + x0 + w, HDMI_BLACK, SCR_W - x0 - w);
+        if (mode == A8_BIG_PIXEL)
+            for (int i = 0; i < w; i++) dst[x0 + i] = s[2 * i];
+        else
+            for (int i = 0; i < w; i++) dst[x0 + i] = s[i * 4 / 3];
+    } else {
+        memcpy(dst, s, SCR_W);
+    }
+}
+
+static void hdmi_pal_332(void) {
+    for (int i = 0; i < 256; i++) {
+        uint32_t r = (i >> 5) & 7, g = (i >> 2) & 7, b = i & 3;
+        uint32_t c = ((r * 31 / 7) << 11) | ((g * 63 / 7) << 5) | (b * 31 / 3);
+        hdmi_pal[i] = c | (c << 16);
+    }
+}
+
+static void hdmi_pal_atari(void) {
+    a8_display_palette();                /* pal_plain: the Atari colours as RGB565 */
+    for (int i = 0; i < 256; i++) {
+        uint32_t c = pal_plain[i];
+        hdmi_pal[i] = c | (c << 16);
+        atari332[i] = (uint8_t)(((c >> 8) & 0xE0) | ((c >> 6) & 0x1C) | ((c >> 3) & 0x03));
+    }
+}
+
+/* Core 0, at boot: the canvas, then core 1 starts the output (the driver's
+ * interrupt runs on the core that starts it). */
+void a8_display_init(void) {
+    canvas.setColorDepth(8);
+    frame8 = (uint8_t *)canvas.createSprite(SCR_W, SCR_H);
+    if (!frame8) {
+        Serial.println("[display] no RAM for the 320x240 canvas");
+        return;
+    }
+    canvas.set_screen_size(SCR_W, SCR_H);    /* fillScreen(): all of it (A8Canvas) */
+#ifdef A8_HDMI_AUDIO
+    /* (Settings > Sound output = HDMI, or A8_SOUND_HDMI: HDMI starts with
+     * sound and takes the channel itself) */
+    if (!hdmi_audio_wanted) dma_channel_claim(HDMI_AUDIO_DMA);   /* kept for HDMI sound (see there) */
+#endif
+    canvas.fillSprite(TFT_BLACK);
+    for (int y = 0; y < SCR_H; y++) hdmi_src_row[y] = (uint8_t)(24 + y * 192 / SCR_H);
+    hdmi_pal_332();
+    hdmi_wanted = true;
+    for (uint32_t t0 = millis(); !hdmi_started && millis() - t0 < 2000; ) delay(1);
+    Serial.printf("[display] HDMI %s: sys %lu MHz, HSTX %lu MHz, peri %lu MHz%c",
+                  hdmi_ok ? "running" : "FAILED",
+                  (unsigned long)(clock_get_hz(clk_sys) / 1000000),
+                  (unsigned long)(clock_get_hz(clk_hstx) / 1000000),
+                  (unsigned long)(clock_get_hz(clk_peri) / 1000000), 10);
+    a8_display_report();
+}
+
+void a8_display_start(void) {
+    hdmi_pal_atari();
+    ov_redraw = true;
+    ov_top = 0;
+    ov_bottom = SCR_H;
+    frame_ready = false;
+    running = true;
+    hdmi_game = true;
+}
+
+void a8_display_stop(void) {
+    running = false;
+    __dmb();
+    while (composing) tight_loop_contents();
+    /* the paused picture stays under the menus, in the canvas's colours */
+    const uint8_t *src = (const uint8_t *)Screen_atari + SRC_X;
+    for (int y = 0; y < SCR_H; y++)
+        for (int x = 0; x < SCR_W; x++)
+            frame8[y * SCR_W + x] = atari332[src[y * Screen_WIDTH + x]];
+    hdmi_game = false;
+    hdmi_pal_332();
+}
+
+/* Core 0, end of each emulated frame: just a flag (the lines are read from
+ * Screen_atari as they go out). */
+extern "C" void a8_display_frame(void) {
+    if (!running) return;
+    frames_emulated++;
+    frame_ready = true;
+}
+
+void a8_display_refresh(void) { a8_display_frame(); }
+
+/* The on-screen keyboard for HDMI, as draw_osk draws it, but one row of
+ * keys at a time into a strip that is then copied in whole: the lines are
+ * read from frame8 meanwhile, and draw_osk (clear, then the keys) showed
+ * half-drawn keys for a frame when the cursor moved. */
+/* (in PSRAM: written only when the keyboard changes, then copied to frame8
+ * - never read by the line interrupt; SRAM is short with HDMI sound) */
+PSRAM static uint8_t osk_strip[OSK_CELL_H * SCR_W];
+
+static void osk_strip_glyph(int x, int y, const uint8_t *g, int scale, uint8_t colour) {
+    for (int r = 0; r < 7; r++)
+        for (int c = 0; c < 5; c++)
+            if (g[r] & (0x10 >> c))
+                for (int dy = 0; dy < scale; dy++)
+                    memset(osk_strip + (y + r * scale + dy) * SCR_W + x + c * scale, colour, scale);
+}
+
+static void hdmi_draw_osk(void) {
+    const int rows = a8_osk_rows(), OSK_Y = SCR_H - rows * OSK_CELL_H - 2;
+    /* the frame above and below the keys: black, as it already is when
+     * redrawn, so writing it again shows nothing */
+    for (int y = OSK_Y - 2; y < OSK_Y; y++) memset(frame8 + y * SCR_W, OSK_FRAME, SCR_W);
+    for (int y = OSK_Y + rows * OSK_CELL_H; y < SCR_H; y++) memset(frame8 + y * SCR_W, OSK_FRAME, SCR_W);
+    int cr, ci;
+    a8_osk_cursor(&cr, &ci);
+    for (int r = 0; r < rows; r++) {
+        memset(osk_strip, OSK_FRAME, sizeof(osk_strip));
+        int n;
+        const A8Key *keys = a8_osk_row(r, &n);
+        int col = 0;
+        for (int i = 0; i < n; i++) {
+            int x0 = col * OSK_CELL_W + 1, w = keys[i].span * OSK_CELL_W - 2;
+            int y0 = 1, h = OSK_CELL_H - 2;                 /* in the strip */
+            uint8_t face = (r == cr && i == ci) ? OSK_CURSOR : OSK_KEY;
+            for (int y = y0; y < y0 + h; y++) memset(osk_strip + y * SCR_W + x0, face, w);
+            const char *t = keys[i].label;
+            int len = (int)strlen(t), scale = len == 1 ? 2 : 1;
+            int tw = len * 6 * scale - scale, th = 7 * scale;
+            int tx = x0 + (w - tw) / 2, ty = y0 + (h - th) / 2;
+            for (int k = 0; k < len; k++) {
+                const uint8_t *g = glyph(t[k]);
+                if (g) osk_strip_glyph(tx + k * 6 * scale, ty, g, scale, OSK_TEXT);
+            }
+            col += keys[i].span;
+        }
+        memcpy(frame8 + (OSK_Y + r * OSK_CELL_H) * SCR_W, osk_strip, sizeof(osk_strip));
+    }
+}
+
+/* What the on-screen keyboard shows: its layout, keys and cursor. */
+static uint32_t osk_signature(void) {
+    uint32_t h = 2166136261u;
+    int cr, ci, rows = a8_osk_rows();
+    a8_osk_cursor(&cr, &ci);
+    h = (h ^ (uint32_t)rows) * 16777619u;
+    h = (h ^ (uint32_t)(cr * 64 + ci)) * 16777619u;
+    for (int r = 0; r < rows; r++) {
+        int n;
+        const A8Key *keys = a8_osk_row(r, &n);
+        for (int i = 0; i < n; i++) {
+            h = (h ^ (uint32_t)(uintptr_t)keys[i].label) * 16777619u;
+            h = (h ^ (uint32_t)keys[i].span) * 16777619u;
+            for (const char *t = keys[i].label; *t; t++) h = (h ^ (uint8_t)*t) * 16777619u;
+        }
+    }
+    return h;
+}
+
+/* Core 1, once a frame: the overlays' rows into frame8. The lines are read
+ * from frame8 while this runs, so nothing is written there that isn't
+ * meant to be seen: an overlay is redrawn only when it changes (drawing
+ * clears it first), and the game rows around the top boxes are copied
+ * around them, never under them. The keyboard covers its rows whole, so no
+ * game rows go there at all. (Writing them all every frame, then the
+ * overlays over them, showed as tearing in the keyboard.) */
+static void hdmi_compose(void) {
+    static uint32_t osk_sig = 0;
+    static int fps_shown = -1, last_top = 0, last_bottom = SCR_H;
+    static char toast_shown[sizeof(toast_text)] = "";
+    static uint8_t line[SCR_W];
+    uint32_t t0 = time_us_32();
+    if (ov_redraw) {                     /* a game (re)started: frame8 held the menus */
+        ov_redraw = false;
+        last_top = 0;
+        last_bottom = SCR_H;
+        osk_sig = 0;
+    }
+    const int mode = a8_settings_scale_now();   /* the game's own, or Settings > Scale */
+    const bool toast = toast_until && (int32_t)(toast_until - millis()) > 0;
+    const int top = (fps_on || toast) ? OV_H + 2 : 0;
+    const bool osk = a8_osk_is_open();
+    const int bottom = osk ? SCR_H - a8_osk_rows() * OSK_CELL_H - 4 : SCR_H;
+
+    /* top band: the game rows, around the boxes (as draw_toast / draw_fps
+     * place them: OV_H rows from y 2; the toast from x 2, FPS to SCR_W - 2) */
+    const int box_y0 = 2, box_y1 = 2 + OV_H;
+    const int toast_x1 = toast ? 2 + (int)strlen(toast_text) * OV_CHAR_W + 2 : 0;
+    const int fps_x0 = fps_on ? SCR_W - (7 * OV_CHAR_W + 2) - 2 : SCR_W;
+    for (int y = 0; y < top; y++) {
+        uint8_t *d = frame8 + y * SCR_W;
+        hdmi_scaled_row(y, mode, line);
+        if (y < box_y0 || y >= box_y1) { memcpy(d, line, SCR_W); continue; }
+        if (toast) memcpy(d, line, 2);                       /* left of the toast */
+        memcpy(d + toast_x1, line + toast_x1, fps_x0 - toast_x1);   /* between */
+        if (fps_on) memcpy(d + SCR_W - 2, line + SCR_W - 2, 2);     /* right of FPS */
+    }
+    const int fps_now = fps_emu * 100 + fps_scr;
+    if (fps_on && (fps_now != fps_shown || last_top == 0)) { draw_fps(); fps_shown = fps_now; }
+    if (toast && (strcmp(toast_text, toast_shown) || last_top == 0)) {
+        draw_toast();
+        strcpy(toast_shown, toast_text);
+    }
+    if (!toast) toast_shown[0] = 0;
+    if (!fps_on) fps_shown = -1;
+
+    /* the keyboard: only when it changed (or its band just appeared) */
+    if (osk) {
+        uint32_t sig = osk_signature();
+        if (sig != osk_sig || bottom != last_bottom) { hdmi_draw_osk(); osk_sig = sig; }
+    } else {
+        osk_sig = 0;
+    }
+
+    hdmi_mode = (uint8_t)mode;
+    ov_top = top;
+    ov_bottom = bottom;
+    last_top = top;
+    last_bottom = bottom;
+    push_us_sum += time_us_32() - t0;
+    rows_sum += (uint32_t)(top + SCR_H - bottom);
+    push_count++;
+}
+
+#ifdef A8_HDMI_AUDIO
+/* Sound over HDMI on / off (core 1 restarts the output with or without
+ * it). False if the mode had no room for it. */
+bool a8_display_set_hdmi_audio(bool on) {
+    hdmi_audio_wanted = on;
+    if (!hdmi_started && !hdmi_wanted) return true;    /* before a8_display_init: it starts so */
+    for (uint32_t t0 = millis(); hdmi_audio_on != on && millis() - t0 < 1000; ) delay(1);
+    return hdmi_audio_on == on;
+}
+bool a8_display_hdmi_audio(void) { return hdmi_started ? hdmi_audio_on : hdmi_audio_wanted; }   /* (before start: as it will) */
+uint32_t a8_display_hdmi_audio_gaps(void) { return hstx_di_queue_silence_count; }
+#endif
+
+/* The serial monitor's V key: the next video mode (core 1 switches). */
+void a8_display_next_hdmi_mode(void) {
+    hdmi_vmode_wanted = (hdmi_vmode + 1) % HDMI_NMODES;
+}
+
+/* Settings > Screen mode (a8_settings.cpp). */
+int a8_display_hdmi_modes(void) { return HDMI_NMODES; }
+int a8_display_hdmi_mode_default(void) { return A8_HDMI_MODE; }
+int a8_display_hdmi_mode(void) { return hdmi_vmode; }
+const char *a8_display_hdmi_mode_name(int m) {
+    return m >= 0 && m < HDMI_NMODES ? HDMI_MODES[m].name : "?";
+}
+/* Before a8_display_init: the mode it starts in. After: switch (core 1
+ * restarts the output) and wait for it; false if it didn't start. */
+bool a8_display_set_hdmi_mode(int m) {
+    if (m < 0 || m >= HDMI_NMODES) return false;
+    if (!hdmi_started && !hdmi_wanted) { hdmi_vmode = hdmi_vmode_wanted = m; return true; }
+    hdmi_vmode_wanted = m;
+    for (uint32_t t0 = millis(); hdmi_vmode != m && millis() - t0 < 2000; ) delay(1);
+    return hdmi_vmode == m && hdmi_ok;
+}
+
+/* At start: how the output is set up - the mode, HSTX's control register,
+ * its clock, the frames sent, and the function of GPIO 12-19 (0 = HSTX). */
+void a8_display_report(void) {
+    char funcs[9];
+    for (int i = 0; i < 8; i++) funcs[i] = (char)('0' + (gpio_get_function(12 + i) & 0x1F) % 10);
+    funcs[8] = 0;
+    Serial.printf("[display] HDMI %s %s, frames %lu, HSTX csr %08lx, clk_hstx %lu Hz, sys %lu Hz, "
+                  "GPIO 12-19 functions %s (0 = HSTX), game %d, scale %d%c",
+                  HDMI_MODES[hdmi_vmode].name, hdmi_ok ? "running" : "NOT RUNNING",
+                  (unsigned long)hdmi.get_frame_count(),
+                  (unsigned long)hstx_ctrl_hw->csr, (unsigned long)clock_get_hz(clk_hstx),
+                  (unsigned long)clock_get_hz(clk_sys), funcs, (int)hdmi_game, (int)hdmi_mode, 10);
+}
+
+/* Core 1, all the time (main.cpp loop1): starts the output when asked, then
+ * in a game the overlays once a frame. */
+void a8_display_core1_loop(void) {
+#ifdef A8_HDMI_AUDIO
+    const bool audio_change = hdmi_started && hdmi_audio_wanted != hdmi_audio_on;
+#else
+    const bool audio_change = false;
+#endif
+    if (hdmi_wanted && (!hdmi_started || hdmi_vmode_wanted != hdmi_vmode || audio_change)) {
+        /* the Fruit Jam's HSTX pins (its variant): CK+ 13, D0+ 15, D1+ 17, D2+ 19 */
+        static const pimoroni::DVHSTXPinout pins = { PIN_CKP, { PIN_D0P, PIN_D1P, PIN_D2P } };
+        if (hdmi_started) hdmi.reset();
+        const HdmiMode &m = HDMI_MODES[hdmi_vmode_wanted];
+        hdmi.set_scanline_callback(hdmi_line);
+#ifdef A8_HDMI_AUDIO
+        bool with_audio = hdmi_audio_wanted;
+        if (with_audio) {
+            if (dma_channel_is_claimed(HDMI_AUDIO_DMA)) dma_channel_unclaim(HDMI_AUDIO_DMA);
+            hdmi_audio_frame = 0;
+            hdmi_audio_prev = 0;
+        }
+        hdmi.enable_audio(with_audio ? HDMI_AUDIO_RATE : 0);
+        hdmi_ok = hdmi.init(m.w, m.h, pimoroni::DVHSTX::MODE_RGB565, false, pins);
+        if (!hdmi_ok && with_audio) {           /* a mode with no room for sound: picture only */
+            Serial.printf("[display] HDMI sound doesn't fit %s: picture only%c", m.name, 10);
+            with_audio = false;
+            hdmi.enable_audio(0);
+            hdmi_ok = hdmi.init(m.w, m.h, pimoroni::DVHSTX::MODE_RGB565, false, pins);
+        }
+        if (!with_audio && !dma_channel_is_claimed(HDMI_AUDIO_DMA)) dma_channel_claim(HDMI_AUDIO_DMA);
+        hdmi_audio_on = with_audio;
+        hdmi_audio_wanted = with_audio;
+#else
+        hdmi_ok = hdmi.init(m.w, m.h, pimoroni::DVHSTX::MODE_RGB565, false, pins);
+#endif
+        if (hdmi_ok) {
+            out_words = hdmi.get_width() / 2;
+            out_lines = hdmi.get_height();
+        }
+        hdmi_vmode = hdmi_vmode_wanted;
+        hdmi_started = true;
+        Serial.printf("[display] HDMI mode %d of %d: %s%s, %s (%d x %d)%s%c", hdmi_vmode + 1, HDMI_NMODES,
+                      m.name, m.note, hdmi_ok ? "running" : "FAILED", out_words * 2, out_lines,
+#ifdef A8_HDMI_AUDIO
+                      hdmi_audio_on ? ", sound 44100 Hz" : ", no sound",
+#else
+                      "",
+#endif
+                      10);
+    }
+#ifdef A8_HDMI_AUDIO
+    if (hdmi_audio_on) hdmi_audio_feed();
+#endif
+    composing = true;
+    __dmb();
+    if (running) {
+        fps_tick();
+        frames_shown = hdmi.get_frame_count();
+        if (frame_ready) {
+            hdmi_compose();
+            frame_ready = false;
+        }
+    }
+    composing = false;
+}
+
+/* The driver's code, compiled here (last: its file-level names stay out of
+ * the code above). platformio.ini fetches Adafruit-DVI-HSTX but keeps it
+ * out of the build - this core links every object of a library whole, and
+ * the library's Arduino wrapper needs Adafruit GFX - so only Pimoroni's
+ * dvhstx driver is built: not its HDMI audio (dvhstx_audio.cpp), as nothing
+ * enables it. The text-mode font isn't used here, but init() refers to it.
+ * (In this file, not files of their own: even an empty extra object file
+ * reorders the linker's veneers in the other builds.) */
+#include "drivers/dvhstx/dvhstx.cpp"
+/* 800x600 @ 60 Hz by the VESA book: the driver's has a front porch of 44
+ * (lines of 1060 pixels, not 1056). With that, the first display tried
+ * showed 7 thin evenly spaced black vertical bars (when it showed 800x600 at
+ * all - it takes the mode only sometimes, and with 40 not at all); a second
+ * display shows it clean with 40 (2026-11-11).
+ * TODO: the driver's 44 on that second display, to know whether the bars
+ * were the porch or the first display.
+ * The driver's table entry is renamed out of the way and this one takes its
+ * name. */
+#define dvi_timing_800x600p_60hz dvi_timing_800x600p_60hz_driver
+#include "drivers/dvhstx/dvi.cpp"
+#undef dvi_timing_800x600p_60hz
+const struct dvi_timing dvi_timing_800x600p_60hz = {
+    .h_sync_polarity = false,
+    .h_front_porch   = 40,
+    .h_sync_width    = 128,
+    .h_back_porch    = 88,
+    .h_active_pixels = 800,
+
+    .v_sync_polarity = false,
+    .v_front_porch   = 1,
+    .v_sync_width    = 4,
+    .v_back_porch    = 23,
+    .v_active_lines  = 600,
+
+    .bit_clk_khz     = 400000
+};
+#include "drivers/dvhstx/font_cp437.c"
+#ifdef A8_HDMI_AUDIO
+#undef NUM_CHANS                         /* dvhstx.cpp's 3; the audio code's is 4 */
+#include "drivers/dvhstx/dvhstx_audio.cpp"
+#endif
+#endif  /* A8_HDMI */

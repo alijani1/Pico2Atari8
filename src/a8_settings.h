@@ -25,12 +25,20 @@ struct A8Settings {
     bool pal;                     /* TV system: false = NTSC */
     int  paddles;                 /* A8_PADDLES_*: paddle sensitivity (Quad) */
     int  scale;                   /* A8_SCALE_*: how the picture is shrunk (160x80 panel) */
+    int  screen_mode;             /* the Fruit Jam's HDMI mode (a8_display_hdmi_mode_name) */
+    int  sound_out;               /* the Fruit Jam's sound: pico_audio_set_sound_output */
 };
 
 extern A8Settings a8_settings;
 
 void a8_settings_load(void);      /* from flash (defaults if none): at boot */
 void a8_settings_screen(void);    /* the Settings screen; saves on the way out if changed */
+/* Settings for every game, also in Game Settings (so a game needn't be
+ * left for them): Volume, and the Fruit Jam's Sound output. Applied at
+ * once; the output is saved with the game's settings when it ends. */
+void a8_settings_volume_step(int dir);         /* -1 / +1: 10 % down / up */
+const char *a8_settings_sound_name(int o);
+void a8_settings_sound_step(int dir);          /* -1 / +1: the previous / next output */
 
 /* Per game (by its path in the game list): the Joy-Con as paddle 1 instead
  * of joystick 1 (400/800/XL games; Yellow + click switches, a8_input.cpp). */

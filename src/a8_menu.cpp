@@ -26,7 +26,11 @@
 #include "a8_platform.h"
 
 static const int MAX_GAMES = 128;      /* + the Settings and ROM drive rows */
+#ifdef A8_SD
+struct Game { char path[128]; char name[40]; bool osb; char kind[5]; };   /* (a card's long names) */
+#else
 struct Game { char path[48]; char name[40]; bool osb; char kind[5]; };
+#endif
 
 /* What the file is, shown at the right of its row: two files can share a
  * name ("Slime" = SLIME.BIN and SLIME.ZIP). */
@@ -48,15 +52,16 @@ static const char *kind_of(const char *path) {
     if (!strcasecmp(dot, ".a52")) return "5200";
     if (!strcasecmp(dot, ".rom") || !strcasecmp(dot, ".bin")) {
         /* a 5200 cartridge by its last bytes (a8_raw_cart_is_5200) */
-        const uint8_t *p;
+        /* (a peek: on the SD card, not the whole file loaded) */
+        uint8_t tail[6];
         size_t size;
-        if (romfs_map(path, &p, &size) && size >= 4096 && raw_5200(p + size - 6, size)) return "5200";
+        if (romfs_peek(path, -6, tail, sizeof(tail), &size) && size >= 4096 && raw_5200(tail, size)) return "5200";
         return "CART";
     }
     if (!strcasecmp(dot, ".car")) {
-        const uint8_t *p;
+        uint8_t head[16];
         size_t size;
-        if (romfs_map(path, &p, &size) && size >= 16 && a8_car_is_5200(p)) return "5200";
+        if (romfs_peek(path, 0, head, sizeof(head), &size) && a8_car_is_5200(head)) return "5200";
         return "CART";
     }
     return "XEX";
@@ -64,7 +69,14 @@ static const char *kind_of(const char *path) {
 static bool picked_alt = false, picked_osb = false;
 bool a8_menu_picked_alt(void) { return picked_alt; }
 bool a8_menu_picked_osb(void) { return picked_osb; }
+#ifdef PICO_FRUITJAM
+/* (in its PSRAM: the list is only used here, never by the emulator, and the
+ * Fruit Jam's SRAM is short with HDMI sound - 36 KB for its packet queue;
+ * PSRAM isn't zeroed at start, but every entry is written before use) */
+PSRAM static Game games[MAX_GAMES + 2];
+#else
 static Game games[MAX_GAMES + 2];
+#endif
 static int found = 0;                  /* games on the drive; then Settings, then the drive */
 static int game_count = 0;
 
@@ -265,6 +277,35 @@ static void draw_empty(void) {
 }
 
 /* ---- the list -------------------------------------------------------- */
+
+#ifdef A8_HEADLESS
+const char *a8_menu_auto(const char *want, int *index) {
+    game_count = 0;
+    romfs_list(add_game, nullptr);
+    qsort(games, game_count, sizeof(Game), by_name);
+    found = game_count;
+    Serial.printf("[menu] %d games\n", found);
+    picked_alt = false;
+    picked_osb = false;
+    int sel = -1;
+    if (want && *want) {
+        for (int i = 0; i < found && sel < 0; i++)
+            if (!strcasecmp(games[i].path, want)) sel = i;
+        if (sel < 0 && romfs_exists(want)) {       /* not listed (e.g. its kind), but there */
+            Serial.printf("[menu] auto-start %s (not in the list)\n", want);
+            *index = -1;
+            return want;
+        }
+        if (sel < 0) Serial.printf("[menu] %s not on the drive\n", want);
+    }
+    if (found == 0) return nullptr;
+    if (sel < 0) sel = ((*index % found) + found) % found;
+    *index = sel;
+    picked_osb = games[sel].osb;
+    Serial.printf("[menu] auto-start %d of %d: %s (%s)\n", sel + 1, found, games[sel].path, games[sel].name);
+    return games[sel].path;
+}
+#endif
 
 const char *a8_menu_pick(void) {
     game_count = 0;

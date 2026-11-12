@@ -26,5 +26,14 @@ int16_t paddles_pot(int port, int paddle);
  * and the range seen. */
 void    paddles_diag(int port, int paddle, uint32_t *count, uint32_t *lo, uint32_t *hi);
 
+#elif !defined(PICO_5200)
+/* No paddle ports (the Fruit Jam test build): none ever plugged in. */
+static inline void    paddles_init(void) {}
+static inline void    paddles_poll(void) {}
+static inline bool    paddles_present(int port) { (void)port; return false; }
+static inline int16_t paddles_pot(int port, int paddle) { (void)port; (void)paddle; return -1; }
+static inline void    paddles_diag(int port, int paddle, uint32_t *count, uint32_t *lo, uint32_t *hi) {
+    (void)port; (void)paddle; *count = *lo = *hi = 0;
+}
 #endif
 #endif

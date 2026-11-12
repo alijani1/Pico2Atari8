@@ -29,6 +29,9 @@
 #include "a8_settings.h"
 #include "a8_gamecfg.h"
 #include "a8_version.h"
+#ifdef A8_HEADLESS
+#include <hardware/structs/watchdog.h>
+#endif
 
 extern "C" {
 #include "atari.h"
@@ -54,7 +57,13 @@ extern "C" void a8_idle(void) { tight_loop_contents(); }
 
 /* ---- the emulator's stack ------------------------------------------- */
 
+#if defined(PICO_FRUITJAM) && defined(A8_USB_HOST)
+/* 16 KB: the USB host's buffers took the RAM (a game was seen using 7 KB;
+ * the start-up log reports the use - "emulator stack N bytes used") */
+static const uint32_t EMU_STACK_WORDS = 4096;
+#else
 static const uint32_t EMU_STACK_WORDS = 8192;           /* 32 KB */
+#endif
 static const uint32_t STACK_FILL = 0xA8A8A8A8u;
 static uint32_t emu_stack[EMU_STACK_WORDS] __attribute__((aligned(8)));
 
@@ -81,7 +90,11 @@ static uint32_t emu_stack_used(void) {
 
 /* ---- start-up --------------------------------------------------------- */
 
+#ifdef A8_SD
+static char game_file[160];                /* (a card's long names, or the unzip prefix + one) */
+#else
 static char game_file[96];
+#endif
 static bool start_as_800 = false;
 static bool start_as_5200 = false;
 
@@ -129,6 +142,11 @@ static volatile bool g_gave_up = false;
 /* A message in the middle of the panel: a line and a grey second line
  * (320x240: font 2 in a box; 160x80: the 6x8 font). */
 static void show_message(const char *line1, const char *line2, bool box) {
+#ifdef A8_HEADLESS
+    (void)box;                           /* no display: the serial monitor */
+    Serial.printf("[a8] %s %s%c", line1, line2 ? line2 : "", 10);
+    return;
+#endif
     TFT_eSPI &tft = a8_tft();
 #ifdef PICO_TINY_SCREEN
     (void)box;
@@ -173,6 +191,44 @@ static void log_file(const char *path) {
     }
 }
 
+#ifdef A8_HEADLESS
+/* No display, so no game list: the game is A8_AUTOSTART (a drive path, e.g.
+ * -DA8_AUTOSTART=\"/ATARI/GAME.XEX\") on the first start, else the first in
+ * the list; later starts take the game number kept in a watchdog scratch
+ * register (the Fruit Jam's button 3 moves on to the next). No games on the
+ * drive: USB ROM drive mode, to copy some on. */
+static int game_index = 0;
+
+static const char *headless_pick(void) {
+    uint32_t s = watchdog_hw->scratch[HANDOFF_SCRATCH_GAME];
+    const char *want = nullptr;
+    if ((s & 0xFFFF0000u) == HANDOFF_GAME_TAG) {
+        game_index = (int)(s & 0xFFFFu);
+    } else {
+        game_index = 0;
+#ifdef A8_AUTOSTART
+        want = A8_AUTOSTART;
+#endif
+    }
+    const char *path = a8_menu_auto(want, &game_index);
+    if (!path) {
+        Serial.println("[a8] no games on the drive: USB ROM drive mode");
+        pico_drive_run();                /* never returns */
+    }
+    if (game_index >= 0)
+        watchdog_hw->scratch[HANDOFF_SCRATCH_GAME] = HANDOFF_GAME_TAG | (uint32_t)game_index;
+    return path;
+}
+
+/* Restart with the next game on the drive. */
+static void __attribute__((noreturn)) next_game(void) {
+    Serial.printf("[a8] next game (%d)%c", game_index + 1, 10);
+    watchdog_hw->scratch[HANDOFF_SCRATCH_GAME] = HANDOFF_GAME_TAG | (uint32_t)((game_index + 1) & 0xFFFF);
+    handoff_relaunch_arcade();
+    for (;;) {}
+}
+#endif
+
 void setup() {
     Serial.begin(115200);
     Serial.println("[a8] Pico2Atari8 " A8_VERSION);
@@ -187,7 +243,14 @@ void setup() {
     a8_display_init();
     if (pico_drive_requested()) pico_drive_run();      /* never returns */
 
+#ifdef A8_HEADLESS
+    const char *path = headless_pick();
+#else
+    pico_audio_menu_sound(A8_SAMPLE_RATE, 1);   /* the menus' sound: beeps, music (pico_audio.cpp) */
     const char *path = a8_menu_pick();
+    pico_audio_menu_sound(0, 0);
+    romfs_cache_reset();               /* (the SD card: the list's zips out of PSRAM) */
+#endif
     strncpy(game_file, path, sizeof(game_file) - 1);
     a8_settings_set_game(path);        /* its own settings (the zip's path for a zip) */
     /* the default machine, or the other one if picked with SELECT; a
@@ -206,6 +269,10 @@ void setup() {
         char inner[64];
         if (!a8_unzip(path, inner, sizeof(inner))) {
             show_message("Can't unpack this zip.", "MENU: the game list", false);
+#if defined(PICO_FRUITJAM) && defined(A8_HEADLESS)
+            Serial.println("[a8] button 3: the next game");
+            for (;;) { if (a8_input_next_game()) next_game(); delay(10); }
+#endif
             while (a8_input_menu() & A8M_BACK) delay(10);
             while (!(a8_input_menu() & A8M_BACK)) delay(10);
             handoff_relaunch_arcade();
@@ -260,6 +327,16 @@ static bool game_is_disk(void) {
 }
 
 void loop() {
+#ifdef PICO_FRUITJAM
+#ifdef A8_HEADLESS
+    if (a8_input_next_game()) {
+        pico_audio_amp_off();
+        a8_settings_save_game();
+        next_game();
+    }
+#endif
+    pico_audio_poll();                   /* the headphone jack */
+#endif
     static bool first = true;
     if (first) {
         first = false;
@@ -293,9 +370,12 @@ void loop() {
          * saved when the game ends (the display's buffer is the sector's) */
         pico_audio_amp_off();
         a8_display_stop();
-        pico_audio_suspend();
+        /* (the sound was suspended here - nothing fed it, and an empty PWM
+         * ring clicks; the menus' sound feeds it now: silence, and the beeps
+         * - no music in a game) */
+        pico_audio_menu_sound(A8_SAMPLE_RATE, 0);
         a8_gamecfg_screen(game_title(), a8_is_5200(), true, game_is_disk());
-        pico_audio_resume();
+        pico_audio_menu_sound(0, 0);
         a8_display_start();
         pico_audio_amp_on();
         return;
@@ -327,6 +407,9 @@ void loop() {
                       frames / secs, (shown - last_shown) / secs, (unsigned long)skipped,
                       push_us / 1000.0f, (unsigned long)rows, (unsigned long)emu_stack_used());
         last_shown = shown;
+#ifdef PICO_FRUITJAM
+        pico_audio_report();
+#endif
         busy = frames = 0;
         last = now;
     }
@@ -336,7 +419,11 @@ void loop() {
  * progress - it keeps coming if core 0 hangs or faults. */
 void setup1() {}
 void loop1() {
+#ifdef A8_HDMI
+    a8_display_core1_loop();             /* starts the HDMI output, then the overlays */
+#else
     if (g_emulating) a8_display_core1_loop();
+#endif
     static uint32_t last = 0;
     uint32_t now = millis();
     if (g_heartbeat && now - last >= 1000) {

@@ -51,6 +51,43 @@ void    pico_audio_amp_on(void);
 void    pico_audio_amp_off(void);
 uint8_t pico_audio_get_volume(void);
 
+#ifdef PICO_FRUITJAM
+/* I2S / TLV320DAC3100 (pico_audio.cpp): */
+/* From the main loop: follows the headphone jack (auto output). */
+void    pico_audio_poll(void);
+/* Output: 0 auto (headphones when plugged in, else the speaker),
+ * 1 headphones, 2 speaker, 3 both. */
+void    pico_audio_set_output(int mode);
+/* Log the ring's health since the last call (under-runs, lowest level). */
+void    pico_audio_report(void);
+/* A key from the serial monitor: + - volume, A H S B output, I report. */
+void    pico_audio_key(int c);
+/* Settings > Sound output: 0 - 3 as pico_audio_set_output, 4 HDMI
+ * (A8_HDMI_AUDIO). Any time, before pico_audio_init too. */
+void    pico_audio_set_sound_output(int o);
+int     pico_audio_get_sound_output(void);
+#ifdef A8_HDMI_AUDIO
+/* Sound over HDMI instead of the codec (serial key O toggles). */
+void    pico_audio_set_hdmi(int on);
+void    pico_audio_toggle_hdmi(void);
+/* Core 1: n samples (all or none) for the HDMI packets. */
+size_t  pico_audio_hdmi_take(int16_t *dst, size_t n);
+#endif
+#endif
+
+/* The menus' sound (every board): on (the sound's rate: starts the sound)
+ * before the game list, off (0) once a game is picked; a tone on each move
+ * (beep), and the music (A8_MENU_MUSIC; music = 0: not - a game's Game
+ * Settings); poll: from the menus' input polling (a8_input_menu) - it
+ * feeds the sound. */
+void    pico_audio_menu_sound(int sample_rate, int music);
+void    pico_audio_menu_beep(void);
+void    pico_audio_menu_poll(void);
+/* The beep itself, any time the sound runs: a move on the on-screen
+ * keyboard in a game (mixed into the game's sound, or the paused game's
+ * silence). */
+void    pico_audio_beep(void);
+
 #ifdef __cplusplus
 }
 #endif

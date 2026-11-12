@@ -31,6 +31,19 @@ extern "C" bool romfs_slurp(const char *path, uint8_t **out, size_t *out_sz) {
 
 extern "C" const char *romfs_where(void) { return "/roms/ on the SD card"; }
 
+extern "C" bool romfs_peek(const char *path, long ofs, uint8_t *buf, size_t n, size_t *size) {
+    File f = SD.open(path, FILE_READ);
+    if (!f) return false;
+    const long sz = (long)f.size(), at = ofs < 0 ? sz + ofs : ofs;
+    const bool ok = at >= 0 && at + (long)n <= sz && f.seek((uint32_t)at) && f.read(buf, n) == n;
+    f.close();
+    if (ok) *size = (size_t)sz;
+    return ok;
+}
+extern "C" bool romfs_on_card(void) { return true; }
+extern "C" FILE *romfs_fopen_stream(const char *path) { (void)path; return nullptr; }
+extern "C" void romfs_cache_reset(void) {}
+
 #else
 /* ── Flash ROM drive backend (read-only FAT12/FAT16 over XIP) ───────────
  * Quad (chain-booted) and standalone Pico 2. The drive is read through XIP;
@@ -112,7 +125,7 @@ static bool fat_eoc(uint32_t c) { return fat16 ? c >= 0xFFF8 : c >= 0x0FF8; }
 static bool cluster_ok(uint32_t c) { return c >= 2 && c < clusterCount + 2; }
 static uint32_t cluster_ofs(uint32_t c) { return dataOfs + (c - 2) * clusterBytes; }
 
-extern "C" bool romfs_init(void) {
+static bool romfs_init_flash(void) {
     if (!s_xip) locate_drive();
     vol = s_xip;
     volSize = s_size;
@@ -347,16 +360,304 @@ static bool list_folder(uint32_t cluster, const char *folder, int depth,
     return false;
 }
 
+#ifdef A8_SD
+/* ── the SD card (A8_SD; the Fruit Jam's microSD slot) ─────────────────────
+ * With a card in at start-up the games come from it, else from the flash
+ * drive (USB drive mode then shows the card; without one, the flash
+ * drive). Through the
+ * core's SD library: SPI (SPI0 - the slot's pins on the Fruit Jam) at
+ * A8_SD_SPI_MHZ, or its SDIO mode (A8_SD_SDIO) on the same pins.
+ * Paths are the card's own (long names). A name alone ("/ATARIOSB.ROM") is
+ * looked up as on the flash drive: the root, ROMS, ATARI, then any folder.
+ * A file up to A8_SD_CACHE_SIZE is loaded into PSRAM when it's opened or
+ * mapped (romfs_map), and run from there - one after the other in the area
+ * (an OS ROM, the cartridge, a disk...), emptied when a game is picked
+ * (romfs_cache_reset): a file the core still uses is never overwritten. A
+ * bigger one (a hard-disk sized disk image) is read from the card as the
+ * core asks (romfs_fopen_stream). A8_SD_CACHE_SIZE 0: every file that way
+ * (a device with no PSRAM to spare).
+ * USB drive mode shows the whole card (romfs_card_raw_open).
+ * TODO: disk writes. */
+#include <SD.h>
+#include <SPI.h>
+#ifndef A8_SD_SPI_MHZ
+#define A8_SD_SPI_MHZ 25
+#endif
+#ifndef A8_SD_CACHE_SIZE
+#define A8_SD_CACHE_SIZE (4u * 1024u * 1024u)
+#endif
+static bool sd_on = false;
+#if A8_SD_CACHE_SIZE > 0
+PSRAM static uint8_t sd_cache[A8_SD_CACHE_SIZE];
+#endif
+static const int SD_CACHED = 8;                /* files in the area at once */
+static struct { char path[128]; uint32_t at, size; } sd_files[SD_CACHED];
+static int sd_nfiles = 0;
+static uint32_t sd_used = 0;
+static const int SD_LIST_DEPTH = 3;           /* folders below the root, as the flash drive's */
+
+static bool sd_begin(void) {
+#ifdef A8_SD_SDIO
+    const bool ok = SD.begin(PIN_SD_CLK, PIN_SD_CMD_MOSI, PIN_SD_DAT0_MISO);
+    Serial.printf("[romfs] SD card (SDIO): %s%c", ok ? "found" : "none", 10);
+#else
+    SPI.setRX(PIN_SD_DAT0_MISO);
+    SPI.setTX(PIN_SD_CMD_MOSI);
+    SPI.setSCK(PIN_SD_CLK);
+    const bool ok = SD.begin(PIN_SD_DAT3_CS, SD_SCK_MHZ(A8_SD_SPI_MHZ), SPI);
+    Serial.printf("[romfs] SD card (SPI, %d MHz): %s%c", A8_SD_SPI_MHZ, ok ? "found" : "none", 10);
+#endif
+    return ok;
+}
+
+/* A file `name` in folder `dir` (path, "" = root), folders `depth` deep. */
+static bool sd_search(const char *dir, const char *name, int depth, char *out, size_t cap) {
+    File d = SD.open(dir[0] ? dir : "/");
+    if (!d || !d.isDirectory()) return false;
+    bool found = false;
+    char sub[128];
+    for (File e = d.openNextFile(); e && !found; e = d.openNextFile()) {
+        const char *nm = e.name();
+        if (e.isDirectory()) {
+            if (depth > 0 && nm[0] != '.' && strcasecmp(nm, "System Volume Information")) {
+                snprintf(sub, sizeof(sub), "%s/%s", dir, nm);
+                found = sd_search(sub, name, depth - 1, out, cap);
+            }
+        } else if (!strcasecmp(nm, name)) {
+            snprintf(out, cap, "%s/%s", dir, nm);
+            found = true;
+        }
+        e.close();
+    }
+    d.close();
+    return found;
+}
+
+/* The card's path for `path`: as it is, or - a name alone - found by name. */
+static bool sd_find(const char *path, char *out, size_t cap) {
+    if (SD.exists(path)) { snprintf(out, cap, "%s", path); return true; }
+    const char *p = path[0] == '/' ? path + 1 : path;
+    if (strchr(p, '/')) return false;
+    static const char *const dirs[] = { "/ROMS", "/ATARI" };
+    for (const char *dn : dirs) {
+        char q[128];
+        snprintf(q, sizeof(q), "%s/%s", dn, p);
+        if (SD.exists(q)) { snprintf(out, cap, "%s", q); return true; }
+    }
+    return sd_search("", p, SD_LIST_DEPTH, out, cap);
+}
+
+static bool sd_list_dir(const char *dir, int depth, romfs_list_cb cb, void *ctx) {
+    File d = SD.open(dir[0] ? dir : "/");
+    if (!d || !d.isDirectory()) return true;
+    bool more = true;
+    char path[128];
+    for (File e = d.openNextFile(); e && more; e = d.openNextFile()) {
+        const char *nm = e.name();
+        if (nm[0] == '.' || !strcasecmp(nm, "System Volume Information")) { e.close(); continue; }
+        if (snprintf(path, sizeof(path), "%s/%s", dir, nm) >= (int)sizeof(path)) { e.close(); continue; }
+        const bool is_dir = e.isDirectory();
+        const uint32_t size = (uint32_t)e.size();
+        e.close();
+        if (is_dir) { if (depth < SD_LIST_DEPTH) more = sd_list_dir(path, depth + 1, cb, ctx); }
+        else more = cb(path, nm, size, ctx);
+    }
+    d.close();
+    return more;
+}
+
+static bool sd_map(const char *path, const uint8_t **out, size_t *out_sz) {
+#if A8_SD_CACHE_SIZE > 0
+    char p[128];
+    if (!sd_find(path, p, sizeof(p))) return false;
+    for (int i = 0; i < sd_nfiles; i++)
+        if (!strcmp(sd_files[i].path, p)) { *out = sd_cache + sd_files[i].at; *out_sz = sd_files[i].size; return true; }
+    File f = SD.open(p, FILE_READ);
+    if (!f) return false;
+    const uint32_t size = (uint32_t)f.size();
+    const uint32_t at = (sd_used + 15) & ~15u;
+    if (size == 0 || sd_nfiles >= SD_CACHED || at + size > A8_SD_CACHE_SIZE) { f.close(); return false; }
+    const uint32_t t0 = millis();
+    const size_t got = f.read(sd_cache + at, size);
+    f.close();
+    if (got != size) { Serial.printf("[romfs] %s: short read%c", p, 10); return false; }
+    snprintf(sd_files[sd_nfiles].path, sizeof(sd_files[0].path), "%s", p);
+    sd_files[sd_nfiles].at = at;
+    sd_files[sd_nfiles].size = size;
+    sd_nfiles++;
+    sd_used = at + size;
+    if (size > 64 * 1024)
+        Serial.printf("[romfs] %s: %lu bytes from the card in %lu ms%c", p, (unsigned long)size,
+                      (unsigned long)(millis() - t0), 10);
+    *out = sd_cache + at;
+    *out_sz = size;
+    return true;
+#else
+    (void)path; (void)out; (void)out_sz;
+    return false;
+#endif
+}
+
+static bool sd_read(const char *path, uint8_t *buf, size_t cap, size_t *out_sz) {
+    char p[128];
+    if (!sd_find(path, p, sizeof(p))) return false;
+    File f = SD.open(p, FILE_READ);
+    if (!f) return false;
+    const size_t size = f.size();
+    const bool ok = size && size <= cap && f.read(buf, size) == size;
+    f.close();
+    if (ok) *out_sz = size;
+    return ok;
+}
+
+static bool sd_peek(const char *path, long ofs, uint8_t *buf, size_t n, size_t *size) {
+    char p[128];
+    if (!sd_find(path, p, sizeof(p))) return false;
+    File f = SD.open(p, FILE_READ);
+    if (!f) return false;
+    const long sz = (long)f.size();
+    const long at = ofs < 0 ? sz + ofs : ofs;
+    const bool ok = at >= 0 && at + (long)n <= sz && f.seek((uint32_t)at) && f.read(buf, n) == n;
+    f.close();
+    if (ok) *size = (size_t)sz;
+    return ok;
+}
+
+/* A big file as a stdio stream over the card (fopencookie). newlib has it,
+ * but its header shows it only with _GNU_SOURCE set before stdio.h (which
+ * Arduino.h includes first): declared here, its functions' struct laid out
+ * as newlib's cookie_io_functions_t (read, write, seek, close). */
+#ifdef __LARGE64_FILES
+typedef _off64_t sd_off_t;
+#else
+typedef off_t sd_off_t;
+#endif
+struct SdCookieIo {
+    ssize_t (*read)(void *, char *, size_t);
+    ssize_t (*write)(void *, const char *, size_t);
+    int (*seek)(void *, sd_off_t *, int);
+    int (*close)(void *);
+};
+extern "C" FILE *fopencookie(void *cookie, const char *mode, SdCookieIo functions);
+struct SdCookie { File f; };
+static ssize_t sd_ck_read(void *c, char *buf, size_t n) {
+    return (ssize_t)((SdCookie *)c)->f.read((uint8_t *)buf, n);
+}
+static int sd_ck_seek(void *c, sd_off_t *pos, int whence) {
+    File &f = ((SdCookie *)c)->f;
+    long p = (long)*pos;
+    if (whence == SEEK_CUR) p += (long)f.position();
+    else if (whence == SEEK_END) p += (long)f.size();
+    if (p < 0 || !f.seek((uint32_t)p)) return -1;
+    *pos = p;
+    return 0;
+}
+static int sd_ck_close(void *c) {
+    SdCookie *k = (SdCookie *)c;
+    k->f.close();
+    delete k;
+    return 0;
+}
+
+extern "C" FILE *romfs_fopen_stream(const char *path) {
+    if (!sd_on) return nullptr;
+    char p[128];
+    if (!sd_find(path, p, sizeof(p))) return nullptr;
+    SdCookie *k = new SdCookie;
+    k->f = SD.open(p, FILE_READ);
+    if (!k->f) { delete k; return nullptr; }
+    SdCookieIo io = { sd_ck_read, nullptr, sd_ck_seek, sd_ck_close };
+    FILE *f = fopencookie(k, "rb", io);
+    if (!f) { k->f.close(); delete k; return nullptr; }
+    Serial.printf("[romfs] %s: %lu bytes, read from the card as it goes%c", p,
+                  (unsigned long)k->f.size(), 10);
+    return f;
+}
+
+extern "C" void romfs_cache_reset(void) { sd_nfiles = 0; sd_used = 0; }
+extern "C" bool romfs_on_card(void) { return sd_on; }
+
+/* The card's sectors as they are, for USB drive mode (pico_drive.cpp): the
+ * PC gets the whole card, with its own file system, as PicoCartReader does.
+ * A card of its own (SdFat's), started anew - the file system above is not
+ * used again before the restart. SPI: A8_SD_SPI_MHZ, else slower if the
+ * card won't take it; the SPI bus is the card's alone (DEDICATED_SPI: no
+ * per-sector select). Made only here (its SDIO part is large). */
+static SdCard *sd_raw = nullptr;
+
+extern "C" uint32_t romfs_card_raw_open(void) {
+    if (!sd_on) return 0;
+    static SdCardFactory *factory = nullptr;
+    if (!factory) factory = new SdCardFactory;
+#ifdef A8_SD_SDIO
+    sd_raw = factory->newCard(SdioConfig(PIN_SD_CLK, PIN_SD_CMD_MOSI, PIN_SD_DAT0_MISO));
+    if (sd_raw && sd_raw->errorCode()) sd_raw = nullptr;
+#else
+    static const int mhz[] = { A8_SD_SPI_MHZ, 12, 4 };
+    for (int m : mhz) {
+        if (m > A8_SD_SPI_MHZ) continue;
+        sd_raw = factory->newCard(SdSpiConfig(PIN_SD_DAT3_CS, DEDICATED_SPI, SD_SCK_MHZ(m), &SPI));
+        if (sd_raw && !sd_raw->errorCode()) {
+            Serial.printf("[romfs] SD card as a USB drive: SPI %d MHz%c", m, 10);
+            break;
+        }
+        sd_raw = nullptr;
+    }
+#endif
+    return sd_raw ? (uint32_t)sd_raw->sectorCount() : 0;
+}
+
+extern "C" bool romfs_card_raw_read(uint32_t lba, void *buf, uint32_t n) {
+    return sd_raw && sd_raw->readSectors(lba, (uint8_t *)buf, n);
+}
+
+extern "C" bool romfs_card_raw_write(uint32_t lba, const void *buf, uint32_t n) {
+    return sd_raw && sd_raw->writeSectors(lba, (const uint8_t *)buf, n);
+}
+
+extern "C" void romfs_card_raw_sync(void) {
+    if (sd_raw) sd_raw->syncDevice();
+}
+#else
+extern "C" FILE *romfs_fopen_stream(const char *path) { (void)path; return nullptr; }
+extern "C" void romfs_cache_reset(void) {}
+extern "C" bool romfs_on_card(void) { return false; }
+#endif
+
+/* The card (A8_SD) if there's one, and the flash drive (USB ROM drive mode
+ * writes it when there's no card, and it holds the games then). */
+extern "C" bool romfs_init(void) {
+#ifdef A8_SD
+    sd_on = sd_begin();
+    const bool flash_ok = romfs_init_flash();
+    if (sd_on) Serial.printf("[romfs] games: the SD card%c", 10);
+    return sd_on || flash_ok;
+#else
+    return romfs_init_flash();
+#endif
+}
+
 extern "C" void romfs_list(romfs_list_cb cb, void *ctx) {
+#ifdef A8_SD
+    if (sd_on) { sd_list_dir("", 0, cb, ctx); return; }
+#endif
     if (!vol) return;
     char lfn[64];
     lfn[0] = 0;
     list_entries(vol + rootOfs, rootEntries, nullptr, 0, cb, ctx, lfn, sizeof(lfn));
 }
 
-extern "C" bool romfs_exists(const char *path) { return find_file(path) != nullptr; }
+extern "C" bool romfs_exists(const char *path) {
+#ifdef A8_SD
+    if (sd_on) { char p[128]; return sd_find(path, p, sizeof(p)); }
+#endif
+    return find_file(path) != nullptr;
+}
 
 extern "C" bool romfs_map(const char *path, const uint8_t **out, size_t *out_sz) {
+#ifdef A8_SD
+    if (sd_on) return sd_map(path, out, out_sz);
+#endif
     const uint8_t *e = find_file(path);
     if (!e) return false;
     uint32_t size = rd32(e + 28), cluster = rd16(e + 26), first = cluster;
@@ -373,6 +674,9 @@ extern "C" bool romfs_map(const char *path, const uint8_t **out, size_t *out_sz)
 }
 
 extern "C" bool romfs_read(const char *path, uint8_t *buf, size_t cap, size_t *out_sz) {
+#ifdef A8_SD
+    if (sd_on) return sd_read(path, buf, cap, out_sz);
+#endif
     const uint8_t *e = find_file(path);
     if (!e) return false;
     uint32_t size = rd32(e + 28), cluster = rd16(e + 26);
@@ -390,6 +694,21 @@ extern "C" bool romfs_read(const char *path, uint8_t *buf, size_t cap, size_t *o
 }
 
 extern "C" bool romfs_slurp(const char *path, uint8_t **out, size_t *out_sz) {
+#ifdef A8_SD
+    if (sd_on) {                             /* (into RAM: small files only - the heap is small) */
+        char p[128];
+        if (!sd_find(path, p, sizeof(p))) { Serial.printf("[romfs] not found: %s\n", path); return false; }
+        File f = SD.open(p, FILE_READ);
+        if (!f) return false;
+        const size_t size = f.size();
+        uint8_t *buf = size ? (uint8_t *)malloc(size) : nullptr;
+        const bool ok = buf && f.read(buf, size) == size;
+        f.close();
+        if (!ok) { free(buf); return false; }
+        *out = buf; *out_sz = size;
+        return true;
+    }
+#endif
     const uint8_t *e = find_file(path);
     if (!e) { Serial.printf("[romfs] not found: %s\n", path); return false; }
     uint32_t size = rd32(e + 28), cluster = rd16(e + 26);
@@ -412,5 +731,24 @@ extern "C" bool romfs_slurp(const char *path, uint8_t **out, size_t *out_sz) {
 
 /* Every flash board's drive is labelled ARCADE ROMS (the Quad's first drives
  * were "QUAD ROMS"; only the label differs). */
-extern "C" const char *romfs_where(void) { return "the ARCADE ROMS drive"; }
+extern "C" const char *romfs_where(void) {
+#ifdef A8_SD
+    if (sd_on) return "the SD card";
+#endif
+    return "the ARCADE ROMS drive";
+}
+
+extern "C" bool romfs_peek(const char *path, long ofs, uint8_t *buf, size_t n, size_t *size) {
+#ifdef A8_SD
+    if (sd_on) return sd_peek(path, ofs, buf, n, size);
+#endif
+    const uint8_t *p;                        /* in place (as the list looked before) */
+    size_t sz;
+    if (!romfs_map(path, &p, &sz)) return false;
+    const long at = ofs < 0 ? (long)sz + ofs : ofs;
+    if (at < 0 || at + (long)n > (long)sz) return false;
+    memcpy(buf, p + at, n);
+    *size = sz;
+    return true;
+}
 #endif

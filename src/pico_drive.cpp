@@ -74,6 +74,33 @@ static int32_t drive_write(uint32_t lba, uint8_t *buffer, uint32_t bufsize) {
 
 static void drive_flush(void) { flush_cache(); }
 
+#ifdef A8_SD
+/* The SD card (A8_SD) instead, when there's one: the PC gets the whole card,
+ * its sectors as they are (romfs_card_raw_*), with its own file system - as
+ * PicoCartReader does. The callbacks run in the USB task; nothing else uses
+ * the card meanwhile. */
+static bool s_card = false;
+
+static int32_t card_read(uint32_t lba, void *buffer, uint32_t bufsize) {
+    return romfs_card_raw_read(lba, buffer, bufsize / SECTOR) ? (int32_t)bufsize : -1;
+}
+
+static int32_t card_write(uint32_t lba, uint8_t *buffer, uint32_t bufsize) {
+    return romfs_card_raw_write(lba, buffer, bufsize / SECTOR) ? (int32_t)bufsize : -1;
+}
+
+static void card_flush(void) { romfs_card_raw_sync(); }
+#endif
+
+/* "Eject" on the PC: the same as pressing MENU / START (the restart). */
+static volatile bool s_ejected = false;
+
+static bool drive_start_stop(uint8_t power_condition, bool start, bool load_eject) {
+    (void)power_condition;
+    if (load_eject && !start) s_ejected = true;
+    return true;
+}
+
 static void write_sector(uint32_t lba, const uint8_t *data) {
     drive_write(lba, (uint8_t *)data, SECTOR);
 }
@@ -173,7 +200,8 @@ extern "C" bool pico_drive_requested(void) {
     if (pin_low(g_pins.menu)) return true;                  /* held at power-on */
     const uint8_t *xip; uint32_t phys, size;
     romfs_location(&xip, &phys, &size);
-    if (!(xip[510] == 0x55 && xip[511] == 0xAA)) return true;   /* first boot: set it up */
+    /* first boot: set it up (not with the games on an SD card) */
+    if (!(xip[510] == 0x55 && xip[511] == 0xAA) && !romfs_on_card()) return true;
 #endif
     return false;
 }
@@ -192,6 +220,14 @@ extern "C" void pico_drive_run(void) {
     s_sectors = size / SECTOR;
     pico_audio_suspend();        /* no audio here; its DMA can't survive flash writes (pico_audio.cpp) */
     s_cache = (uint8_t *)malloc(FLASH_SECTOR_SIZE);
+#ifdef A8_SD
+    const uint32_t cardSectors = romfs_card_raw_open();
+    s_card = cardSectors > 0;
+    if (s_card) {
+        s_sectors = cardSectors;
+        Serial.printf("[drive] USB drive mode: the SD card, %lu MB\n", (unsigned long)(cardSectors / 2048));
+    } else
+#endif
     Serial.printf("[drive] ROM drive mode: 0x%lx, %lu sectors\n",
                   (unsigned long)s_phys, (unsigned long)s_sectors);
 
@@ -199,8 +235,13 @@ extern "C" void pico_drive_run(void) {
      * already formatted drive keeps its label). */
     const char *driveName = "ARCADE ROMS";
     static const char LABEL[11] = {'A','R','C','A','D','E',' ','R','O','M','S'};
-    if (!is_formatted()) {
-#if defined(PICO_STANDALONE) && !defined(PICO_DUO)
+    bool card = false;
+#ifdef A8_SD
+    card = s_card;
+    if (card) driveName = "SD card's";               /* its own name; never formatted here */
+#endif
+    if (!card && !is_formatted()) {
+#if defined(PICO_STANDALONE) && !defined(PICO_DUO) && !defined(PICO_FRUITJAM)
         static const char INI83[11] = {'A','R','C','A','D','E',' ',' ','I','N','I'};
         format_drive(LABEL, INI83, board_default_ini());
 #else
@@ -212,6 +253,10 @@ extern "C" void pico_drive_run(void) {
     TinyUSBDevice.setProductDescriptor("Arcade ROM Drive");
     s_msc.setID("iCode", "ROM Drive", "1.0");
     s_msc.setReadWriteCallback(drive_read, drive_write, drive_flush);
+#ifdef A8_SD
+    if (card) s_msc.setReadWriteCallback(card_read, card_write, card_flush);
+#endif
+    s_msc.setStartStopCallback(drive_start_stop);
     s_msc.setCapacity(s_sectors, SECTOR);
     s_msc.setUnitReady(true);
     s_msc.begin();
@@ -219,6 +264,12 @@ extern "C" void pico_drive_run(void) {
     delay(20);
     TinyUSBDevice.attach();
 
+#ifdef A8_HEADLESS
+    /* No display (the Fruit Jam test): the instructions go to the serial
+     * monitor, which stays up (the drive is added to the same USB device). */
+    Serial.println("[drive] Copy Atari games (.xex .car .rom .atr .zip, root or an ATARI folder)");
+    Serial.printf("[drive] onto the %s drive, then eject it (or press button 2 or 3).%c", driveName, 10);
+#else
     TFT_eSPI &tft = a8_tft();
     tft.fillScreen(TFT_BLACK);
 #ifdef PICO_TINY_SCREEN
@@ -230,8 +281,8 @@ extern "C" void pico_drive_run(void) {
     tft.setCursor(2, 26);  tft.printf("the %s drive.", driveName);
     tft.setCursor(2, 40);  tft.print(".xex .car .rom .atr .zip");
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
-    tft.setCursor(2, 56);  tft.print("Eject, then MENU or");
-    tft.setCursor(2, 66);  tft.print("START (Black) to play.");
+    tft.setCursor(2, 56);  tft.print("Eject to play (or MENU");
+    tft.setCursor(2, 66);  tft.print("or START (Black)).");
     if (0)
 #endif
     {
@@ -247,11 +298,12 @@ extern "C" void pico_drive_run(void) {
     tft.setCursor(10, y += 20); tft.print(".xex .com  executables");
     tft.setCursor(10, y += 12); tft.print(".car .rom  cartridges");
     tft.setCursor(10, y += 12); tft.print(".atr .xfd  disk images");
-    tft.setCursor(10, y += 20); tft.print("(The arcade's ROM zips share this drive.)");
+    if (!card) { tft.setCursor(10, y += 20); tft.print("(The arcade's ROM zips share this drive.)"); }
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
-    tft.setCursor(10, y += 24); tft.print("Eject the drive, then press");
-    tft.setCursor(10, y += 12); tft.print("MENU or START to play.");
+    tft.setCursor(10, y += 24); tft.print("Eject the drive to play");
+    tft.setCursor(10, y += 12); tft.print("(or press MENU or START).");
     }
+#endif
 
     delay(300);
     while (pin_low(g_pins.menu) || pin_low(g_pins.start)) delay(10);   /* released from entry */
@@ -259,11 +311,30 @@ extern "C" void pico_drive_run(void) {
     for (;;) {
         /* Commit a partially written sector once the host goes quiet. */
         if (s_cacheDirty && millis() - s_lastWriteMs > 500) flush_cache();
+#ifdef A8_HEADLESS
+        /* again now and then, for a serial monitor opened later */
+        static uint32_t said = millis();
+        if (millis() - said > 10000) {
+            said = millis();
+            Serial.printf("[drive] ROM drive mode: copy games onto %s, then eject (or button 2 or 3)%c", driveName, 10);
+        }
+#endif
         if (pin_low(g_pins.menu) || pin_low(g_pins.start)) break;
+        if (s_ejected) { delay(200); break; }        /* the PC's last writes are in */
         delay(5);
     }
 
     flush_cache();
+#ifdef A8_SD
+    if (card) {
+        s_msc.setUnitReady(false);                    /* the PC: no more reads / writes */
+        delay(50);
+        romfs_card_raw_sync();
+    }
+#endif
+#ifdef A8_HEADLESS
+    Serial.println("[drive] restarting");
+#else
     tft.fillScreen(TFT_BLACK);
 #ifdef PICO_TINY_SCREEN
     tft.setTextSize(1);
@@ -275,6 +346,7 @@ extern "C" void pico_drive_run(void) {
     tft.setCursor(10, 100);
 #endif
     tft.print("Restarting...");
+#endif
     delay(300);
     handoff_relaunch_arcade();
     for (;;) {}

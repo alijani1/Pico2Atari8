@@ -14,7 +14,10 @@ extern "C" {
 #endif
 
 /* POKEY output rate (the PWM ring runs at it) */
+/* (a build flag may set another: the Fruit Jam's I2S, pico_audio.cpp) */
+#ifndef A8_SAMPLE_RATE
 #define A8_SAMPLE_RATE 22050
+#endif
 
 /* Stick bits (set = held) */
 #define A8_UP    0x01
