@@ -61,6 +61,13 @@ FILE *romfs_fopen_stream(const char *path);
 /* The SD card: forget the files loaded into PSRAM (romfs_map) - from the
  * game list's look at its zips - before a game loads its own. */
 void romfs_cache_reset(void);
+/* The SD card's sectors as they are (A8_SD; USB drive mode, pico_drive.cpp):
+ * open gives its size in 512-byte sectors (0: no card), then read / write
+ * n sectors at lba, sync before the restart. */
+uint32_t romfs_card_raw_open(void);
+bool romfs_card_raw_read(uint32_t lba, void *buf, uint32_t n);
+bool romfs_card_raw_write(uint32_t lba, const void *buf, uint32_t n);
+void romfs_card_raw_sync(void);
 
 /* Short human description of where ROMs go, for menu/error text. */
 const char *romfs_where(void);

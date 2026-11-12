@@ -303,7 +303,9 @@ to 4 MB (`A8_SD_CACHE_SIZE`) are loaded into PSRAM and run from there; a
 zip is unpacked into PSRAM (3.5 MB, `A8_SD_UNZIP_SIZE`) - no flash write.
 A bigger file (a hard-disk sized ATR) is read from the card as the
 emulator asks. SPI at 25 MHz (`A8_SD_SPI_MHZ`; `A8_SD_SDIO` for 4-bit
-SDIO). Disks stay read-only; USB drive mode still exposes the flash drive.
+SDIO). Disks stay read-only. With a card in, USB drive mode shows the
+whole card to the PC (its own file system, as PicoCartReader); without
+one, the flash drive.
 
 **USB gamepad / keyboard** (`A8_USB_HOST`): the USB-A ports take a gamepad
 and a keyboard (TinyUSB host over Pico-PIO-USB, a copy in
@@ -357,7 +359,8 @@ headphones, speaker, both), `I` audio report.
 
 **Games:** USB ROM drive mode (the 1 MB drive at 0x200000, as `duo_tiny`):
 the list's ROM Drive row, button 2 held at power-on, or by itself when the
-drive isn't formatted yet. Eject, then button 2 or 3.
+drive isn't formatted yet (and no SD card is in). Eject to restart into
+the list (or press button 2 or 3).
 
 **Serial log:** the HDMI and clock setup, the codec's clocks, and every 5 s
 the emulator's fps and the sound ring's health (lowest level, stretched

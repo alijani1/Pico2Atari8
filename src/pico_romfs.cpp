@@ -363,7 +363,8 @@ static bool list_folder(uint32_t cluster, const char *folder, int depth,
 #ifdef A8_SD
 /* ── the SD card (A8_SD; the Fruit Jam's microSD slot) ─────────────────────
  * With a card in at start-up the games come from it, else from the flash
- * drive (USB ROM drive mode still writes the flash drive). Through the
+ * drive (USB drive mode then shows the card; without one, the flash
+ * drive). Through the
  * core's SD library: SPI (SPI0 - the slot's pins on the Fruit Jam) at
  * A8_SD_SPI_MHZ, or its SDIO mode (A8_SD_SDIO) on the same pins.
  * Paths are the card's own (long names). A name alone ("/ATARIOSB.ROM") is
@@ -375,7 +376,8 @@ static bool list_folder(uint32_t cluster, const char *folder, int depth,
  * bigger one (a hard-disk sized disk image) is read from the card as the
  * core asks (romfs_fopen_stream). A8_SD_CACHE_SIZE 0: every file that way
  * (a device with no PSRAM to spare).
- * TODO: the card in USB drive mode (as PicoCartReader), and disk writes. */
+ * USB drive mode shows the whole card (romfs_card_raw_open).
+ * TODO: disk writes. */
 #include <SD.h>
 #include <SPI.h>
 #ifndef A8_SD_SPI_MHZ
@@ -574,6 +576,48 @@ extern "C" FILE *romfs_fopen_stream(const char *path) {
 
 extern "C" void romfs_cache_reset(void) { sd_nfiles = 0; sd_used = 0; }
 extern "C" bool romfs_on_card(void) { return sd_on; }
+
+/* The card's sectors as they are, for USB drive mode (pico_drive.cpp): the
+ * PC gets the whole card, with its own file system, as PicoCartReader does.
+ * A card of its own (SdFat's), started anew - the file system above is not
+ * used again before the restart. SPI: A8_SD_SPI_MHZ, else slower if the
+ * card won't take it; the SPI bus is the card's alone (DEDICATED_SPI: no
+ * per-sector select). Made only here (its SDIO part is large). */
+static SdCard *sd_raw = nullptr;
+
+extern "C" uint32_t romfs_card_raw_open(void) {
+    if (!sd_on) return 0;
+    static SdCardFactory *factory = nullptr;
+    if (!factory) factory = new SdCardFactory;
+#ifdef A8_SD_SDIO
+    sd_raw = factory->newCard(SdioConfig(PIN_SD_CLK, PIN_SD_CMD_MOSI, PIN_SD_DAT0_MISO));
+    if (sd_raw && sd_raw->errorCode()) sd_raw = nullptr;
+#else
+    static const int mhz[] = { A8_SD_SPI_MHZ, 12, 4 };
+    for (int m : mhz) {
+        if (m > A8_SD_SPI_MHZ) continue;
+        sd_raw = factory->newCard(SdSpiConfig(PIN_SD_DAT3_CS, DEDICATED_SPI, SD_SCK_MHZ(m), &SPI));
+        if (sd_raw && !sd_raw->errorCode()) {
+            Serial.printf("[romfs] SD card as a USB drive: SPI %d MHz%c", m, 10);
+            break;
+        }
+        sd_raw = nullptr;
+    }
+#endif
+    return sd_raw ? (uint32_t)sd_raw->sectorCount() : 0;
+}
+
+extern "C" bool romfs_card_raw_read(uint32_t lba, void *buf, uint32_t n) {
+    return sd_raw && sd_raw->readSectors(lba, (uint8_t *)buf, n);
+}
+
+extern "C" bool romfs_card_raw_write(uint32_t lba, const void *buf, uint32_t n) {
+    return sd_raw && sd_raw->writeSectors(lba, (const uint8_t *)buf, n);
+}
+
+extern "C" void romfs_card_raw_sync(void) {
+    if (sd_raw) sd_raw->syncDevice();
+}
 #else
 extern "C" FILE *romfs_fopen_stream(const char *path) { (void)path; return nullptr; }
 extern "C" void romfs_cache_reset(void) {}
@@ -581,7 +625,7 @@ extern "C" bool romfs_on_card(void) { return false; }
 #endif
 
 /* The card (A8_SD) if there's one, and the flash drive (USB ROM drive mode
- * writes it, and it holds the games when there's no card). */
+ * writes it when there's no card, and it holds the games then). */
 extern "C" bool romfs_init(void) {
 #ifdef A8_SD
     sd_on = sd_begin();
