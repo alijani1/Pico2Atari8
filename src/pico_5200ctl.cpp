@@ -38,8 +38,11 @@
 static const uint8_t FIRE_PINS[2][2] = { { 10, 11 }, { 12, 13 } };   /* Fire A, Fire B */
 
 static const uint8_t RC_PINS[4] = { 40, 41, 42, 43 };   /* p1 x, p1 y, p2 x, p2 y */
-static const uint32_t RC_MAX  = 7500;       /* timeout (counts, 6 ms): no controller. 4500 (the
-                                               host's) was too short: pushed hard, a stick reads ~5900 */
+static const uint32_t RC_MAX  = 9500;       /* timeout (counts, 7.6 ms): no controller. 4500 (the
+                                               host's) was too short: pushed hard, a stick reads ~5900;
+                                               7500 too: one bench stick's x reads 8850 pushed hard, so
+                                               down / right timed out (dropped reads, hard menu "down",
+                                               2026-11-18). Same as GameAdapterRGBPico's RC_MAX_5200. */
 static const uint32_t RC_LOW  = 400;        /* full left / up, a first guess (only grows outward) */
 static const uint32_t RC_HIGH = 5000;       /* full right / down, likewise (pushed hard ~5900); at
                                                3000 a small push already read as a full one */
@@ -258,7 +261,9 @@ void ctl5200_init(void) {
 
 void ctl5200_poll(void) {
     if (rc_pio) {
-        if (rc_running && (time_us_32() - rc_started_us) >= 6500) rc_collect();   /* > 6 ms: all done */
+        /* past RC_MAX counts (0.8 us each) + a margin: all done or timed out. A fixed
+         * 6500 us here would cut off a count still running past it (read as a timeout). */
+        if (rc_running && (time_us_32() - rc_started_us) >= RC_MAX * 4 / 5 + 300) rc_collect();
         if (!rc_running) {
             delayMicroseconds(200);           /* drain the caps (1.5 k x 22 nF) */
             rc_start();
