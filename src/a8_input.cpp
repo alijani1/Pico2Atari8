@@ -667,18 +667,23 @@ static uint8_t joycon_read(int16_t *pot_x = nullptr, int16_t *pot_y = nullptr, i
 
 #ifdef PICO_5200
 /* the analog stick as a joystick: past `edge` of its travel (pot units,
- * of ~107 each way) - about a third in a game, 70 % in the menus */
-static uint8_t port_dirs(int n, int edge = 36) {
+ * of ~107 each way) - about a third in a game, 70 % in the menus. `edge_pos`
+ * (if given) is the edge for right / down instead: that side of a 5200 pot is
+ * the more sensitive one (the long charge times, ~2300 at rest to ~8850 pushed
+ * hard on a bench stick), so the menus want 85 % there (2026-11-18). */
+static uint8_t port_dirs(int n, int edge = 36, int edge_pos = -1) {
     int16_t x = ctl5200_pot(n, 0), y = ctl5200_pot(n, 1);
     if (x < 0) return 0;
+    if (edge_pos < 0) edge_pos = edge;
     uint8_t d = 0;
-    if (x < 114 - edge) d |= A8_LEFT;
-    if (x > 114 + edge) d |= A8_RIGHT;
-    if (y < 114 - edge) d |= A8_UP;
-    if (y > 114 + edge) d |= A8_DOWN;
+    if (x < 114 - edge)     d |= A8_LEFT;
+    if (x > 114 + edge_pos) d |= A8_RIGHT;
+    if (y < 114 - edge)     d |= A8_UP;
+    if (y > 114 + edge_pos) d |= A8_DOWN;
     return d;
 }
-static const int MENU_EDGE = 75;
+static const int MENU_EDGE = 75;        /* left / up: 70 % of 108 */
+static const int MENU_EDGE_POS = 90;    /* right / down: 85 % of 106 */
 static bool port_fire(int n) { return ctl5200_fire_a(n) || ctl5200_fire_b(n); }
 static bool port_fire_a(int n) { return ctl5200_fire_a(n); }
 static bool port_fire_b(int n) { return ctl5200_fire_b(n); }
@@ -691,8 +696,8 @@ static const int KEYPAD_5200[15] = {
 static const int KEYPAD_800[12] = {
     AKEY_0, AKEY_1, AKEY_2, AKEY_3, AKEY_4, AKEY_5, AKEY_6, AKEY_7, AKEY_8, AKEY_9, -1, -1 };
 #else
-static uint8_t port_dirs(int n, int edge = 0) {
-    (void)edge;
+static uint8_t port_dirs(int n, int edge = 0, int edge_pos = -1) {
+    (void)edge; (void)edge_pos;
     uint8_t d = 0;
     if (low(PORT_PINS[n][0])) d |= A8_UP;
     if (low(PORT_PINS[n][1])) d |= A8_DOWN;
@@ -705,6 +710,7 @@ static bool port_fire_a(int n) { return port_fire(n); }
 static bool port_fire_b(int n) { (void)n; return false; }
 static void ports_poll(void) { paddles_poll(); }
 static const int MENU_EDGE = 0;
+static const int MENU_EDGE_POS = 0;
 #endif
 
 /* ---- in a game ------------------------------------------------------- */
@@ -1174,7 +1180,7 @@ uint8_t a8_input_menu(void) {
     uint8_t b = 0;
     ports_poll();
     /* left / right change values in Settings: the Joy-Con needs a firm push */
-    uint8_t d = port_dirs(0, MENU_EDGE) | joycon_read(nullptr, nullptr, MENU_JOY_DEAD_X) | five_way();
+    uint8_t d = port_dirs(0, MENU_EDGE, MENU_EDGE_POS) | joycon_read(nullptr, nullptr, MENU_JOY_DEAD_X) | five_way();
     if ((d & A8_UP)   || low(PIN_SIDE_UP))   b |= A8M_UP;
     if ((d & A8_DOWN) || low(PIN_SIDE_DOWN)) b |= A8M_DOWN;
     if (d & A8_LEFT)  b |= A8M_LEFT;
