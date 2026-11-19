@@ -1,6 +1,6 @@
 # Pico2Atari8 release notes
 
-## 2.1 (in progress)
+## 2.1 (18 November 2026)
 
 **Game Settings: each game remembers its own buttons**
 - **A Game Settings screen for every game.** Open it from the game list
@@ -71,6 +71,38 @@
   60 fps however the rest of the code changes.
 - **More free memory than 2.0** despite that: the emulator's file-path
   buffers were 1 KB each (about 45 of them); 128 bytes is plenty here.
+
+**Sound**
+- **Menus and the on-screen keyboard beep** on each move, at the Volume
+  setting. **Volume** is also in Game Settings, so it can be changed
+  without leaving the game.
+- POKEY's high-pass filter channels are always emulated edge by edge (the
+  2.0 shortcut for inaudible tones no longer touches them).
+
+**5200 controllers**
+- A firm push down or right is no longer lost: a stick's reading may now
+  run to 9500 counts (it was cut off at 7500, and a bench stick reads
+  8850).
+- In the menus, right and down need 85 % of the travel (left and up stay
+  70 %), so the game list no longer drifts while the stick is held still.
+
+**Duo Ultimate (160x80 screen)**
+- **New `duo` build, hosted by the Duo Ultimate firmware (2.3 and later):**
+  started from the Duo's menu, it shares the arcade's ROM drive and goes
+  back to the Duo on exit. The standalone `duo_tiny` test build stays.
+- The picture is scaled to 160x80 (Smooth, Sharp, Drop or Crop), with
+  Settings, the controller test and the on-screen keyboard redrawn for the
+  small panel.
+- The DB9 ports are powered as Atari ports (pin 7 +5 V, pin 8 ground), so
+  paddles work on both.
+- The 5-way's press is fire 1 (it was RETURN, which pauses many games);
+  RETURN stays on the on-screen keyboard.
+
+**Adafruit Fruit Jam (test build)**
+- A `fruitjam` build: HDMI picture (800x480 by default, other modes in
+  Settings > Screen mode), sound over the headphone jack, speaker or HDMI
+  (Settings > Sound output), USB gamepads on the USB-A ports, games from the microSD card and the Game Adapter's menu music.
+  Open items are listed in the backlog.
 
 ## 2.0 (31 October 2026)
 
